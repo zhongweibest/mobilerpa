@@ -47,6 +47,7 @@
 | `repos/mobilerpa-center/docs/server/中心服务手工验收.md` | 中心服务手工启动与接口验收 |
 | `repos/mobilerpa-center/tools/README.md` | 中心服务工具脚本说明 |
 | `repos/mobilerpa-center/docs/web/前端结构说明.md` | 前端目录结构与页面范围 |
+| `repos/mobilerpa-center/docs/web/前端开发约定.md` | 前端本地启动、环境配置和请求规则 |
 | `repos/mobilerpa-center/docs/web/archive/前端快速上线清单.md` | 前端快速上线历史参考清单 |
 | `repos/mobilerpa-agent/docs/手机端与脚本架构.md` | Agent 与脚本架构 |
 | `repos/mobilerpa-agent/docs/手机端开发约定.md` | Agent 仓库开发规范 |
