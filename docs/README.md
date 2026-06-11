@@ -35,19 +35,19 @@
 | `docs/archive/开发计划.md` | 开发顺序、依赖关系和并行原则已吸收到 `开发阶段计划.md` 与 `项目看板.md` |
 | `docs/archive/快速上线角色分工排期.md` | 角色分工和并行协作原则已吸收到 `开发阶段计划.md` 与 `项目看板.md` |
 | `docs/archive/acceptance-checklists-drafts/` | 未实现功能的预写验收清单已归档，后续不作为当前验收依据 |
-| `repos/mobilerpa-center/web/docs/archive/前端快速上线清单.md` | 前端快速上线边界、交付节奏和后端依赖已吸收到 `前端结构说明.md` |
+| `repos/mobilerpa-center/docs/web/archive/前端快速上线清单.md` | 前端快速上线边界、交付节奏和后端依赖已吸收到 `前端结构说明.md` |
 | `repos/mobilerpa-agent/docs/archive/手机端四周快速上线实施清单.md` | 手机端上线检查项、失败证据链、灰度回滚和值守要求已吸收到 `手机端运行时最小契约.md` |
 
 ## 子仓库文档
 
 | 位置 | 定位 |
 |---|---|
-| `repos/mobilerpa-center/docs/中心服务架构.md` | 中心服务架构与模块边界 |
-| `repos/mobilerpa-center/docs/中心服务开发约定.md` | 中心服务开发规范 |
-| `repos/mobilerpa-center/docs/中心服务手工验收.md` | 中心服务手工启动与接口验收 |
+| `repos/mobilerpa-center/docs/server/中心服务架构.md` | 中心服务架构与模块边界 |
+| `repos/mobilerpa-center/docs/server/中心服务开发约定.md` | 中心服务开发规范 |
+| `repos/mobilerpa-center/docs/server/中心服务手工验收.md` | 中心服务手工启动与接口验收 |
 | `repos/mobilerpa-center/tools/README.md` | 中心服务工具脚本说明 |
-| `repos/mobilerpa-center/web/docs/前端结构说明.md` | 前端目录结构与页面范围 |
-| `repos/mobilerpa-center/web/docs/archive/前端快速上线清单.md` | 前端快速上线历史参考清单 |
+| `repos/mobilerpa-center/docs/web/前端结构说明.md` | 前端目录结构与页面范围 |
+| `repos/mobilerpa-center/docs/web/archive/前端快速上线清单.md` | 前端快速上线历史参考清单 |
 | `repos/mobilerpa-agent/docs/手机端与脚本架构.md` | Agent 与脚本架构 |
 | `repos/mobilerpa-agent/docs/手机端开发约定.md` | Agent 仓库开发规范 |
 | `repos/mobilerpa-agent/docs/手机端运行时最小契约.md` | Agent 与业务脚本运行契约 |
