@@ -16,3 +16,4 @@ choose_device_push.bat
 # 子仓库由各自 Git 管理，根仓库不直接管理其内容
 repos/mobilerpa-center/
 repos/mobilerpa-agent/
+repos/mobilerpa-toolkit/

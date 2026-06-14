@@ -34,6 +34,7 @@
 |---|---|---|---|
 | `C0-2` 中心 HTTP 最小验收链路 | `P1-BE-001` 到 `P1-BE-005`、`P1-QA-001` | `repos/mobilerpa-center/docs/server/中心服务手工验收.md` | 已实现，已通过用户启动服务方式验收 |
 | `C1-1` WebSocket `hello/heartbeat` 链路 | `P1-BE-006`、`P1-BE-007`、`P1-BE-008`、`P1-QA-002`、`NEXT-001` | `repos/mobilerpa-center/docs/server/中心服务手工验收.md` | 已实现，当前等待用户验收确认 |
+| `C1-3` 设备列表前端入口增项：设备删除 | `P1-BE-004B`、`P1-FE-004A`、`P1-QA-004A` | `repos/mobilerpa-center/docs/server/中心服务手工验收.md`、`repos/mobilerpa-center/docs/web/前端手工验收.md` | 实现后使用服务端接口与前端页面双路径验收 |
 
 ## 待实现后生成验收文档
 
@@ -41,7 +42,7 @@
 |---|---|---|
 | `C1-2` Agent 注册与心跳 | `repos/mobilerpa-agent/docs/手机端手工验收.md` | 待实现后生成 |
 | `C1-3` 设备列表前端入口 | `repos/mobilerpa-center/docs/web/前端手工验收.md` | 待实现后生成 |
-| `C1-4` 阶段验收与接口集合 | `docs/阶段验收记录/` 或 `docs/验收记录/` | 待用户确认记录目录后生成 |
+| `C1-4` 阶段验收与接口集合 | `docs/验收记录/S1-Apifox接口集合说明.md`、`docs/验收记录/S1阶段验收记录.md` | 已生成，等待用户审阅与确认 |
 | `C2` 单任务下发与脚本执行 | `repos/mobilerpa-center/docs/server/中心服务手工验收.md`、`repos/mobilerpa-agent/docs/手机端手工验收.md` | 待实现后补充 |
 | `C3` 最小后台与排障能力 | `repos/mobilerpa-center/docs/web/前端手工验收.md`、`repos/mobilerpa-agent/docs/手机端手工验收.md` | 待实现后补充 |
 | `C4` 早期生产试运行 | `docs/验收记录/` | 待用户确认记录目录后生成 |
