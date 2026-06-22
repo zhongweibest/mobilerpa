@@ -1506,6 +1506,10 @@ func firstFileHeader(files []*multipart.FileHeader) (*multipart.FileHeader, erro
 }
 
 func writeTaskError(w http.ResponseWriter, err error) {
+	if writeExecutionReadyError(w, err) {
+		return
+	}
+
 	status := http.StatusInternalServerError
 	message := err.Error()
 
@@ -1545,6 +1549,10 @@ func writeTaskError(w http.ResponseWriter, err error) {
 }
 
 func writeDeviceError(w http.ResponseWriter, err error) {
+	if writeExecutionReadyError(w, err) {
+		return
+	}
+
 	status := http.StatusInternalServerError
 	message := err.Error()
 
@@ -1575,19 +1583,15 @@ func writeDeviceError(w http.ResponseWriter, err error) {
 }
 
 func writeDispatchError(w http.ResponseWriter, err error) {
+	if writeExecutionReadyError(w, err) {
+		return
+	}
+
 	switch {
 	case errors.Is(err, dispatch.ErrDeviceNotConnected):
 		writeError(w, http.StatusConflict, "device_not_connected")
 	case errors.Is(err, task.ErrTaskAlreadyAssigned):
 		writeError(w, http.StatusConflict, "task_already_assigned")
-	case errors.Is(err, device.ErrDeviceExecutionProfileUnknown):
-		writeError(w, http.StatusConflict, "device_execution_profile_unknown")
-	case errors.Is(err, device.ErrDeviceAccessibilityRequired):
-		writeError(w, http.StatusConflict, "device_accessibility_required")
-	case errors.Is(err, device.ErrDeviceForegroundServiceRequired):
-		writeError(w, http.StatusConflict, "device_foreground_service_required")
-	case errors.Is(err, device.ErrDeviceBatteryOptimizationRequired):
-		writeError(w, http.StatusConflict, "device_battery_optimization_required")
 	default:
 		writeTaskError(w, err)
 	}
@@ -1666,6 +1670,33 @@ func writeScriptError(w http.ResponseWriter, err error) {
 	}
 }
 
+func writeExecutionReadyError(w http.ResponseWriter, err error) bool {
+	switch {
+	case errors.Is(err, device.ErrDeviceExecutionProfileUnknown):
+		writeErrorWithDetails(w, http.StatusConflict, "设备执行环境校验失败", map[string]any{
+			"reason": "设备尚未上报执行环境状态，请先启动 Agent 并等待环境检查完成",
+		})
+		return true
+	case errors.Is(err, device.ErrDeviceAccessibilityRequired):
+		writeErrorWithDetails(w, http.StatusConflict, "设备执行环境校验失败", map[string]any{
+			"reason": "设备未开启无障碍服务，请先在手机上开启 AutoJs6 无障碍权限",
+		})
+		return true
+	case errors.Is(err, device.ErrDeviceForegroundServiceRequired):
+		writeErrorWithDetails(w, http.StatusConflict, "设备执行环境校验失败", map[string]any{
+			"reason": "设备未开启前台服务或通知保活，请先确认 Agent 前台服务正常运行",
+		})
+		return true
+	case errors.Is(err, device.ErrDeviceBatteryOptimizationRequired):
+		writeErrorWithDetails(w, http.StatusConflict, "设备执行环境校验失败", map[string]any{
+			"reason": "设备未忽略电量优化，请先关闭系统对 Agent 或 AutoJs6 的电量限制",
+		})
+		return true
+	default:
+		return false
+	}
+}
+
 func writeWorkflowError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, workflow.ErrWorkflowDefinitionNotFound):
@@ -1703,17 +1734,12 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusConflict, "workflow_definition_running")
 	case errors.Is(err, workflow.ErrWorkflowInstanceDeleteNotAllowed):
 		writeError(w, http.StatusConflict, "workflow_instance_delete_not_allowed")
-	case errors.Is(err, device.ErrDeviceExecutionProfileUnknown):
-		writeError(w, http.StatusConflict, "device_execution_profile_unknown")
-	case errors.Is(err, device.ErrDeviceAccessibilityRequired):
-		writeError(w, http.StatusConflict, "device_accessibility_required")
-	case errors.Is(err, device.ErrDeviceForegroundServiceRequired):
-		writeError(w, http.StatusConflict, "device_foreground_service_required")
-	case errors.Is(err, device.ErrDeviceBatteryOptimizationRequired):
-		writeError(w, http.StatusConflict, "device_battery_optimization_required")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
 	default:
+		if writeExecutionReadyError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
 }
@@ -1762,6 +1788,9 @@ func writePlanError(w http.ResponseWriter, err error) {
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
 	default:
+		if writeExecutionReadyError(w, err) {
+			return
+		}
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}
 }
