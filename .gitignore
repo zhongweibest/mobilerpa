@@ -2,18 +2,12 @@
 .tmp/
 
 # legacy 源材料，暂不纳入根仓库版本管理
-projects/
-scripts/
+
 
 # 本机私有配置
-config.ini
-choose_device_push.bat
+
 
 # VS Code 当前配置包含真实设备序列号，后续只提交模板
 .vscode/
 !.vscode/*.example.json
 
-# 子仓库由各自 Git 管理，根仓库不直接管理其内容
-repos/mobilerpa-center/
-repos/mobilerpa-agent/
-repos/mobilerpa-toolkit/

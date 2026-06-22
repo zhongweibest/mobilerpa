@@ -1,0 +1,21 @@
+{
+  "center_base_url": "http://127.0.0.1:18080",
+  "agent_uuid": "",
+  "device_id": "",
+  "device": {
+    "device_name": "AutoJs Test Device",
+    "brand": "unknown",
+    "model": "unknown",
+    "android_id": "",
+    "adb_serial": ""
+  },
+  "websocket": {
+    "enabled": true,
+    "heartbeat_interval_ms": 30000,
+    "reconnect_enabled": true,
+    "reconnect_initial_delay_ms": 3000,
+    "reconnect_max_delay_ms": 60000,
+    "reconnect_backoff_multiplier": 2
+  },
+  "last_register": {}
+}

@@ -1,0 +1,22 @@
+# 操作系统与编辑器文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 运行时输出
+logs/
+screenshots/
+dumps/
+temp/
+tmp/
+
+# 本地设备与运行状态
+agent/runtime/
+agent/config.local.json
+agent/device.local.json
+
+# 工具输出
+tools/**/dist/
+tools/**/bin/
+tools/adb-debug/*.local.ini

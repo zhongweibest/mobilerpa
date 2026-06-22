@@ -1,0 +1,32 @@
+# 操作系统与编辑器文件
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 构建产物
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go 临时文件
+server/data/
+server/coverage.out
+server/.tmp/
+
+# 运行时文件
+.env
+.env.local
+.env.*.local
+logs/
+uploads/
+tmp/
+
+# 前端临时文件
+web/node_modules/
+web/dist/
+web/.cache/
+web/.vite/
