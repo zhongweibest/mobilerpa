@@ -47,6 +47,19 @@ function renderBindTag(bindStatus: string) {
   return h("span", { class: "status-tag status-tag--unknown" }, "未知");
 }
 
+function renderOccupancyTag(occupancy: DeviceOccupancyDetail["occupancy"]) {
+  if (!occupancy) {
+    return h("span", { class: "status-tag status-tag--bound" }, "空闲");
+  }
+  if (occupancy.occupancy_type === "plan") {
+    return h("span", { class: "status-tag status-tag--pending" }, "计划任务占用");
+  }
+  if (occupancy.occupancy_type === "manual_task") {
+    return h("span", { class: "status-tag status-tag--offline" }, "手工任务占用");
+  }
+  return h("span", { class: "status-tag status-tag--online" }, "工作流占用");
+}
+
 export const DevicesPage = defineComponent({
   name: "DevicesPage",
   setup() {
@@ -227,6 +240,16 @@ export const DevicesPage = defineComponent({
                                 minWidth: 140,
                                 formatter: (row) => (row.current_task_id?.trim() ? row.current_task_id : "暂无")
                               }),
+                              h(
+                                ElTableColumn,
+                                {
+                                  label: "占用状态",
+                                  minWidth: 140
+                                },
+                                {
+                                  default: ({ row }) => renderOccupancyTag(row.occupancy)
+                                }
+                              ),
                               h(ElTableColumn, {
                                 label: "物理位置",
                                 minWidth: 120,

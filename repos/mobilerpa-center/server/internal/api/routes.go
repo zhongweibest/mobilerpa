@@ -63,8 +63,8 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 
 	mux.HandleFunc("/healthz", healthz)
 	mux.HandleFunc("/api/v1/device/register", registerDevice(devices))
-	mux.HandleFunc("/api/v1/devices", listDevices(devices))
-	mux.HandleFunc("/api/v1/devices/", getDevice(devices, tasks, workflows))
+	mux.HandleFunc("/api/v1/devices", listDevices(devices, plans))
+	mux.HandleFunc("/api/v1/devices/", getDevice(devices, tasks, workflows, plans))
 	mux.HandleFunc("/api/v1/discovery/devices", listDiscoveredDevices(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-deployments", deployAgents(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-actions", controlAgent(discoveryService))
@@ -735,7 +735,7 @@ func registerDevice(devices *device.Service) http.HandlerFunc {
 	}
 }
 
-func listDevices(devices *device.Service) http.HandlerFunc {
+func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w, http.MethodGet)
@@ -757,14 +757,53 @@ func listDevices(devices *device.Service) http.HandlerFunc {
 			return
 		}
 
+		items := make([]map[string]any, 0, len(results))
+		for _, item := range results {
+			deviceItem := map[string]any{
+				"device_id":                             item.DeviceID,
+				"agent_uuid":                            item.AgentUUID,
+				"device_name":                           item.DeviceName,
+				"physical_slot":                         item.PhysicalSlot,
+				"group_name":                            item.GroupName,
+				"status":                                item.Status,
+				"bind_status":                           item.BindStatus,
+				"ip":                                    item.IP,
+				"brand":                                 item.Brand,
+				"model":                                 item.Model,
+				"android_id":                            item.AndroidID,
+				"adb_serial":                            item.ADBSerial,
+				"current_task_id":                       item.CurrentTaskID,
+				"current_step":                          item.CurrentStep,
+				"last_error":                            item.LastError,
+				"accessibility_status":                  item.AccessibilityStatus,
+				"foreground_service_status":             item.ForegroundServiceStatus,
+				"battery_optimization_ignored_status":   item.BatteryOptimizationIgnoredStatus,
+				"env_checked_at":                        item.EnvCheckedAt,
+				"env_check_message":                     item.EnvCheckMessage,
+				"last_heartbeat_at":                     item.LastHeartbeatAt,
+				"created_at":                            item.CreatedAt,
+				"updated_at":                            item.UpdatedAt,
+				"occupancy":                             nil,
+			}
+			if plans != nil {
+				busyDetail, err := plans.GetDeviceBusyDetail(ctx, item.DeviceID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+				deviceItem["occupancy"] = busyDetail
+			}
+			items = append(items, deviceItem)
+		}
+
 		writeJSON(w, http.StatusOK, map[string]any{
 			"status": "ok",
-			"data":   paginateItems(results, page, pageSize),
+			"data":   paginateItems(items, page, pageSize),
 		})
 	}
 }
 
-func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow.Service) http.HandlerFunc {
+func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow.Service, plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
 		trimmed = strings.Trim(trimmed, "/")
@@ -785,10 +824,21 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 				return
 			}
 
-			busyDetail, err := workflows.GetDeviceBusyDetail(ctx, deviceID)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
+			var busyDetail any
+			if plans != nil {
+				planBusyDetail, err := plans.GetDeviceBusyDetail(ctx, deviceID)
+				if err != nil {
+					writePlanError(w, err)
+					return
+				}
+				busyDetail = planBusyDetail
+			} else {
+				workflowBusyDetail, err := workflows.GetDeviceBusyDetail(ctx, deviceID)
+				if err != nil {
+					writeWorkflowError(w, err)
+					return
+				}
+				busyDetail = workflowBusyDetail
 			}
 
 			writeJSON(w, http.StatusOK, map[string]any{

@@ -25,6 +25,7 @@ export interface DeviceRecord {
   last_heartbeat_at: string;
   created_at: string;
   updated_at: string;
+  occupancy: DeviceOccupancyRecord | null;
 }
 
 export interface DeviceOccupancyRecord {

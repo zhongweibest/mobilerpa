@@ -1973,6 +1973,14 @@ LIMIT 1`,
 	return nil, nil
 }
 
+// GetDeviceBusyDetail 返回某台设备当前是否被计划任务、工作流或手工任务占用。
+func (s *Service) GetDeviceBusyDetail(ctx context.Context, deviceID string) (*DeviceBusyDetail, error) {
+	if s == nil || s.db == nil {
+		return nil, nil
+	}
+	return s.inspectDeviceBusy(ctx, "", "", strings.TrimSpace(deviceID))
+}
+
 func (s *Service) listDeviceIDsByPlan(ctx context.Context) (map[string][]string, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT plan_def_id, device_id
