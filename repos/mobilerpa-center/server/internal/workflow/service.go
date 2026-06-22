@@ -1736,7 +1736,7 @@ func (s *Service) lookupWorkflowTask(ctx context.Context, taskID string) (struct
 	ResultMessage  string
 }, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT t.id AS task_id, t.workflow_run_id, t.workflow_node_id, r.workflow_def_id, t.status, t.result_message
+SELECT t.id AS task_id, t.workflow_run_id, t.workflow_node_id, COALESCE(r.workflow_def_id, 0), t.status, t.result_message
 FROM tasks t
 LEFT JOIN workflow_runs r
   ON r.id = t.workflow_run_id
