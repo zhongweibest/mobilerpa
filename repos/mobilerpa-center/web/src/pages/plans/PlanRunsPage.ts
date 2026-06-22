@@ -154,6 +154,24 @@ export const PlanRunsPage = defineComponent({
       }
     }
 
+    async function stopOrRemoveDevice(item: PlanDeviceRunRecord) {
+      const isActive = item.status === "pending" || item.status === "running";
+      if (isActive) {
+        try {
+          await ElMessageBox.confirm(`确认停止设备 ${item.device_id} 当前的计划任务执行吗？`, "停止设备确认", {
+            confirmButtonText: "确认停止",
+            cancelButtonText: "取消",
+            type: "warning"
+          });
+        } catch (error) {
+          if (error === "cancel" || error === "close") {
+            return;
+          }
+        }
+      }
+      await removeDevice(item);
+    }
+
     return () =>
       h("section", { class: "app-page" }, [
         h("div", { class: "page-toolbar" }, [
@@ -225,7 +243,7 @@ export const PlanRunsPage = defineComponent({
                             slots: {
                               default: (scope: { row: PlanRunRecord }) =>
                                 h("div", { class: "table-actions" }, [
-                                  h(ElButton, { type: "primary", link: true, onClick: () => openDevicesDialog(scope.row) }, () => "查看设备"),
+                                  h(ElButton, { type: "primary", link: true, onClick: () => openDevicesDialog(scope.row) }, () => "查看执行设备"),
                                   h(ElButton, { type: "primary", link: true, onClick: () => void openEventsDialog(scope.row) }, () => "查看事件"),
                                   h(ElButton, { type: "primary", link: true, onClick: () => openAppendDialog(scope.row) }, () => "追加设备"),
                                   h(ElButton, { type: "danger", link: true, loading: stoppingRunID.value === scope.row.plan_run_id, onClick: () => void stopCurrentRun(scope.row) }, () => "停止")
@@ -295,7 +313,11 @@ export const PlanRunsPage = defineComponent({
                     fixed: "right",
                     slots: {
                       default: (scope: { row: PlanDeviceRunRecord }) =>
-                        h(ElButton, { type: "danger", link: true, loading: mutatingDevices.value, onClick: () => void removeDevice(scope.row) }, () => "移除")
+                        h(
+                          ElButton,
+                          { type: "danger", link: true, loading: mutatingDevices.value, onClick: () => void stopOrRemoveDevice(scope.row) },
+                          () => (scope.row.status === "pending" || scope.row.status === "running" ? "停止设备" : "移除设备")
+                        )
                     }
                   })
                 ]
