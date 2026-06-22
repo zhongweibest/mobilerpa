@@ -407,14 +407,17 @@ export const PlansPage = defineComponent({
                               width: 120,
                               formatter: (row: PlanDefinitionRecord) => String((row.device_ids || []).length)
                             }),
-                            h(ElTableColumn, {
-                              prop: "status",
-                              label: "计划状态",
-                              width: 120,
-                              slots: {
+                            h(
+                              ElTableColumn,
+                              {
+                                prop: "status",
+                                label: "计划状态",
+                                width: 120
+                              },
+                              {
                                 default: (scope: { row: PlanDefinitionRecord }) => renderPlanStatus(scope.row.status)
                               }
-                            }),
+                            ),
                             h(ElTableColumn, {
                               prop: "updated_at",
                               label: "更新时间",

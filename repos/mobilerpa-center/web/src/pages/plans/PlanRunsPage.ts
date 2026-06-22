@@ -46,7 +46,7 @@ export const PlanRunsPage = defineComponent({
   name: "PlanRunsPage",
   setup() {
     const plansStore = usePlansStore();
-    const { runs, runsTotal, runsPage, runsPageSize, selectedEvents, loadingRuns, loadingEvents, stoppingRunID, deletingRunID, mutatingDevices, errorMessage } =
+    const { runs, runsTotal, runsPage, runsPageSize, selectedEvents, loadingRuns, loadingEvents, stoppingRunID, mutatingDevices, errorMessage } =
       storeToRefs(plansStore);
 
     const eventsDialogVisible = ref(false);
@@ -122,6 +122,7 @@ export const PlanRunsPage = defineComponent({
       try {
         await plansStore.triggerStopPlanRun(item.plan_def_id, item.plan_run_id);
         ElMessage.success("计划任务实例已停止");
+        await loadPageData();
       } catch (error) {
         ElMessage.error(error instanceof Error ? error.message : "计划任务实例停止失败");
       }
@@ -174,9 +175,7 @@ export const PlanRunsPage = defineComponent({
 
     return () =>
       h("section", { class: "app-page" }, [
-        h("div", { class: "page-toolbar" }, [
-          h(ElButton, { loading: loadingRuns.value, onClick: () => void loadPageData() }, () => "刷新")
-        ]),
+        h("div", { class: "page-toolbar" }, [h(ElButton, { loading: loadingRuns.value, onClick: () => void loadPageData() }, () => "刷新")]),
         supportingDataWarning.value
           ? h(ElAlert, {
               class: "page-alert",
@@ -202,56 +201,68 @@ export const PlanRunsPage = defineComponent({
                 ? h(ElEmpty, { description: "暂无计划任务实例" })
                 : h("div", { class: "page-scroll-body" }, [
                     h("div", { class: "table-scroll-region table-scroll-region--soft" }, [
-                      h(ElTable, { data: runs.value, stripe: true, border: false, class: "app-table", height: "100%" }, {
-                        default: () => [
-                          h(ElTableColumn, { prop: "plan_run_id", label: "实例ID", minWidth: 140 }),
-                          h(ElTableColumn, { prop: "plan_name", label: "计划任务名称", minWidth: 180 }),
-                          h(ElTableColumn, {
-                            prop: "target_type",
-                            label: "目标类型",
-                            width: 120,
-                            formatter: (_row: unknown, _column: unknown, value: string) => getTargetTypeLabel(value)
-                          }),
-                          h(ElTableColumn, {
-                            label: "设备数",
-                            width: 120,
-                            formatter: (row: PlanRunRecord) => String((row.device_runs || []).length)
-                          }),
-                          h(ElTableColumn, {
-                            label: "状态",
-                            width: 120,
-                            slots: {
-                              default: (scope: { row: PlanRunRecord }) => renderStatus(scope.row.status)
-                            }
-                          }),
-                          h(ElTableColumn, {
-                            prop: "started_at",
-                            label: "开始时间",
-                            minWidth: 180,
-                            formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
-                          }),
-                          h(ElTableColumn, {
-                            prop: "finished_at",
-                            label: "结束时间",
-                            minWidth: 180,
-                            formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
-                          }),
-                          h(ElTableColumn, {
-                            label: "操作",
-                            width: 280,
-                            fixed: "right",
-                            slots: {
-                              default: (scope: { row: PlanRunRecord }) =>
-                                h("div", { class: "table-actions" }, [
-                                  h(ElButton, { type: "primary", link: true, onClick: () => openDevicesDialog(scope.row) }, () => "查看执行设备"),
-                                  h(ElButton, { type: "primary", link: true, onClick: () => void openEventsDialog(scope.row) }, () => "查看事件"),
-                                  h(ElButton, { type: "primary", link: true, onClick: () => openAppendDialog(scope.row) }, () => "追加设备"),
-                                  h(ElButton, { type: "danger", link: true, loading: stoppingRunID.value === scope.row.plan_run_id, onClick: () => void stopCurrentRun(scope.row) }, () => "停止")
-                                ])
-                            }
-                          })
-                        ]
-                      })
+                      h(
+                        ElTable,
+                        { data: runs.value, stripe: true, border: false, class: "app-table", height: "100%" },
+                        {
+                          default: () => [
+                            h(ElTableColumn, { prop: "plan_run_id", label: "实例ID", minWidth: 140 }),
+                            h(ElTableColumn, { prop: "plan_name", label: "计划任务名称", minWidth: 180 }),
+                            h(ElTableColumn, {
+                              prop: "target_type",
+                              label: "目标类型",
+                              width: 120,
+                              formatter: (_row: unknown, _column: unknown, value: string) => getTargetTypeLabel(value)
+                            }),
+                            h(ElTableColumn, {
+                              label: "设备数",
+                              width: 120,
+                              formatter: (row: PlanRunRecord) => String((row.device_runs || []).length)
+                            }),
+                            h(
+                              ElTableColumn,
+                              { label: "状态", width: 120 },
+                              {
+                                default: (scope: { row: PlanRunRecord }) => renderStatus(scope.row.status)
+                              }
+                            ),
+                            h(ElTableColumn, {
+                              prop: "started_at",
+                              label: "开始时间",
+                              minWidth: 180,
+                              formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
+                            }),
+                            h(ElTableColumn, {
+                              prop: "finished_at",
+                              label: "结束时间",
+                              minWidth: 180,
+                              formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
+                            }),
+                            h(
+                              ElTableColumn,
+                              { label: "操作", width: 320, fixed: "right" },
+                              {
+                                default: (scope: { row: PlanRunRecord }) =>
+                                  h("div", { class: "table-actions" }, [
+                                    h(ElButton, { type: "primary", link: true, onClick: () => openDevicesDialog(scope.row) }, () => "查看执行设备"),
+                                    h(ElButton, { type: "primary", link: true, onClick: () => void openEventsDialog(scope.row) }, () => "查看事件"),
+                                    h(ElButton, { type: "primary", link: true, onClick: () => openAppendDialog(scope.row) }, () => "追加设备"),
+                                    h(
+                                      ElButton,
+                                      {
+                                        type: "danger",
+                                        link: true,
+                                        loading: stoppingRunID.value === scope.row.plan_run_id,
+                                        onClick: () => void stopCurrentRun(scope.row)
+                                      },
+                                      () => "停止"
+                                    )
+                                  ])
+                              }
+                            )
+                          ]
+                        }
+                      )
                     ]),
                     h("div", { class: "page-pagination" }, [
                       h(ElPagination, {
@@ -278,50 +289,58 @@ export const PlanRunsPage = defineComponent({
           },
           {
             default: () =>
-              h(ElTable, { data: selectedRun.value?.device_runs || [], stripe: true, border: false, class: "app-table", height: "520px" }, {
-                default: () => [
-                  h(ElTableColumn, { prop: "device_id", label: "设备ID", minWidth: 140 }),
-                  h(ElTableColumn, {
-                    prop: "target_type",
-                    label: "目标类型",
-                    width: 120,
-                    formatter: (_row: unknown, _column: unknown, value: string) => getTargetTypeLabel(value)
-                  }),
-                  h(ElTableColumn, {
-                    label: "状态",
-                    width: 120,
-                    slots: {
-                      default: (scope: { row: PlanDeviceRunRecord }) => renderStatus(scope.row.status)
-                    }
-                  }),
-                  h(ElTableColumn, {
-                    prop: "started_at",
-                    label: "开始时间",
-                    minWidth: 180,
-                    formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
-                  }),
-                  h(ElTableColumn, {
-                    prop: "finished_at",
-                    label: "结束时间",
-                    minWidth: 180,
-                    formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
-                  }),
-                  h(ElTableColumn, { prop: "last_error", label: "最后错误", minWidth: 220 }),
-                  h(ElTableColumn, {
-                    label: "操作",
-                    width: 120,
-                    fixed: "right",
-                    slots: {
-                      default: (scope: { row: PlanDeviceRunRecord }) =>
-                        h(
-                          ElButton,
-                          { type: "danger", link: true, loading: mutatingDevices.value, onClick: () => void stopOrRemoveDevice(scope.row) },
-                          () => (scope.row.status === "pending" || scope.row.status === "running" ? "停止设备" : "移除设备")
-                        )
-                    }
-                  })
-                ]
-              }),
+              h(
+                ElTable,
+                { data: selectedRun.value?.device_runs || [], stripe: true, border: false, class: "app-table", height: "520px" },
+                {
+                  default: () => [
+                    h(ElTableColumn, { prop: "device_id", label: "设备ID", minWidth: 140 }),
+                    h(ElTableColumn, {
+                      prop: "target_type",
+                      label: "目标类型",
+                      width: 120,
+                      formatter: (_row: unknown, _column: unknown, value: string) => getTargetTypeLabel(value)
+                    }),
+                    h(
+                      ElTableColumn,
+                      { label: "状态", width: 120 },
+                      {
+                        default: (scope: { row: PlanDeviceRunRecord }) => renderStatus(scope.row.status)
+                      }
+                    ),
+                    h(ElTableColumn, {
+                      prop: "started_at",
+                      label: "开始时间",
+                      minWidth: 180,
+                      formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
+                    }),
+                    h(ElTableColumn, {
+                      prop: "finished_at",
+                      label: "结束时间",
+                      minWidth: 180,
+                      formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
+                    }),
+                    h(ElTableColumn, { prop: "last_error", label: "最后错误", minWidth: 220 }),
+                    h(
+                      ElTableColumn,
+                      { label: "操作", width: 140, fixed: "right" },
+                      {
+                        default: (scope: { row: PlanDeviceRunRecord }) =>
+                          h(
+                            ElButton,
+                            {
+                              type: "danger",
+                              link: true,
+                              loading: mutatingDevices.value,
+                              onClick: () => void stopOrRemoveDevice(scope.row)
+                            },
+                            () => (scope.row.status === "pending" || scope.row.status === "running" ? "停止设备" : "移除设备")
+                          )
+                      }
+                    )
+                  ]
+                }
+              ),
             footer: () => h(ElButton, { onClick: () => (devicesDialogVisible.value = false) }, () => "关闭")
           }
         ),
@@ -337,20 +356,24 @@ export const PlanRunsPage = defineComponent({
             default: () =>
               loadingEvents.value
                 ? h("div", { class: "dialog-loading" }, "加载中...")
-                : h(ElTable, { data: selectedEvents.value, stripe: true, border: false, class: "app-table", height: "520px" }, {
-                    default: () => [
-                      h(ElTableColumn, { prop: "id", label: "ID", width: 90 }),
-                      h(ElTableColumn, { prop: "device_id", label: "设备ID", minWidth: 140 }),
-                      h(ElTableColumn, { prop: "event_type", label: "事件类型", minWidth: 180 }),
-                      h(ElTableColumn, { prop: "message", label: "事件内容", minWidth: 260 }),
-                      h(ElTableColumn, {
-                        prop: "created_at",
-                        label: "时间",
-                        minWidth: 180,
-                        formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
-                      })
-                    ]
-                  }),
+                : h(
+                    ElTable,
+                    { data: selectedEvents.value, stripe: true, border: false, class: "app-table", height: "520px" },
+                    {
+                      default: () => [
+                        h(ElTableColumn, { prop: "id", label: "ID", width: 90 }),
+                        h(ElTableColumn, { prop: "device_id", label: "设备ID", minWidth: 140 }),
+                        h(ElTableColumn, { prop: "event_type", label: "事件类型", minWidth: 180 }),
+                        h(ElTableColumn, { prop: "message", label: "事件内容", minWidth: 260 }),
+                        h(ElTableColumn, {
+                          prop: "created_at",
+                          label: "时间",
+                          minWidth: 180,
+                          formatter: (_row: unknown, _column: unknown, value: string) => formatDateTime(value)
+                        })
+                      ]
+                    }
+                  ),
             footer: () => h(ElButton, { onClick: () => (eventsDialogVisible.value = false) }, () => "关闭")
           }
         ),
