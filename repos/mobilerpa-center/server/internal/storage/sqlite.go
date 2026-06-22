@@ -293,10 +293,10 @@ func Open(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping sqlite: %w", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	if err := resetSchema(ctx, db); err != nil {
+	if err := initSchema(ctx, db); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -304,36 +304,7 @@ func Open(dbPath string) (*sql.DB, error) {
 	return db, nil
 }
 
-func resetSchema(ctx context.Context, db *sql.DB) error {
-	dropStatements := []string{
-		`DROP TABLE IF EXISTS plan_contexts`,
-		`DROP TABLE IF EXISTS plan_events`,
-		`DROP TABLE IF EXISTS plan_device_runs`,
-		`DROP TABLE IF EXISTS plan_runs`,
-		`DROP TABLE IF EXISTS plan_devices`,
-		`DROP TABLE IF EXISTS plan_defs`,
-		`DROP TABLE IF EXISTS workflow_contexts`,
-		`DROP TABLE IF EXISTS workflow_events`,
-		`DROP TABLE IF EXISTS workflow_runs`,
-		`DROP TABLE IF EXISTS workflow_instances`,
-		`DROP TABLE IF EXISTS workflow_edges`,
-		`DROP TABLE IF EXISTS workflow_nodes`,
-		`DROP TABLE IF EXISTS workflow_defs`,
-		`DROP TABLE IF EXISTS daily_reports`,
-		`DROP TABLE IF EXISTS uploaded_files`,
-		`DROP TABLE IF EXISTS script_versions`,
-		`DROP TABLE IF EXISTS task_events`,
-		`DROP TABLE IF EXISTS tasks`,
-		`DROP TABLE IF EXISTS devices`,
-		`DROP TABLE IF EXISTS system_settings`,
-	}
-
-	for _, statement := range dropStatements {
-		if _, err := db.ExecContext(ctx, statement); err != nil {
-			return fmt.Errorf("drop schema objects: %w", err)
-		}
-	}
-
+func initSchema(ctx context.Context, db *sql.DB) error {
 	if _, err := db.ExecContext(ctx, schema); err != nil {
 		return fmt.Errorf("init schema: %w", err)
 	}
