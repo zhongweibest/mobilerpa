@@ -1,0 +1,20 @@
+# open_xiaohongshu @ v0.1.0
+
+## 目录说明
+
+- `index.js`：供 Agent/中心任务调度执行的正式入口。
+- `index_debug.js`：供 AutoJs6 真机直接运行的调试入口。
+
+## 开发约定
+
+1. 默认使用中文注释、中文文档、中文提交信息。
+2. 正式执行入口统一导出 `run(context, helpers)`。
+3. 关键步骤统一通过 `reportProgress(stepName, message, status, extra)` 上报。
+4. 真机调试优先运行 `index_debug.js`，不要直接运行 `index.js`。
+5. 调试通过后，再打包成 zip 上传到中心服务。
+
+## 当前能力
+
+1. `index.js` 已实现按包名启动小红书并等待前台成功。
+2. `index_debug.js` 可直接在 AutoJs6 中运行，用于真机调试。
+3. 调试通过后可将当前目录打包上传到中心服务。

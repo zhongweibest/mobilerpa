@@ -1,0 +1,13 @@
+
+推送软件
+adb -s adb-AXREUT5612000490-b3B2d1._adb-tls-connect._tcp push D:\home\Downloads\autojs6-v6.7.0-arm64-v8a-62db1ff8.apk /data/local/tmp/autojs6-v6.7.0-arm64-v8a.apk
+
+
+安装软件
+adb -s adb-AXREUT5612000490-b3B2d1._adb-tls-connect._tcp shell pm install -r /data/local/tmp/autojs6-v6.7.0-arm64-v8a.apk
+
+断开连接
+adb disconnect adb-AXREUT5612000490-b3B2d1._adb-tls-connect._tcp
+
+连接设备
+adb pair ip:端口 配对码命
