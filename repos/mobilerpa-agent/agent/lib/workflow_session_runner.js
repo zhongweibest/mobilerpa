@@ -2,6 +2,40 @@
 
 var runtime = require("./runtime");
 var taskRunner = require("./task_runner");
+var NODE_TRANSITION_DELAY_MS = 2000;
+
+function sleepMilliseconds(durationMs) {
+    var startedAt = new Date().getTime();
+
+    while (new Date().getTime() - startedAt < durationMs) {
+        java.lang.Thread.sleep(100);
+    }
+}
+
+function pauseBeforeNextNode(sessionPayload, fromNodeID, toNodeID, options) {
+    var sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function () {};
+    var isCancelled = options && typeof options.isCancelled === "function" ? options.isCancelled : function () { return false; };
+
+    if (!toNodeID || isCancelled()) {
+        return;
+    }
+
+    sendEvent({
+        workflow_run_id: String((sessionPayload && sessionPayload.workflow_run_id) || ""),
+        workflow_node_id: String(fromNodeID || ""),
+        event_type: "workflow_step_progress",
+        status: "running",
+        step_name: "NODE_TRANSITION_WAIT",
+        message: "节点切换前等待 2 秒",
+        extra: {
+            from_node_id: String(fromNodeID || ""),
+            to_node_id: String(toNodeID || ""),
+            delay_ms: NODE_TRANSITION_DELAY_MS
+        }
+    });
+
+    sleepMilliseconds(NODE_TRANSITION_DELAY_MS);
+}
 
 function syncSessionScripts(sessionPayload, options) {
     var manifests = sessionPayload && sessionPayload.script_manifest ? sessionPayload.script_manifest : [];
@@ -232,7 +266,12 @@ function runSession(sessionPayload, options) {
                     workflow_node_id: currentNodeID
                 };
             }
-            currentNodeID = getNextNodeID(edgeMap, currentNodeID, "next");
+            nextNodeID = getNextNodeID(edgeMap, currentNodeID, "next");
+            pauseBeforeNextNode(sessionPayload, currentNodeID, nextNodeID, {
+                sendEvent: sendEvent,
+                isCancelled: isCancelled
+            });
+            currentNodeID = nextNodeID;
             continue;
         }
 
@@ -240,6 +279,10 @@ function runSession(sessionPayload, options) {
             loopCounters[currentNodeID] = Number(loopCounters[currentNodeID] || 0);
             if (Number(node.max_iterations || 0) > 0 && loopCounters[currentNodeID] >= Number(node.max_iterations || 0)) {
                 nextNodeID = getNextNodeID(edgeMap, currentNodeID, "loop_exit") || getNextNodeID(edgeMap, currentNodeID, "next");
+                pauseBeforeNextNode(sessionPayload, currentNodeID, nextNodeID, {
+                    sendEvent: sendEvent,
+                    isCancelled: isCancelled
+                });
                 currentNodeID = nextNodeID;
                 continue;
             }
@@ -257,7 +300,12 @@ function runSession(sessionPayload, options) {
                     max_iterations: Number(node.max_iterations || 0)
                 }
             });
-            currentNodeID = getNextNodeID(edgeMap, currentNodeID, "loop_body") || getNextNodeID(edgeMap, currentNodeID, "next");
+            nextNodeID = getNextNodeID(edgeMap, currentNodeID, "loop_body") || getNextNodeID(edgeMap, currentNodeID, "next");
+            pauseBeforeNextNode(sessionPayload, currentNodeID, nextNodeID, {
+                sendEvent: sendEvent,
+                isCancelled: isCancelled
+            });
+            currentNodeID = nextNodeID;
             continue;
         }
 
