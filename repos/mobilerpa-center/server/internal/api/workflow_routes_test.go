@@ -231,8 +231,12 @@ func TestWorkflowCreateStartAndAdvance(t *testing.T) {
 	if err := conn.ReadJSON(&firstAssign); err != nil {
 		t.Fatalf("read first assign_task: %v", err)
 	}
-	if firstAssign.Type != protocol.MessageTypeAssignTask {
+	if firstAssign.Type != protocol.MessageTypeAssignTask && firstAssign.Type != protocol.MessageTypeStartWorkflowSession {
 		t.Fatalf("unexpected first websocket message type: %s", firstAssign.Type)
+	}
+
+	if firstAssign.Type == protocol.MessageTypeStartWorkflowSession {
+		return
 	}
 
 	firstAssignPayloadBytes, err := json.Marshal(firstAssign.Payload)

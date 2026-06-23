@@ -12,6 +12,7 @@ import (
 
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
+	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
 
 const (
@@ -63,6 +64,7 @@ const (
 	EventTypeWorkflowRunCompleted = "workflow_run_completed"
 	// EventTypeWorkflowRunFailed 表示工作流运行实例失败结束。
 	EventTypeWorkflowRunFailed = "workflow_run_failed"
+	EventTypeWorkflowSessionAck = "workflow_session_ack"
 )
 
 var (
@@ -239,6 +241,17 @@ type Service struct {
 	devices    *device.Service
 	tasks      *task.Service
 	dispatcher TaskDispatcher
+	sessionResultHooks []func(context.Context, string) error
+}
+
+type SessionDispatcher interface {
+	StartWorkflowSession(ctx context.Context, payload protocol.StartWorkflowSessionPayload) error
+	StopWorkflowSession(ctx context.Context, payload protocol.StopWorkflowSessionPayload) error
+}
+
+func (s *Service) usesLegacyTaskDrivenFlow() bool {
+	_, ok := s.dispatcher.(SessionDispatcher)
+	return !ok
 }
 
 // NewService 创建工作流服务。
@@ -249,6 +262,13 @@ func NewService(db *sql.DB, devices *device.Service, tasks *task.Service, dispat
 		tasks:      tasks,
 		dispatcher: dispatcher,
 	}
+}
+
+func (s *Service) AddSessionResultHook(hook func(context.Context, string) error) {
+	if hook == nil {
+		return
+	}
+	s.sessionResultHooks = append(s.sessionResultHooks, hook)
 }
 
 // CreateDefinition 创建新的工作流定义。
@@ -550,6 +570,7 @@ WHERE workflow_instance_id = ?`,
 		if run.Status != RunStatusPending && run.Status != RunStatusRunning {
 			continue
 		}
+		_ = s.stopWorkflowSession(ctx, run, "definition_stop")
 		if err := s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, run.WorkflowDefID, run.DeviceID, run.CurrentNodeID, EventTypeWorkflowDeviceStopped, "设备工作流已手动停止", map[string]any{
 			"source": "center",
 			"reason": "definition_stop",
@@ -602,6 +623,7 @@ WHERE workflow_def_id = ?
 	if err != nil {
 		return Run{}, err
 	}
+	_ = s.stopWorkflowSession(ctx, run, "device_stop")
 
 	if err := s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, workflowDefID, deviceID, "", EventTypeWorkflowDeviceStopped, "设备工作流已手动停止", map[string]any{
 		"source": "center",
@@ -779,10 +801,15 @@ ORDER BY id DESC`
 	return items, nil
 }
 
-// HandleTaskResult 把任务结果推进到对应工作流运行实例。
+// HandleTaskResult 仅兼容旧的“逐节点 assign_task 推进工作流”链路。
+// 正式主链已经切换为 workflow_session_* 协议族；当 dispatcher 支持会话分发时，
+// 这里不再继续承担工作流推进职责。
 func (s *Service) HandleTaskResult(ctx context.Context, taskID string) error {
 	taskID = strings.TrimSpace(taskID)
 	if taskID == "" {
+		return nil
+	}
+	if !s.usesLegacyTaskDrivenFlow() {
 		return nil
 	}
 
@@ -845,6 +872,176 @@ WHERE id = ?`,
 }
 
 // HandleStepProgress 处理设备回传的 workflow_step_progress，并写入工作流事件域。
+func (s *Service) HandleSessionAck(ctx context.Context, payload protocol.WorkflowSessionAckPayload, requestID string, deviceID string) error {
+	payload.WorkflowRunID = strings.TrimSpace(payload.WorkflowRunID)
+	payload.Status = strings.TrimSpace(payload.Status)
+	payload.Message = strings.TrimSpace(payload.Message)
+	deviceID = strings.TrimSpace(deviceID)
+
+	if payload.WorkflowRunID == "" {
+		return ErrWorkflowRunNotFound
+	}
+
+	run, err := s.getRunByID(ctx, payload.WorkflowRunID)
+	if err != nil {
+		return err
+	}
+	if deviceID == "" {
+		deviceID = run.DeviceID
+	}
+	if payload.Status == "" {
+		payload.Status = "ok"
+	}
+	if payload.Message == "" {
+		payload.Message = "设备已收到工作流会话"
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE workflow_runs
+SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ?
+WHERE id = ?`,
+		RunStatusRunning,
+		now,
+		now,
+		run.WorkflowRunID,
+	); err != nil {
+		return fmt.Errorf("mark workflow run running on session ack: %w", err)
+	}
+
+	return s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, run.WorkflowDefID, deviceID, run.CurrentNodeID, EventTypeWorkflowSessionAck, payload.Message, map[string]any{
+		"source":     "agent",
+		"request_id": requestID,
+		"status":     payload.Status,
+	})
+}
+
+func (s *Service) HandleSessionEvent(ctx context.Context, payload protocol.WorkflowSessionEventPayload, requestID string, deviceID string) error {
+	payload.WorkflowRunID = strings.TrimSpace(payload.WorkflowRunID)
+	payload.WorkflowNodeID = strings.TrimSpace(payload.WorkflowNodeID)
+	payload.EventType = strings.TrimSpace(payload.EventType)
+	payload.Status = strings.TrimSpace(payload.Status)
+	payload.StepName = strings.TrimSpace(payload.StepName)
+	payload.Message = strings.TrimSpace(payload.Message)
+	deviceID = strings.TrimSpace(deviceID)
+
+	if payload.WorkflowRunID == "" {
+		return ErrWorkflowRunNotFound
+	}
+
+	run, err := s.getRunByID(ctx, payload.WorkflowRunID)
+	if err != nil {
+		return err
+	}
+	if payload.WorkflowNodeID == "" {
+		payload.WorkflowNodeID = run.CurrentNodeID
+	}
+	if deviceID == "" {
+		deviceID = run.DeviceID
+	}
+
+	message := payload.Message
+	if message == "" {
+		message = "工作流会话事件"
+	}
+
+	eventType := payload.EventType
+	if eventType == "" {
+		eventType = EventTypeWorkflowStepProgress
+	}
+
+	extra := map[string]any{
+		"source":     "agent",
+		"request_id": requestID,
+		"status":     payload.Status,
+		"step_name":  payload.StepName,
+	}
+	for key, value := range payload.Extra {
+		extra[key] = value
+	}
+
+	return s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, run.WorkflowDefID, deviceID, payload.WorkflowNodeID, eventType, message, extra)
+}
+
+func (s *Service) HandleSessionResult(ctx context.Context, payload protocol.WorkflowSessionResultPayload, requestID string, deviceID string) error {
+	payload.WorkflowRunID = strings.TrimSpace(payload.WorkflowRunID)
+	payload.WorkflowNodeID = strings.TrimSpace(payload.WorkflowNodeID)
+	payload.Status = strings.TrimSpace(payload.Status)
+	payload.ResultCode = strings.TrimSpace(payload.ResultCode)
+	payload.ResultMessage = strings.TrimSpace(payload.ResultMessage)
+	deviceID = strings.TrimSpace(deviceID)
+
+	if payload.WorkflowRunID == "" {
+		return ErrWorkflowRunNotFound
+	}
+
+	run, err := s.getRunByID(ctx, payload.WorkflowRunID)
+	if err != nil {
+		return err
+	}
+	if payload.WorkflowNodeID == "" {
+		payload.WorkflowNodeID = run.CurrentNodeID
+	}
+	if deviceID == "" {
+		deviceID = run.DeviceID
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	nextStatus := RunStatusFailed
+	eventType := EventTypeWorkflowRunFailed
+	message := "工作流运行失败结束"
+	lastError := payload.ResultMessage
+
+	switch payload.Status {
+	case RunStatusSuccess:
+		nextStatus = RunStatusSuccess
+		eventType = EventTypeWorkflowRunCompleted
+		message = "工作流运行已完成"
+		lastError = ""
+	case RunStatusStopped:
+		nextStatus = RunStatusStopped
+		eventType = EventTypeWorkflowDeviceStopped
+		message = "设备工作流已手动停止"
+		lastError = ""
+	}
+
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE workflow_runs
+SET status = ?, current_node_id = ?, current_task_id = 0, finished_at = CASE WHEN finished_at = '' THEN ? ELSE finished_at END,
+    last_error = ?, updated_at = ?
+WHERE id = ?`,
+		nextStatus,
+		payload.WorkflowNodeID,
+		now,
+		lastError,
+		now,
+		run.WorkflowRunID,
+	); err != nil {
+		return fmt.Errorf("update workflow run by session result: %w", err)
+	}
+
+	if err := s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, run.WorkflowDefID, deviceID, payload.WorkflowNodeID, eventType, message, map[string]any{
+		"source":         "agent",
+		"request_id":     requestID,
+		"status":         payload.Status,
+		"result_code":    payload.ResultCode,
+		"result_message": payload.ResultMessage,
+	}); err != nil {
+		return err
+	}
+
+	if err := s.refreshInstanceStatus(ctx, run.WorkflowInstanceID); err != nil {
+		return err
+	}
+
+	for _, hook := range s.sessionResultHooks {
+		if err := hook(ctx, run.WorkflowRunID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) HandleStepProgress(ctx context.Context, payload StepProgressPayload, requestID string, deviceID string) error {
 	payload.WorkflowRunID = strings.TrimSpace(payload.WorkflowRunID)
 	payload.WorkflowNodeID = strings.TrimSpace(payload.WorkflowNodeID)
@@ -894,6 +1091,122 @@ func (s *Service) HandleStepProgress(ctx context.Context, payload StepProgressPa
 	}
 
 	return s.appendEvent(ctx, run.WorkflowInstanceID, run.WorkflowRunID, run.WorkflowDefID, deviceID, payload.WorkflowNodeID, EventTypeWorkflowStepProgress, message, extra)
+}
+
+func (s *Service) startWorkflowSession(ctx context.Context, run Run, definition Definition, headNode Node) error {
+	sessionDispatcher, ok := s.dispatcher.(SessionDispatcher)
+	if !ok {
+		// 仅在未接入 workflow session dispatcher 的历史兼容场景下，
+		// 回退到旧的逐节点 task 下发模型。
+		return s.startRunFromNode(ctx, run.WorkflowRunID, headNode.NodeID)
+	}
+
+	payload, err := s.buildSessionPayload(ctx, run, definition, headNode)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE workflow_runs
+SET status = ?, current_node_id = ?, current_task_id = 0, updated_at = ?
+WHERE id = ?`,
+		RunStatusPending,
+		headNode.NodeID,
+		now,
+		run.WorkflowRunID,
+	); err != nil {
+		return fmt.Errorf("prepare workflow run for session dispatch: %w", err)
+	}
+
+	if err := sessionDispatcher.StartWorkflowSession(ctx, payload); err != nil {
+		return fmt.Errorf("dispatch workflow session: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) buildSessionPayload(ctx context.Context, run Run, definition Definition, headNode Node) (protocol.StartWorkflowSessionPayload, error) {
+	nodes, err := s.listNodes(ctx, definition.WorkflowDefID)
+	if err != nil {
+		return protocol.StartWorkflowSessionPayload{}, err
+	}
+	edges, err := s.listEdges(ctx, definition.WorkflowDefID)
+	if err != nil {
+		return protocol.StartWorkflowSessionPayload{}, err
+	}
+
+	nodeSnapshots := make([]protocol.WorkflowNodeSnapshot, 0, len(nodes))
+	edgeSnapshots := make([]protocol.WorkflowEdgeSnapshot, 0, len(edges))
+	scriptManifest := make([]protocol.WorkflowScriptManifest, 0)
+	seenScripts := make(map[string]struct{})
+
+	for _, node := range nodes {
+		nodeSnapshots = append(nodeSnapshots, protocol.WorkflowNodeSnapshot{
+			NodeID:        node.NodeID,
+			NodeType:      node.NodeType,
+			NodeName:      node.NodeName,
+			ScriptName:    node.ScriptName,
+			ScriptVersion: node.ScriptVersion,
+			MaxIterations: node.MaxIterations,
+			Position:      node.Position,
+		})
+
+		if node.NodeType == NodeTypeScript {
+			key := node.ScriptName + "@" + node.ScriptVersion
+			if _, exists := seenScripts[key]; !exists {
+				seenScripts[key] = struct{}{}
+				scriptManifest = append(scriptManifest, protocol.WorkflowScriptManifest{
+					ScriptName:    node.ScriptName,
+					ScriptVersion: node.ScriptVersion,
+				})
+			}
+		}
+	}
+
+	for _, edge := range edges {
+		edgeSnapshots = append(edgeSnapshots, protocol.WorkflowEdgeSnapshot{
+			FromNodeID: edge.FromNodeID,
+			ToNodeID:   edge.ToNodeID,
+			EdgeType:   edge.EdgeType,
+		})
+	}
+
+	return protocol.StartWorkflowSessionPayload{
+		WorkflowSessionID:  run.WorkflowRunID,
+		WorkflowInstanceID: run.WorkflowInstanceID,
+		WorkflowRunID:      run.WorkflowRunID,
+		WorkflowDefID:      run.WorkflowDefID,
+		WorkflowName:       definition.WorkflowName,
+		DeviceID:           run.DeviceID,
+		EntryNodeID:        headNode.NodeID,
+		DefinitionSnapshot: protocol.WorkflowDefinitionSnapshot{
+			Nodes: nodeSnapshots,
+			Edges: edgeSnapshots,
+		},
+		ScriptManifest: scriptManifest,
+		RuntimePolicy: map[string]any{
+			"event_mode": "key_events",
+		},
+	}, nil
+}
+
+func (s *Service) stopWorkflowSession(ctx context.Context, run Run, reason string) error {
+	sessionDispatcher, ok := s.dispatcher.(SessionDispatcher)
+	if !ok {
+		return nil
+	}
+
+	return sessionDispatcher.StopWorkflowSession(ctx, protocol.StopWorkflowSessionPayload{
+		WorkflowSessionID:  run.WorkflowRunID,
+		WorkflowInstanceID: run.WorkflowInstanceID,
+		WorkflowRunID:      run.WorkflowRunID,
+		WorkflowDefID:      run.WorkflowDefID,
+		DeviceID:           run.DeviceID,
+		Reason:             strings.TrimSpace(reason),
+		Extra: map[string]any{
+			"source": "center",
+		},
+	})
 }
 
 func (s *Service) addRuns(ctx context.Context, workflowDefID string, deviceIDs []string, workflowInstanceID string) (Instance, error) {
@@ -967,7 +1280,7 @@ func (s *Service) addRuns(ctx context.Context, workflowDefID string, deviceIDs [
 			return Instance{}, err
 		}
 
-		if err := s.startRunFromNode(ctx, run.WorkflowRunID, headNode.NodeID); err != nil {
+		if err := s.startWorkflowSession(ctx, run, definition, headNode); err != nil {
 			return Instance{}, err
 		}
 	}
@@ -1028,6 +1341,7 @@ INSERT INTO workflow_runs (
 	return s.getRunByID(ctx, runID)
 }
 
+// startRunFromNode 是旧的逐节点 task 推进模型，仅保留为历史兼容兜底。
 func (s *Service) startRunFromNode(ctx context.Context, workflowRunID string, nodeID string) error {
 	run, err := s.getRunByID(ctx, workflowRunID)
 	if err != nil {
@@ -1122,6 +1436,7 @@ WHERE id = ?`,
 	}
 }
 
+// advanceRunAfterNode 是旧的逐节点 task 推进模型，仅保留为历史兼容兜底。
 func (s *Service) advanceRunAfterNode(ctx context.Context, run Run, completedNodeID string) error {
 	nextNodeID, err := s.getNextNodeID(ctx, run.WorkflowDefID, completedNodeID, EdgeTypeNext)
 	if err != nil {
@@ -1153,6 +1468,7 @@ WHERE id = ?`,
 	return s.startRunFromNode(ctx, run.WorkflowRunID, nextNodeID)
 }
 
+// advanceRunAfterLoopNode 是旧的逐节点 task 推进模型，仅保留为历史兼容兜底。
 func (s *Service) advanceRunAfterLoopNode(ctx context.Context, run Run, loopNode Node) error {
 	counter, err := s.getLoopCounter(ctx, run.WorkflowRunID, loopNode.NodeID)
 	if err != nil {
@@ -2000,7 +2316,7 @@ func (s *Service) DeleteInstance(ctx context.Context, workflowInstanceID string)
 	if err != nil {
 		return err
 	}
-	if instance.Status == RunStatusPending || instance.Status == RunStatusRunning {
+	if instance.Status != RunStatusSuccess && instance.Status != RunStatusFailed {
 		return ErrWorkflowInstanceDeleteNotAllowed
 	}
 

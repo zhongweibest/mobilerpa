@@ -855,6 +855,25 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 			return
 		}
 
+		if len(parts) == 3 && parts[1] == "manual-tasks" && parts[2] != "" && r.Method == http.MethodPost {
+			if tasks == nil {
+				writeError(w, http.StatusNotFound, "task_resource_not_found")
+				return
+			}
+
+			result, err := tasks.StopManualTask(ctx, parts[2], "人工结束手工任务")
+			if err != nil {
+				writeTaskError(w, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
 		switch r.Method {
 		case http.MethodGet:
 			if len(parts) != 1 {
@@ -1733,7 +1752,9 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 	case errors.Is(err, workflow.ErrWorkflowDefinitionRunning):
 		writeError(w, http.StatusConflict, "workflow_definition_running")
 	case errors.Is(err, workflow.ErrWorkflowInstanceDeleteNotAllowed):
-		writeError(w, http.StatusConflict, "workflow_instance_delete_not_allowed")
+		writeErrorWithDetails(w, http.StatusConflict, "工作流实例暂不允许删除", map[string]any{
+			"reason": "只有执行成功或执行失败的工作流实例允许删除，运行中、待执行或已停止实例请勿删除",
+		})
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
 	default:

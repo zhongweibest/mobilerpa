@@ -1569,8 +1569,25 @@ func (s *Service) stopWorkflowPlanDevice(ctx context.Context, definition Definit
 	if s.workflows == nil {
 		return fmt.Errorf("workflow runner is not configured")
 	}
-	if _, err := s.workflows.StopRunByDevice(ctx, definition.TargetWorkflowDefID, run.TargetRefID, deviceRun.DeviceID); err != nil {
-		return err
+
+	workflowInstanceID := strings.TrimSpace(run.TargetRefID)
+	if workflowInstanceID == "" {
+		row := s.db.QueryRowContext(ctx, `
+SELECT id
+FROM workflow_instances
+WHERE plan_run_id = ?
+ORDER BY id DESC
+LIMIT 1`, run.PlanRunID)
+		if err := row.Scan(&workflowInstanceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("query workflow instance by plan run: %w", err)
+		}
+		workflowInstanceID = strings.TrimSpace(workflowInstanceID)
+	}
+
+	if workflowInstanceID != "" {
+		if _, err := s.workflows.StopRunByDevice(ctx, definition.TargetWorkflowDefID, workflowInstanceID, deviceRun.DeviceID); err != nil && !errors.Is(err, workflow.ErrWorkflowRunNotFound) {
+			return err
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1712,6 +1729,54 @@ WHERE id = ?`,
 	if planRunID == "" {
 		return nil
 	}
+	return s.syncWorkflowPlanRun(ctx, planRunID)
+}
+
+// SyncWorkflowRunBySession 在工作流会话结果回传后，把工作流实例状态回写到计划任务实例。
+func (s *Service) SyncWorkflowRunBySession(ctx context.Context, workflowRunID string) error {
+	workflowRunID = strings.TrimSpace(workflowRunID)
+	if workflowRunID == "" {
+		return nil
+	}
+
+	row := s.db.QueryRowContext(ctx, `
+SELECT workflow_instance_id
+FROM workflow_runs
+WHERE id = ?`,
+		workflowRunID,
+	)
+
+	var workflowInstanceID string
+	if err := row.Scan(&workflowInstanceID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("query workflow instance by workflow run: %w", err)
+	}
+	workflowInstanceID = strings.TrimSpace(workflowInstanceID)
+	if workflowInstanceID == "" {
+		return nil
+	}
+
+	instanceRow := s.db.QueryRowContext(ctx, `
+SELECT plan_run_id
+FROM workflow_instances
+WHERE id = ?`,
+		workflowInstanceID,
+	)
+
+	var planRunID string
+	if err := instanceRow.Scan(&planRunID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("query plan run by workflow instance: %w", err)
+	}
+	planRunID = strings.TrimSpace(planRunID)
+	if planRunID == "" {
+		return nil
+	}
+
 	return s.syncWorkflowPlanRun(ctx, planRunID)
 }
 

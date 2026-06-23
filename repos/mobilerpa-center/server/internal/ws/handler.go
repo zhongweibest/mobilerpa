@@ -142,6 +142,96 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("device %s acknowledged task %s", currentDeviceID, taskItem.TaskID)
 			_ = writeAck(deviceConn, protocol.MessageTypeTaskAck, msg.RequestID, "ok")
 
+		case protocol.MessageTypeWorkflowSessionAck:
+			currentDeviceID = msg.DeviceID
+			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
+			if h.workflows == nil {
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
+				continue
+			}
+
+			payloadBytes, err := json.Marshal(msg.Payload)
+			if err != nil {
+				log.Printf("marshal workflow_session_ack for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
+				continue
+			}
+
+			var payload protocol.WorkflowSessionAckPayload
+			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+				log.Printf("decode workflow_session_ack for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
+				continue
+			}
+
+			if err := h.workflows.HandleSessionAck(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
+				log.Printf("handle workflow_session_ack for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
+				continue
+			}
+			log.Printf("device %s acknowledged workflow session %s", currentDeviceID, payload.WorkflowRunID)
+			_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "ok")
+
+		case protocol.MessageTypeWorkflowSessionEvent:
+			currentDeviceID = msg.DeviceID
+			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
+			if h.workflows == nil {
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
+				continue
+			}
+
+			payloadBytes, err := json.Marshal(msg.Payload)
+			if err != nil {
+				log.Printf("marshal workflow_session_event for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
+				continue
+			}
+
+			var payload protocol.WorkflowSessionEventPayload
+			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+				log.Printf("decode workflow_session_event for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
+				continue
+			}
+
+			if err := h.workflows.HandleSessionEvent(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
+				log.Printf("handle workflow_session_event for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
+				continue
+			}
+			log.Printf("device %s reported workflow session event run=%s event=%s", currentDeviceID, payload.WorkflowRunID, payload.EventType)
+			_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "ok")
+
+		case protocol.MessageTypeWorkflowSessionResult:
+			currentDeviceID = msg.DeviceID
+			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
+			if h.workflows == nil {
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
+				continue
+			}
+
+			payloadBytes, err := json.Marshal(msg.Payload)
+			if err != nil {
+				log.Printf("marshal workflow_session_result for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
+				continue
+			}
+
+			var payload protocol.WorkflowSessionResultPayload
+			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
+				log.Printf("decode workflow_session_result for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
+				continue
+			}
+
+			if err := h.workflows.HandleSessionResult(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
+				log.Printf("handle workflow_session_result for device %s: %v", currentDeviceID, err)
+				_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
+				continue
+			}
+			log.Printf("device %s reported workflow session result %s -> %s", currentDeviceID, payload.WorkflowRunID, payload.Status)
+			_ = writeAck(deviceConn, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "ok")
+
 		case protocol.MessageTypeTaskProgress:
 			currentDeviceID = msg.DeviceID
 			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)

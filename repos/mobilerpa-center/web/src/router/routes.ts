@@ -9,7 +9,6 @@ import { PlansPage } from "../pages/plans/PlansPage";
 import { PlanRunsPage } from "../pages/plans/PlanRunsPage";
 import { ScriptsPage } from "../pages/scripts/ScriptsPage";
 import { SettingsPage } from "../pages/settings/SettingsPage";
-import { TasksPage } from "../pages/tasks/TasksPage";
 import { WorkflowInstancesPage } from "../pages/workflows/WorkflowInstancesPage";
 import { WorkflowsPage } from "../pages/workflows/WorkflowsPage";
 
@@ -37,12 +36,12 @@ export const appRoutes: RouteRecordRaw[] = [
         name: "home",
         component: HomePage,
         meta: meta({
-          title: "首页看板",
+          title: "主页看板",
           section: "总览",
           navGroup: "main",
           navOrder: 1,
           navVisible: true,
-          summary: "集中查看设备、任务、脚本、工作流与系统状态，作为整个平台的全局入口。"
+          summary: "集中查看设备、计划任务、脚本、工作流与系统状态，作为整个平台的全局入口。"
         })
       },
       {
@@ -69,19 +68,6 @@ export const appRoutes: RouteRecordRaw[] = [
           navOrder: 3,
           navVisible: true,
           summary: "发现无线调试设备，完成连接、断开、单设备下发 Agent 与批量下发 Agent。"
-        })
-      },
-      {
-        path: "tasks",
-        name: "tasks",
-        component: TasksPage,
-        meta: meta({
-          title: "任务中心",
-          section: "任务执行",
-          navGroup: "main",
-          navOrder: 4,
-          navVisible: true,
-          summary: "管理手工任务的创建、下发、执行结果与任务事件，适合单任务链路验证。"
         })
       },
       {
@@ -120,7 +106,7 @@ export const appRoutes: RouteRecordRaw[] = [
           navGroup: "workflow",
           navOrder: 3,
           navVisible: true,
-          summary: "维护工作流定义、节点关系、脚本版本绑定与启动入口。"
+          summary: "维护工作流定义、节点关系、脚本版本绑定与编排入口。"
         })
       },
       {
@@ -133,7 +119,7 @@ export const appRoutes: RouteRecordRaw[] = [
           navGroup: "workflow",
           navOrder: 4,
           navVisible: true,
-          summary: "兼容查看旧工作流实例、设备执行情况与事件流水，后续将逐步收口到计划任务实例。"
+          summary: "兼容查看历史工作流实例、设备执行情况与事件流水，后续将逐步收口到计划任务实例。"
         })
       },
       {
@@ -170,7 +156,7 @@ export const appRoutes: RouteRecordRaw[] = [
           title: "设备绑定",
           section: "设备管理",
           navGroup: "main",
-          navOrder: 5,
+          navOrder: 4,
           navVisible: true,
           navBadge: "规划中",
           summary: "后续在这里维护设备物理位置、分组、标签与批量绑定能力。"

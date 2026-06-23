@@ -58,8 +58,8 @@ func New() (*App, error) {
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService)
 	planService.SetStartFanout(cfg.PlanStartFanout)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
-	dispatchService.AddTaskResultHook(workflowService.HandleTaskResult)
 	dispatchService.AddTaskResultHook(planService.SyncWorkflowRunByTask)
+	workflowService.AddSessionResultHook(planService.SyncWorkflowRunBySession)
 	wsHandler := ws.NewHandler(deviceService, dispatchService, workflowService)
 
 	mux := http.NewServeMux()

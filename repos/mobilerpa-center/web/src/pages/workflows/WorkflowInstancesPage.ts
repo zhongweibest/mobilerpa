@@ -15,15 +15,12 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, ref } from "vue";
 
-import { fetchDevices } from "../../api/devices";
 import { useWorkflowsStore } from "../../stores/workflows";
-import type { DeviceRecord } from "../../types/device";
 import type { WorkflowEventRecord, WorkflowInstanceRecord, WorkflowRunRecord } from "../../types/workflow";
 import { formatDateTime } from "../../utils/device";
 
-const DEVICE_SELECTOR_PAGE_SIZE = 100;
 const PAGE_SIZES = [10, 20, 30, 50, 100];
 
 function renderStatus(status: string) {
@@ -38,54 +35,12 @@ function renderStatus(status: string) {
   return h(ElTag, { type, effect: "light" }, () => status || "unknown");
 }
 
-function buildWorkflowErrorMessage(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || "");
-  if (message.includes("workflow_device_busy")) {
-    return "目标设备已被其他任务或工作流占用。";
-  }
-  if (message.includes("workflow_instance_not_found")) {
-    return "未找到目标工作流实例。";
-  }
-  if (message.includes("workflow_instance_not_active")) {
-    return "目标工作流实例不是运行中状态。";
-  }
-  if (message.includes("device_execution_profile_unknown")) {
-    return "设备尚未上报执行环境检查结果。";
-  }
-  if (message.includes("device_accessibility_required")) {
-    return "至少有一台设备未开启 AutoJs6 无障碍服务。";
-  }
-  if (message.includes("device_foreground_service_required")) {
-    return "至少有一台设备的前台服务能力未满足。";
-  }
-  if (message.includes("device_battery_optimization_required")) {
-    return "至少有一台设备未忽略电量优化。";
-  }
-  return "操作失败，请检查中心服务日志。";
+function getRunSortTimestamp(run: WorkflowRunRecord) {
+  return new Date(run.updated_at || run.finished_at || run.started_at || run.created_at || 0).getTime();
 }
 
-function summarizeWorkflowBusyDevices(error: unknown): string {
-  const details = typeof error === "object" && error !== null ? (error as { details?: Record<string, unknown> }).details : undefined;
-  const busyDevices = Array.isArray(details?.busy_devices) ? (details.busy_devices as Array<Record<string, unknown>>) : [];
-  if (busyDevices.length === 0) {
-    return "";
-  }
-  return busyDevices
-    .map((item) => {
-      const deviceID = String(item.device_id || "");
-      const occupancyType = String(item.occupancy_type || "");
-      if (occupancyType === "manual_task") {
-        return `${deviceID} 被手工任务 ${String(item.task_id || "")} 占用`;
-      }
-      if (occupancyType === "workflow") {
-        return `${deviceID} 被工作流实例 ${String(item.workflow_instance_id || "")} 占用`;
-      }
-      if (occupancyType === "workflow_instance_history") {
-        return `${deviceID} 已执行过当前工作流实例`;
-      }
-      return `${deviceID} 已被占用`;
-    })
-    .join("；");
+function getInstanceSortTimestamp(instance: WorkflowInstanceRecord) {
+  return new Date(instance.updated_at || instance.finished_at || instance.started_at || instance.created_at || 0).getTime();
 }
 
 function buildRunEventSummary(event: WorkflowEventRecord) {
@@ -106,48 +61,28 @@ function buildRunEventSummary(event: WorkflowEventRecord) {
   return parts.join(" / ");
 }
 
-function getRunSortTimestamp(run: WorkflowRunRecord) {
-  return new Date(run.updated_at || run.finished_at || run.started_at || run.created_at || 0).getTime();
-}
-
-function getInstanceSortTimestamp(instance: WorkflowInstanceRecord) {
-  return new Date(instance.updated_at || instance.finished_at || instance.started_at || instance.created_at || 0).getTime();
-}
-
-function getDeviceRuntimeGuardIssues(device: DeviceRecord) {
-  const issues: string[] = [];
-  if (device.accessibility_status !== "enabled") {
-    issues.push("未开启无障碍");
+function buildDeleteWorkflowInstanceErrorMessage(error: unknown) {
+  if (error instanceof Error) {
+    if (error.message.includes("工作流实例暂不允许删除")) {
+      const details = (error as Error & { details?: Record<string, unknown> | null }).details;
+      const reason = details && typeof details.reason === "string" ? details.reason.trim() : "";
+      return reason || "当前工作流实例暂不允许删除。";
+    }
+    if (error.message.includes("workflow_instance_delete_not_allowed")) {
+      return "只有执行成功或执行失败的工作流实例允许删除，运行中、待执行或已停止实例请勿删除。";
+    }
+    return error.message;
   }
-  if (device.foreground_service_status !== "enabled") {
-    issues.push("前台服务能力未满足");
-  }
-  if (device.battery_optimization_ignored_status !== "enabled") {
-    issues.push("未忽略电量优化");
-  }
-  if (
-    device.accessibility_status === "unknown" &&
-    device.foreground_service_status === "unknown" &&
-    device.battery_optimization_ignored_status === "unknown"
-  ) {
-    issues.push("尚未上报执行环境");
-  }
-  return issues;
-}
-
-function isDeviceExecutionReady(device: DeviceRecord) {
-  return getDeviceRuntimeGuardIssues(device).length === 0;
+  return "删除工作流实例失败";
 }
 
 export const WorkflowInstancesPage = defineComponent({
   name: "WorkflowInstancesPage",
   setup() {
     const workflowsStore = useWorkflowsStore();
-    const { workflowInstances, selectedWorkflowEvents, loading, loadingRuns, loadingEvents, addingDevices, stoppingWorkflowID, stoppingRunDeviceID, errorMessage } =
+    const { workflowInstances, selectedWorkflowEvents, loading, loadingRuns, loadingEvents, deletingWorkflowInstanceID, errorMessage } =
       storeToRefs(workflowsStore);
 
-    const deviceMap = ref<Record<string, DeviceRecord>>({});
-    const appendDialogVisible = ref(false);
     const devicesDialogVisible = ref(false);
     const eventsDialogVisible = ref(false);
     const instancePage = ref(1);
@@ -155,12 +90,6 @@ export const WorkflowInstancesPage = defineComponent({
     const eventsFilterType = ref("");
     const selectedInstance = ref<WorkflowInstanceRecord | null>(null);
     const selectedDeviceRun = ref<WorkflowRunRecord | null>(null);
-    const appendForm = reactive({
-      workflow_def_id: "",
-      workflow_instance_id: "",
-      workflow_name: "",
-      device_ids: [] as string[]
-    });
 
     const sortedInstances = computed(() =>
       [...workflowInstances.value].sort((left, right) => {
@@ -197,53 +126,8 @@ export const WorkflowInstancesPage = defineComponent({
       return selectedWorkflowEvents.value.filter((item) => item.event_type === eventsFilterType.value.trim());
     });
 
-    const appendableDevices = computed(() => {
-      if (!selectedInstance.value) {
-        return [];
-      }
-      const currentDeviceIDs = new Set((selectedInstance.value.device_runs || []).map((item) => item.device_id));
-      const busyDeviceIDs = new Set<string>();
-      workflowInstances.value.forEach((instance) => {
-        if (instance.workflow_instance_id === selectedInstance.value?.workflow_instance_id) {
-          return;
-        }
-        if (instance.status !== "pending" && instance.status !== "running") {
-          return;
-        }
-        (instance.device_runs || []).forEach((run) => {
-          if (run.status === "pending" || run.status === "running") {
-            busyDeviceIDs.add(run.device_id);
-          }
-        });
-      });
-      return Object.values(deviceMap.value).filter(
-        (item) => item.status === "online" && !currentDeviceIDs.has(item.device_id) && !busyDeviceIDs.has(item.device_id)
-      );
-    });
-
-    async function loadAllDevices() {
-      const allItems: DeviceRecord[] = [];
-      let nextPage = 1;
-      let totalCount = 0;
-      do {
-        const result = await fetchDevices({
-          page: nextPage,
-          page_size: DEVICE_SELECTOR_PAGE_SIZE
-        });
-        totalCount = result.total;
-        allItems.push(...result.items);
-        nextPage += 1;
-      } while (allItems.length < totalCount);
-
-      const nextMap: Record<string, DeviceRecord> = {};
-      allItems.forEach((item) => {
-        nextMap[item.device_id] = item;
-      });
-      deviceMap.value = nextMap;
-    }
-
     async function loadPage() {
-      await Promise.all([workflowsStore.loadAllWorkflowInstances(), loadAllDevices()]);
+      await workflowsStore.loadAllWorkflowInstances();
       if (selectedInstance.value) {
         selectedInstance.value =
           workflowInstances.value.find((item) => item.workflow_instance_id === selectedInstance.value?.workflow_instance_id) || null;
@@ -261,15 +145,6 @@ export const WorkflowInstancesPage = defineComponent({
     function openDevicesDialog(instance: WorkflowInstanceRecord) {
       selectedInstance.value = instance;
       devicesDialogVisible.value = true;
-    }
-
-    function openAppendDialog(instance: WorkflowInstanceRecord) {
-      selectedInstance.value = instance;
-      appendForm.workflow_def_id = instance.workflow_def_id;
-      appendForm.workflow_instance_id = instance.workflow_instance_id;
-      appendForm.workflow_name = instance.workflow_name;
-      appendForm.device_ids = [];
-      appendDialogVisible.value = true;
     }
 
     async function openEventsDialog(instance: WorkflowInstanceRecord, run: WorkflowRunRecord) {
@@ -296,111 +171,25 @@ export const WorkflowInstancesPage = defineComponent({
       }
     }
 
-    async function handleAppendDevices() {
-      if (appendForm.device_ids.length === 0) {
-        ElMessage.warning("请至少选择一台设备");
-        return;
-      }
+    async function handleDeleteInstance(instance: WorkflowInstanceRecord) {
       try {
-        await workflowsStore.appendWorkflowDevices(appendForm.workflow_def_id, appendForm.workflow_instance_id, appendForm.device_ids);
-        await loadPage();
-        appendDialogVisible.value = false;
-        selectedInstance.value =
-          workflowInstances.value.find((item) => item.workflow_instance_id === appendForm.workflow_instance_id) || selectedInstance.value;
-        ElMessage.success("设备追加成功");
-      } catch (error) {
-        const busySummary = summarizeWorkflowBusyDevices(error);
-        if (busySummary !== "") {
-          ElMessage.error(`追加设备失败：${busySummary}`);
-          return;
-        }
-        ElMessage.error(buildWorkflowErrorMessage(error));
-      }
-    }
-
-    async function handleStopInstance(instance: WorkflowInstanceRecord) {
-      try {
-        await ElMessageBox.confirm(`确认停止工作流实例 ${instance.workflow_instance_id} 的全部设备吗？`, "停止工作流实例确认", {
-          confirmButtonText: "确认停止",
+        await ElMessageBox.confirm(`确认删除工作流实例 ${instance.workflow_instance_id} 吗？删除后实例记录、设备运行记录和事件都会被移除。`, "删除工作流实例确认", {
+          confirmButtonText: "确认删除",
           cancelButtonText: "取消",
           type: "warning"
         });
-        await workflowsStore.terminateWorkflow(instance.workflow_def_id, instance.workflow_instance_id);
-        await loadPage();
-        ElMessage.success("工作流实例已停止");
+        await workflowsStore.removeWorkflowInstance(instance.workflow_def_id, instance.workflow_instance_id);
+        if (selectedInstance.value?.workflow_instance_id === instance.workflow_instance_id) {
+          devicesDialogVisible.value = false;
+          selectedInstance.value = null;
+        }
+        ElMessage.success("工作流实例已删除");
       } catch (error) {
         if (error === "cancel" || error === "close") {
           return;
         }
-        ElMessage.error(buildWorkflowErrorMessage(error));
+        ElMessage.error(buildDeleteWorkflowInstanceErrorMessage(error));
       }
-    }
-
-    async function handleStopDevice(instance: WorkflowInstanceRecord, run: WorkflowRunRecord) {
-      try {
-        await ElMessageBox.confirm(`确认停止设备 ${run.device_id} 在实例 ${instance.workflow_instance_id} 中的执行吗？`, "停止设备确认", {
-          confirmButtonText: "确认停止",
-          cancelButtonText: "取消",
-          type: "warning"
-        });
-        await workflowsStore.terminateWorkflowDevice(instance.workflow_def_id, instance.workflow_instance_id, run.device_id);
-        await loadPage();
-        if (selectedDeviceRun.value?.workflow_run_id === run.workflow_run_id) {
-          await workflowsStore.loadWorkflowEvents(instance.workflow_def_id, run.workflow_run_id);
-        }
-        ElMessage.success(`设备 ${run.device_id} 已停止当前工作流执行`);
-      } catch (error) {
-        if (error === "cancel" || error === "close") {
-          return;
-        }
-        ElMessage.error(buildWorkflowErrorMessage(error));
-      }
-    }
-
-    function toggleDeviceSelection(deviceID: string) {
-      if (appendForm.device_ids.includes(deviceID)) {
-        appendForm.device_ids = appendForm.device_ids.filter((item) => item !== deviceID);
-      } else {
-        appendForm.device_ids = [...appendForm.device_ids, deviceID];
-      }
-    }
-
-    function renderAppendDevices() {
-      if (appendableDevices.value.length === 0) {
-        return h(ElEmpty, { description: "当前没有可追加的在线设备。" });
-      }
-
-      return h(
-        "div",
-        { class: "device-selector-grid" },
-        appendableDevices.value.map((item) => {
-          const checked = appendForm.device_ids.includes(item.device_id);
-          const ready = isDeviceExecutionReady(item);
-          const issues = getDeviceRuntimeGuardIssues(item);
-          return h(
-            "button",
-            {
-              key: item.device_id,
-              type: "button",
-              disabled: !ready,
-              class: ["device-checkbox-card", checked ? "device-checkbox-card--checked" : "", !ready ? "device-checkbox-card--disabled" : ""],
-              onClick: () => {
-                if (ready) {
-                  toggleDeviceSelection(item.device_id);
-                }
-              }
-            },
-            [
-              h("div", { class: "device-checkbox-card__content" }, [
-                h("div", { class: "device-checkbox-card__title" }, `${item.device_id} / ${item.device_name || item.model || "未知设备"}`),
-                h("div", { class: "device-checkbox-card__meta" }, `${item.brand || "未知品牌"} / ${item.model || "未知型号"}`),
-                h("div", { class: "device-checkbox-card__meta" }, `agent_uuid：${item.agent_uuid || "暂无"}`),
-                issues.length > 0 ? h("div", { class: "device-checkbox-card__warning" }, issues.join(" / ")) : null
-              ])
-            ]
-          );
-        })
-      );
     }
 
     return () =>
@@ -426,7 +215,7 @@ export const WorkflowInstancesPage = defineComponent({
               h("div", { class: "card-header" }, [
                 h("div", null, [
                   h("div", { class: "card-header__title" }, "实例列表"),
-                  h("div", { class: "card-header__subtitle" }, "按实例维度查看和管理设备运行情况、事件记录、追加设备与停止动作。")
+                  h("div", { class: "card-header__subtitle" }, "按实例维度查看当前设备运行情况。")
                 ])
               ]),
             default: () =>
@@ -454,7 +243,7 @@ export const WorkflowInstancesPage = defineComponent({
                             h(ElTableColumn, { label: "结束时间", minWidth: 180, formatter: (row) => formatDateTime(row.finished_at) }),
                             h(
                               ElTableColumn,
-                              { label: "操作", minWidth: 320, fixed: "right" },
+                              { label: "操作", minWidth: 220, fixed: "right" },
                               {
                                 default: ({ row }) =>
                                   h("div", { class: "table-actions" }, [
@@ -463,30 +252,14 @@ export const WorkflowInstancesPage = defineComponent({
                                       ElButton,
                                       {
                                         link: true,
-                                        type: "primary",
-                                        disabled: (row.device_runs || []).length === 0,
-                                        onClick: () => {
-                                          const firstRun = [...(row.device_runs || [])].sort((left, right) => getRunSortTimestamp(right) - getRunSortTimestamp(left))[0];
-                                          if (firstRun) {
-                                            void openEventsDialog(row, firstRun);
-                                          }
-                                        }
-                                      },
-                                      () => "查看设备事件"
-                                    ),
-                                    h(ElButton, { link: true, type: "primary", disabled: row.status !== "pending" && row.status !== "running", onClick: () => openAppendDialog(row) }, () => "追加设备"),
-                                    h(
-                                      ElButton,
-                                      {
-                                        link: true,
                                         type: "danger",
-                                        disabled: row.status !== "pending" && row.status !== "running",
-                                        loading: stoppingWorkflowID.value === row.workflow_instance_id,
+                                        disabled: row.status !== "success" && row.status !== "failed",
+                                        loading: deletingWorkflowInstanceID.value === row.workflow_instance_id,
                                         onClick: () => {
-                                          void handleStopInstance(row);
+                                          void handleDeleteInstance(row);
                                         }
                                       },
-                                      () => "停止所有设备"
+                                      () => "删除"
                                     )
                                   ])
                               }
@@ -539,26 +312,11 @@ export const WorkflowInstancesPage = defineComponent({
                           h(ElTableColumn, { label: "最近更新时间", minWidth: 180, formatter: (row) => formatDateTime(row.updated_at) }),
                           h(
                             ElTableColumn,
-                            { label: "操作", fixed: "right", width: 220 },
+                            { label: "操作", fixed: "right", width: 120 },
                             {
                               default: ({ row }) =>
                                 selectedInstance.value
-                                  ? h("div", { class: "table-actions" }, [
-                                      h(ElButton, { link: true, type: "primary", onClick: () => void openEventsDialog(selectedInstance.value as WorkflowInstanceRecord, row) }, () => "查看事件"),
-                                      h(
-                                        ElButton,
-                                        {
-                                          link: true,
-                                          type: "danger",
-                                          disabled: row.status !== "pending" && row.status !== "running",
-                                          loading: stoppingRunDeviceID.value === row.device_id,
-                                          onClick: () => {
-                                            void handleStopDevice(selectedInstance.value as WorkflowInstanceRecord, row);
-                                          }
-                                        },
-                                        () => "停止设备"
-                                      )
-                                    ])
+                                  ? h(ElButton, { link: true, type: "primary", onClick: () => void openEventsDialog(selectedInstance.value as WorkflowInstanceRecord, row) }, () => "查看事件")
                                   : null
                             }
                           )
@@ -566,21 +324,6 @@ export const WorkflowInstancesPage = defineComponent({
                       }
                     )
               )
-          }
-        ),
-        h(
-          ElDialog,
-          { modelValue: appendDialogVisible.value, "onUpdate:modelValue": (value: boolean) => (appendDialogVisible.value = value), title: selectedInstance.value ? `追加设备：${selectedInstance.value.workflow_instance_id}` : "追加设备", width: "920px", closeOnClickModal: false },
-          {
-            default: () => [
-              h(ElAlert, { class: "dialog-alert", type: "info", title: "这里只允许选择当前在线、未被占用且未执行过当前实例的设备。", showIcon: true, closable: false }),
-              renderAppendDevices()
-            ],
-            footer: () =>
-              h("div", { class: "dialog-footer" }, [
-                h(ElButton, { onClick: () => (appendDialogVisible.value = false) }, () => "取消"),
-                h(ElButton, { type: "primary", loading: addingDevices.value, onClick: () => void handleAppendDevices() }, () => "确认追加")
-              ])
           }
         ),
         h(

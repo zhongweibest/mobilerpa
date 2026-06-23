@@ -19,3 +19,9 @@ export function deleteDevice(deviceID: string): Promise<{ device_id: string; del
 export function fetchDeviceOccupancy(deviceID: string): Promise<DeviceOccupancyDetail> {
   return requestJSON<DeviceOccupancyDetail>(`/api/v1/devices/${encodeURIComponent(deviceID)}/occupancy`);
 }
+
+export function terminateManualTaskOnDevice(deviceID: string, taskID: string) {
+  return requestJSON(`/api/v1/devices/${encodeURIComponent(deviceID)}/manual-tasks/${encodeURIComponent(taskID)}`, {
+    method: "POST"
+  });
+}

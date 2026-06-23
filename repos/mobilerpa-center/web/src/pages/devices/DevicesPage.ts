@@ -17,8 +17,7 @@ import {
 import { storeToRefs } from "pinia";
 import { defineComponent, h, onMounted, ref } from "vue";
 
-import { fetchDeviceOccupancy } from "../../api/devices";
-import { terminateTask } from "../../api/tasks";
+import { fetchDeviceOccupancy, terminateManualTaskOnDevice } from "../../api/devices";
 import { useDevicesStore } from "../../stores/devices";
 import type { DeviceOccupancyDetail } from "../../types/device";
 import { formatDateTime, getDeviceDisplayName, normalizeBindStatus, normalizeDeviceStatus } from "../../utils/device";
@@ -127,7 +126,7 @@ export const DevicesPage = defineComponent({
 
       try {
         terminatingTaskID.value = taskID;
-        await terminateTask(taskID);
+        await terminateManualTaskOnDevice(selectedOccupancy.value.device_id, taskID);
         if (selectedOccupancy.value) {
           selectedOccupancy.value = await fetchDeviceOccupancy(selectedOccupancy.value.device_id);
         }

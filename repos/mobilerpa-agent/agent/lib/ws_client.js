@@ -2,23 +2,12 @@
 
 var runtime = require("./runtime");
 var taskRunner = require("./task_runner");
+var workflowSessionRunner = require("./workflow_session_runner");
 
-/**
- * 移除中心地址末尾的斜杠。
- *
- * @param {string} baseURL 中心服务基础地址。
- * @returns {string} 规范化后的地址。
- */
 function trimBaseURL(baseURL) {
     return String(baseURL || "").replace(/\/+$/, "");
 }
 
-/**
- * 把 HTTP 基础地址转换为 WebSocket 地址。
- *
- * @param {string} centerBaseURL 中心服务地址。
- * @returns {string} WebSocket 地址。
- */
 function buildWebSocketURL(centerBaseURL) {
     var base = trimBaseURL(centerBaseURL);
     if (base.indexOf("https://") === 0) {
@@ -33,25 +22,10 @@ function buildWebSocketURL(centerBaseURL) {
     return "ws://" + base + "/ws";
 }
 
-/**
- * 创建请求 ID。
- *
- * @param {string} prefix 前缀。
- * @returns {string} 请求 ID。
- */
 function createRequestID(prefix) {
-    return prefix + "-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
+    return String(prefix || "request") + "-" + Date.now() + "-" + Math.floor(Math.random() * 100000);
 }
 
-/**
- * 创建协议消息。
- *
- * @param {string} type 消息类型。
- * @param {string} requestID 请求 ID。
- * @param {string} deviceID 设备 ID。
- * @param {Object} payload 负载。
- * @returns {Object} 协议消息。
- */
 function createEnvelope(type, requestID, deviceID, payload) {
     return {
         type: type,
@@ -62,13 +36,6 @@ function createEnvelope(type, requestID, deviceID, payload) {
     };
 }
 
-/**
- * 判断确认消息是否表示成功。
- *
- * @param {Object} message 响应消息。
- * @param {string} messageType 期望消息类型。
- * @returns {boolean} 是否成功确认。
- */
 function isOkAck(message, messageType) {
     return !!(message &&
         message.type === "ack" &&
@@ -77,30 +44,22 @@ function isOkAck(message, messageType) {
         message.payload.status === "ok");
 }
 
-/**
- * 加载 Java 类型。
- *
- * @param {string} name Java 类型名。
- * @returns {Object} Java 类型对象。
- */
 function javaType(name) {
     if (typeof Java !== "undefined" && typeof Java.type === "function") {
         return Java.type(name);
     }
-    var parts = name.split(".");
+
+    var parts = String(name || "").split(".");
     var current = Packages;
-    for (var i = 0; i < parts.length; i += 1) {
-        current = current[parts[i]];
+    var index = 0;
+
+    for (index = 0; index < parts.length; index += 1) {
+        current = current[parts[index]];
     }
+
     return current;
 }
 
-/**
- * 创建 Java WebSocket 监听器。
- *
- * @param {Object} callbacks 回调对象。
- * @returns {Object} Java 监听器。
- */
 function createWebSocketListener(callbacks) {
     var WebSocketListener = javaType("okhttp3.WebSocketListener");
     if (typeof JavaAdapter === "function") {
@@ -109,12 +68,6 @@ function createWebSocketListener(callbacks) {
     return new WebSocketListener(callbacks);
 }
 
-/**
- * 创建 Java Runnable。
- *
- * @param {Function} runCallback 执行函数。
- * @returns {Object} Java Runnable。
- */
 function createRunnable(runCallback) {
     var Runnable = javaType("java.lang.Runnable");
     if (typeof JavaAdapter === "function") {
@@ -127,12 +80,6 @@ function createRunnable(runCallback) {
     });
 }
 
-/**
- * 生成任务摘要。
- *
- * @param {Object} taskPayload 下发任务负载。
- * @returns {Object} 任务摘要。
- */
 function buildTaskSummary(taskPayload) {
     var payload = taskPayload || {};
     return {
@@ -147,12 +94,6 @@ function buildTaskSummary(taskPayload) {
     };
 }
 
-/**
- * 使用 AutoJs6 的 OkHttp 建立 WebSocket 连接。
- *
- * @param {Object} options 连接选项。
- * @returns {Object} 连接句柄。
- */
 function connectAutoJs(options) {
     var logger = options.logger || runtime.createLogger();
     var OkHttpClient = javaType("okhttp3.OkHttpClient");
@@ -164,13 +105,13 @@ function connectAutoJs(options) {
     var reconnectExecutor = null;
     var reconnectFuture = null;
     var wsURL = buildWebSocketURL(options.centerBaseURL);
-    var heartbeatIntervalMS = options.heartbeatIntervalMS || 30000;
+    var heartbeatIntervalMS = Number(options.heartbeatIntervalMS || 30000);
     var reconnectEnabled = options.reconnectEnabled !== false;
     var reconnectInitialDelayMS = Number(options.reconnectInitialDelayMS || 3000);
     var reconnectMaxDelayMS = Number(options.reconnectMaxDelayMS || 60000);
     var reconnectBackoffMultiplier = Number(options.reconnectBackoffMultiplier || 2);
-    var deviceID = options.deviceID || "";
-    var agentUUID = options.agentUUID || "";
+    var deviceID = String(options.deviceID || "");
+    var agentUUID = String(options.agentUUID || "");
     var onAssignTask = typeof options.onAssignTask === "function" ? options.onAssignTask : null;
     var heartbeatStarted = false;
     var reconnectAttempt = 0;
@@ -178,6 +119,9 @@ function connectAutoJs(options) {
     var closedGeneration = 0;
     var intentionallyClosed = false;
     var taskExecuting = false;
+    var workflowSessionExecuting = false;
+    var workflowStopFlags = {};
+    var currentWorkflowRunID = "";
     var client = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
         .build();
@@ -190,11 +134,9 @@ function connectAutoJs(options) {
         var message = createEnvelope(type, requestID, deviceID, payload);
         var text = JSON.stringify(message);
         logger.info("发送 WebSocket 消息：" + type + "，request_id=" + requestID);
-        var sent = socket.send(text);
-        if (sent === false) {
+        if (socket.send(text) === false) {
             throw new Error("websocket_send_failed");
         }
-        return sent;
     }
 
     function sendHeartbeat() {
@@ -298,6 +240,66 @@ function connectAutoJs(options) {
         logger.info("已发送 script_sync_result：" + String(payload.script_name || "") + "@" + String(payload.script_version || "") + " -> " + String(summary.status || "failed"));
     }
 
+    function sendWorkflowSessionAck(sessionPayload) {
+        var payload = sessionPayload || {};
+        send("workflow_session_ack", createRequestID("agent-workflow-session-ack"), {
+            workflow_run_id: String(payload.workflow_run_id || ""),
+            status: "ok",
+            message: "Agent 已收到工作流会话"
+        });
+        logger.info("已发送 workflow_session_ack：" + String(payload.workflow_run_id || ""));
+    }
+
+    function sendWorkflowSessionEvent(eventPayload) {
+        var payload = eventPayload || {};
+        send("workflow_session_event", createRequestID("agent-workflow-session-event"), {
+            workflow_run_id: String(payload.workflow_run_id || ""),
+            workflow_node_id: String(payload.workflow_node_id || ""),
+            event_type: String(payload.event_type || ""),
+            status: String(payload.status || "running"),
+            step_name: String(payload.step_name || ""),
+            message: String(payload.message || ""),
+            extra: payload.extra || {}
+        });
+    }
+
+    function sendWorkflowSessionResult(resultPayload) {
+        var payload = resultPayload || {};
+        send("workflow_session_result", createRequestID("agent-workflow-session-result"), {
+            workflow_run_id: String(payload.workflow_run_id || ""),
+            workflow_node_id: String(payload.workflow_node_id || ""),
+            status: String(payload.status || "failed"),
+            result_code: String(payload.result_code || ""),
+            result_message: String(payload.result_message || ""),
+            extra: payload.extra || {}
+        });
+        logger.info("已发送 workflow_session_result：" + String(payload.workflow_run_id || "") + " -> " + String(payload.status || "failed"));
+    }
+
+    function markWorkflowStopRequested(workflowRunID) {
+        workflowRunID = String(workflowRunID || "").trim();
+        if (!workflowRunID) {
+            return;
+        }
+        workflowStopFlags[workflowRunID] = true;
+    }
+
+    function clearWorkflowStopRequested(workflowRunID) {
+        workflowRunID = String(workflowRunID || "").trim();
+        if (!workflowRunID) {
+            return;
+        }
+        delete workflowStopFlags[workflowRunID];
+    }
+
+    function isWorkflowStopRequested(workflowRunID) {
+        workflowRunID = String(workflowRunID || "").trim();
+        if (!workflowRunID) {
+            return false;
+        }
+        return workflowStopFlags[workflowRunID] === true;
+    }
+
     function stopHeartbeat() {
         if (heartbeatFuture) {
             heartbeatFuture.cancel(false);
@@ -367,6 +369,39 @@ function connectAutoJs(options) {
         }
     }
 
+    function scheduleReconnect(reason) {
+        if (!reconnectEnabled) {
+            logger.warn("WebSocket 自动重连已禁用，原因：" + String(reason || ""));
+            return;
+        }
+        if (intentionallyClosed) {
+            logger.info("WebSocket 为主动关闭，不进入自动重连。");
+            return;
+        }
+        if (reconnectFuture) {
+            return;
+        }
+
+        reconnectAttempt += 1;
+        var delayMS = getReconnectDelayMS(reconnectAttempt);
+        logger.warn("WebSocket 连接中断，准备第 " + reconnectAttempt + " 次重连，delay=" + delayMS + "ms，原因：" + String(reason || ""));
+
+        reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
+        reconnectFuture = reconnectExecutor.schedule(createRunnable(function () {
+            reconnectFuture = null;
+            if (reconnectExecutor) {
+                reconnectExecutor.shutdownNow();
+                reconnectExecutor = null;
+            }
+            if (intentionallyClosed) {
+                logger.info("WebSocket 在重连等待期间被主动关闭，取消重连。");
+                return;
+            }
+            logger.info("WebSocket 开始执行第 " + reconnectAttempt + " 次重连：" + wsURL);
+            openSocket();
+        }), delayMS, TimeUnit.MILLISECONDS);
+    }
+
     function handleSocketClosed(expectedGeneration, reason) {
         if (expectedGeneration !== connectGeneration) {
             return;
@@ -400,7 +435,7 @@ function connectAutoJs(options) {
 
     function executeTask(taskSummary) {
         if (taskExecuting) {
-            logger.warn("当前已有任务在执行，忽略新的 assign_task：" + taskSummary.task_id);
+            logger.warn("当前已有任务在执行，忽略新的 assign_task：" + String(taskSummary.task_id || ""));
             return;
         }
 
@@ -454,7 +489,6 @@ function connectAutoJs(options) {
                 force: payload.force === true,
                 logger: logger
             });
-
             sendScriptSyncResult(payload, {
                 status: "success",
                 result_code: "OK",
@@ -472,6 +506,57 @@ function connectAutoJs(options) {
         }
     }
 
+    function executeWorkflowSession(sessionPayload) {
+        var payload = sessionPayload || {};
+        var result = null;
+        var workflowRunID = String(payload.workflow_run_id || "");
+
+        if (workflowSessionExecuting) {
+            logger.warn("当前已有工作流会话在执行，忽略新的 start_workflow_session: " + String(payload.workflow_run_id || ""));
+            return;
+        }
+
+        workflowSessionExecuting = true;
+        currentWorkflowRunID = workflowRunID;
+        clearWorkflowStopRequested(workflowRunID);
+        try {
+            result = workflowSessionRunner.runSession(payload, {
+                deviceID: deviceID,
+                agentUUID: agentUUID,
+                centerBaseURL: options.centerBaseURL,
+                logger: logger,
+                isCancelled: function () {
+                    return isWorkflowStopRequested(workflowRunID);
+                },
+                sendEvent: function (eventPayload) {
+                    sendWorkflowSessionEvent(eventPayload);
+                }
+            });
+            sendWorkflowSessionResult({
+                workflow_run_id: String(payload.workflow_run_id || ""),
+                workflow_node_id: String((result && result.workflow_node_id) || ""),
+                status: String((result && result.status) || "failed"),
+                result_code: String((result && result.result_code) || ""),
+                result_message: String((result && result.result_message) || ""),
+                extra: {}
+            });
+        } catch (error) {
+            logger.error("本地工作流会话执行失败：" + String(error));
+            sendWorkflowSessionResult({
+                workflow_run_id: String(payload.workflow_run_id || ""),
+                workflow_node_id: "",
+                status: "failed",
+                result_code: "WORKFLOW_SESSION_EXCEPTION",
+                result_message: String(error),
+                extra: {}
+            });
+        } finally {
+            clearWorkflowStopRequested(workflowRunID);
+            currentWorkflowRunID = "";
+            workflowSessionExecuting = false;
+        }
+    }
+
     function scheduleTaskExecution(taskSummary) {
         runtime.runAsync(function () {
             executeTask(taskSummary);
@@ -481,6 +566,12 @@ function connectAutoJs(options) {
     function scheduleScriptSync(syncPayload) {
         runtime.runAsync(function () {
             executeScriptSync(syncPayload);
+        });
+    }
+
+    function scheduleWorkflowSession(sessionPayload) {
+        runtime.runAsync(function () {
+            executeWorkflowSession(sessionPayload);
         });
     }
 
@@ -506,37 +597,38 @@ function connectAutoJs(options) {
         scheduleScriptSync(payload);
     }
 
-    function scheduleReconnect(reason) {
-        if (!reconnectEnabled) {
-            logger.warn("WebSocket 自动重连已禁用，原因：" + reason);
-            return;
-        }
-        if (intentionallyClosed) {
-            logger.info("WebSocket 为主动关闭，不进入自动重连。");
-            return;
-        }
-        if (reconnectFuture) {
-            return;
-        }
+    function handleStartWorkflowSession(message) {
+        var payload = message && message.payload ? message.payload : {};
+        logger.info("收到 start_workflow_session：" + JSON.stringify({
+            workflow_run_id: payload.workflow_run_id || "",
+            workflow_def_id: payload.workflow_def_id || "",
+            entry_node_id: payload.entry_node_id || ""
+        }));
+        sendWorkflowSessionAck(payload);
+        scheduleWorkflowSession(payload);
+    }
 
-        reconnectAttempt += 1;
-        var delayMS = getReconnectDelayMS(reconnectAttempt);
-        logger.warn("WebSocket 连接中断，准备第 " + reconnectAttempt + " 次重连，delay=" + delayMS + "ms，原因：" + reason);
-
-        reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
-        reconnectFuture = reconnectExecutor.schedule(createRunnable(function () {
-            reconnectFuture = null;
-            if (reconnectExecutor) {
-                reconnectExecutor.shutdownNow();
-                reconnectExecutor = null;
-            }
-            if (intentionallyClosed) {
-                logger.info("WebSocket 已在重连等待期间被主动关闭，取消重连。");
-                return;
-            }
-            logger.info("WebSocket 开始执行第 " + reconnectAttempt + " 次重连：" + wsURL);
-            openSocket();
-        }), delayMS, TimeUnit.MILLISECONDS);
+    function handleStopWorkflowSession(message) {
+        var payload = message && message.payload ? message.payload : {};
+        var workflowRunID = String(payload.workflow_run_id || "");
+        logger.info("收到 stop_workflow_session：" + JSON.stringify({
+            workflow_run_id: workflowRunID,
+            reason: String(payload.reason || "")
+        }));
+        markWorkflowStopRequested(workflowRunID);
+        if (!workflowSessionExecuting || currentWorkflowRunID !== workflowRunID) {
+            sendWorkflowSessionResult({
+                workflow_run_id: workflowRunID,
+                workflow_node_id: "",
+                status: "stopped",
+                result_code: "WORKFLOW_SESSION_STOPPED",
+                result_message: "工作流会话已停止",
+                extra: {
+                    reason: String(payload.reason || "")
+                }
+            });
+            clearWorkflowStopRequested(workflowRunID);
+        }
     }
 
     function createListener(expectedGeneration) {
@@ -585,8 +677,18 @@ function connectAutoJs(options) {
                         logger.info("WebSocket script_sync_result 已确认。");
                     } else if (isOkAck(message, "task_result")) {
                         logger.info("WebSocket task_result 已确认。");
+                    } else if (isOkAck(message, "workflow_session_ack")) {
+                        logger.info("WebSocket workflow_session_ack 已确认。");
+                    } else if (isOkAck(message, "workflow_session_event")) {
+                        logger.info("WebSocket workflow_session_event 已确认。");
+                    } else if (isOkAck(message, "workflow_session_result")) {
+                        logger.info("WebSocket workflow_session_result 已确认。");
                     } else if (message && message.type === "assign_task") {
                         handleAssignTask(message);
+                    } else if (message && message.type === "start_workflow_session") {
+                        handleStartWorkflowSession(message);
+                    } else if (message && message.type === "stop_workflow_session") {
+                        handleStopWorkflowSession(message);
                     } else if (message && message.type === "sync_script") {
                         handleSyncScript(message);
                     }
@@ -643,15 +745,10 @@ function connectAutoJs(options) {
     };
 }
 
-/**
- * 启动 WebSocket 客户端。
- *
- * @param {Object} options 连接选项。
- * @returns {Object} 连接结果。
- */
 function connect(options) {
     var logger = options && options.logger ? options.logger : runtime.createLogger();
     var config = options || {};
+
     if (!config.deviceID) {
         throw new Error("WebSocket 连接缺少 device_id。");
     }

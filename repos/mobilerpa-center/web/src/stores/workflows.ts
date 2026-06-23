@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { ref } from "vue";
 
 import {
-  addWorkflowDevices,
   createWorkflow,
   deleteWorkflow,
   deleteWorkflowInstance,
@@ -13,8 +12,7 @@ import {
   fetchWorkflowRuns,
   fetchWorkflows,
   startWorkflow,
-  stopWorkflow,
-  stopWorkflowDevice
+  stopWorkflow
 } from "../api/workflows";
 import type { CreateWorkflowRequest, WorkflowDefinitionRecord, WorkflowEventRecord, WorkflowInstanceRecord, WorkflowRunRecord, WorkflowRunSummary } from "../types/workflow";
 
@@ -36,9 +34,7 @@ export const useWorkflowsStore = defineStore("workflows", () => {
   const loadingRuns = ref(false);
   const loadingEvents = ref(false);
   const stoppingWorkflowID = ref("");
-  const stoppingRunDeviceID = ref("");
   const deletingWorkflowInstanceID = ref("");
-  const addingDevices = ref(false);
   const errorMessage = ref("");
 
   async function loadWorkflows() {
@@ -172,26 +168,6 @@ export const useWorkflowsStore = defineStore("workflows", () => {
     }
   }
 
-  async function appendWorkflowDevices(workflowDefID: string, workflowInstanceID: string, deviceIDs: string[]) {
-    addingDevices.value = true;
-    errorMessage.value = "";
-    try {
-      const instance = await addWorkflowDevices(workflowDefID, workflowInstanceID, deviceIDs);
-      selectedWorkflowInstances.value = [instance];
-      selectedWorkflowRuns.value = instance.device_runs || [];
-      workflowInstances.value = workflowInstances.value.map((item) =>
-        item.workflow_instance_id === instance.workflow_instance_id ? instance : item
-      );
-      await loadWorkflows();
-      return instance;
-    } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : "add_workflow_devices_failed";
-      throw error;
-    } finally {
-      addingDevices.value = false;
-    }
-  }
-
   async function terminateWorkflow(workflowDefID: string, workflowInstanceID: string) {
     stoppingWorkflowID.value = workflowInstanceID;
     errorMessage.value = "";
@@ -209,34 +185,6 @@ export const useWorkflowsStore = defineStore("workflows", () => {
       throw error;
     } finally {
       stoppingWorkflowID.value = "";
-    }
-  }
-
-  async function terminateWorkflowDevice(workflowDefID: string, workflowInstanceID: string, deviceID: string) {
-    stoppingRunDeviceID.value = deviceID;
-    errorMessage.value = "";
-    try {
-      const run = await stopWorkflowDevice(workflowDefID, workflowInstanceID, deviceID);
-      selectedWorkflowRuns.value = selectedWorkflowRuns.value.map((item) =>
-        item.workflow_run_id === run.workflow_run_id ? run : item
-      );
-      workflowInstances.value = workflowInstances.value.map((item) => {
-        if (item.workflow_instance_id !== workflowInstanceID) {
-          return item;
-        }
-        return {
-          ...item,
-          device_runs: (item.device_runs || []).map((deviceRun) =>
-            deviceRun.workflow_run_id === run.workflow_run_id ? run : deviceRun
-          )
-        };
-      });
-      return run;
-    } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : "stop_workflow_device_failed";
-      throw error;
-    } finally {
-      stoppingRunDeviceID.value = "";
     }
   }
 
@@ -324,9 +272,7 @@ export const useWorkflowsStore = defineStore("workflows", () => {
     loadingRuns,
     loadingEvents,
     stoppingWorkflowID,
-    stoppingRunDeviceID,
     deletingWorkflowInstanceID,
-    addingDevices,
     errorMessage,
     loadWorkflows,
     changePage,
@@ -338,9 +284,7 @@ export const useWorkflowsStore = defineStore("workflows", () => {
     loadWorkflowRuns,
     loadWorkflowEvents,
     triggerStartWorkflow,
-    appendWorkflowDevices,
     terminateWorkflow,
-    terminateWorkflowDevice,
     removeWorkflowInstance,
     summarizeRuns,
     removeWorkflow

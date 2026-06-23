@@ -193,6 +193,66 @@ func (s *Service) SyncScript(_ context.Context, deviceID string, scriptName stri
 	return nil
 }
 
+// StartWorkflowSession 向指定设备下发一次工作流会话。
+func (s *Service) StartWorkflowSession(_ context.Context, payload protocol.StartWorkflowSessionPayload) error {
+	deviceID := strings.TrimSpace(payload.DeviceID)
+	if deviceID == "" {
+		return ErrDeviceNotConnected
+	}
+
+	conn, ok := s.getConn(deviceID)
+	if !ok {
+		return ErrDeviceNotConnected
+	}
+
+	requestID := fmt.Sprintf("start-workflow-session-%s-%d", payload.WorkflowRunID, time.Now().UnixNano())
+	message := protocol.Envelope{
+		Type:      protocol.MessageTypeStartWorkflowSession,
+		RequestID: requestID,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().Unix(),
+		Payload:   payload,
+	}
+
+	log.Printf("dispatch start_workflow_session start: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	if err := conn.WriteJSON(message); err != nil {
+		s.UnregisterDeviceConn(deviceID, conn.RawConn())
+		return fmt.Errorf("write start_workflow_session: %w", err)
+	}
+	log.Printf("dispatch start_workflow_session done: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	return nil
+}
+
+// StopWorkflowSession 向指定设备发送 stop_workflow_session 消息。
+func (s *Service) StopWorkflowSession(_ context.Context, payload protocol.StopWorkflowSessionPayload) error {
+	deviceID := strings.TrimSpace(payload.DeviceID)
+	if deviceID == "" {
+		return ErrDeviceNotConnected
+	}
+
+	conn, ok := s.getConn(deviceID)
+	if !ok {
+		return ErrDeviceNotConnected
+	}
+
+	requestID := fmt.Sprintf("stop-workflow-session-%s-%d", payload.WorkflowRunID, time.Now().UnixNano())
+	message := protocol.Envelope{
+		Type:      protocol.MessageTypeStopWorkflowSession,
+		RequestID: requestID,
+		DeviceID:  deviceID,
+		Timestamp: time.Now().Unix(),
+		Payload:   payload,
+	}
+
+	log.Printf("dispatch stop_workflow_session start: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	if err := conn.WriteJSON(message); err != nil {
+		s.UnregisterDeviceConn(deviceID, conn.RawConn())
+		return fmt.Errorf("write stop_workflow_session: %w", err)
+	}
+	log.Printf("dispatch stop_workflow_session done: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	return nil
+}
+
 // HandleTaskAck 处理设备回传的 task_ack 消息。
 func (s *Service) HandleTaskAck(ctx context.Context, envelope protocol.Envelope) (task.Task, error) {
 	payloadBytes, err := json.Marshal(envelope.Payload)

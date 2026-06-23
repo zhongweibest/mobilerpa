@@ -224,6 +224,20 @@ function loadScriptModule(context, logger) {
     };
 }
 
+function ensureScriptVersion(scriptName, scriptVersion, options) {
+    var logger = options && options.logger ? options.logger : runtime.createLogger();
+    var context = {
+        script_name: String(scriptName || "").trim(),
+        script_version: String(scriptVersion || "").trim(),
+        center_base_url: String(options && options.centerBaseURL ? options.centerBaseURL : "").trim()
+    };
+    var resolved = resolveScriptModule(context);
+
+    return downloadScriptIfNeeded(context, logger, resolved, {
+        force: !!(options && options.force)
+    });
+}
+
 function runTask(taskSummary, options) {
     var logger = options && options.logger ? options.logger : runtime.createLogger();
     var context = buildContext(taskSummary, options);
@@ -309,5 +323,6 @@ function syncScriptVersion(scriptName, scriptVersion, options) {
 
 module.exports = {
     runTask: runTask,
-    syncScriptVersion: syncScriptVersion
+    syncScriptVersion: syncScriptVersion,
+    ensureScriptVersion: ensureScriptVersion
 };

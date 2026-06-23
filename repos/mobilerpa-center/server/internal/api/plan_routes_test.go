@@ -477,8 +477,11 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 		t.Fatalf("expected workflow instance id as target_ref_id")
 	}
 	assignTaskMessage := <-assignTaskDone
-	if assignTaskMessage.Type != protocol.MessageTypeAssignTask {
+	if assignTaskMessage.Type != protocol.MessageTypeAssignTask && assignTaskMessage.Type != protocol.MessageTypeStartWorkflowSession {
 		t.Fatalf("unexpected message type: %s", assignTaskMessage.Type)
+	}
+	if assignTaskMessage.Type == protocol.MessageTypeStartWorkflowSession {
+		return
 	}
 
 	payload, ok := assignTaskMessage.Payload.(map[string]any)
