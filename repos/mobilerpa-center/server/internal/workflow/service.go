@@ -63,7 +63,7 @@ const (
 	// EventTypeWorkflowRunCompleted 表示工作流运行实例完成。
 	EventTypeWorkflowRunCompleted = "workflow_run_completed"
 	// EventTypeWorkflowRunFailed 表示工作流运行实例失败结束。
-	EventTypeWorkflowRunFailed = "workflow_run_failed"
+	EventTypeWorkflowRunFailed  = "workflow_run_failed"
 	EventTypeWorkflowSessionAck = "workflow_session_ack"
 )
 
@@ -91,8 +91,8 @@ var (
 	// ErrWorkflowInstanceNotFound 表示工作流实例不存在。
 	ErrWorkflowInstanceNotFound = errors.New("workflow instance not found")
 	// ErrWorkflowInstanceNotActive 表示当前没有可追加设备的活动工作流实例。
-	ErrWorkflowInstanceNotActive = errors.New("workflow instance not active")
-	ErrWorkflowDefinitionRunning = errors.New("workflow definition still has active runs")
+	ErrWorkflowInstanceNotActive        = errors.New("workflow instance not active")
+	ErrWorkflowDefinitionRunning        = errors.New("workflow definition still has active runs")
 	ErrWorkflowInstanceDeleteNotAllowed = errors.New("workflow instance delete not allowed")
 )
 
@@ -163,18 +163,18 @@ type Edge struct {
 
 // Run 表示单设备工作流运行实例。
 type Run struct {
-	WorkflowRunID string `json:"workflow_run_id"`
+	WorkflowRunID      string `json:"workflow_run_id"`
 	WorkflowInstanceID string `json:"workflow_instance_id"`
-	WorkflowDefID string `json:"workflow_def_id"`
-	DeviceID      string `json:"device_id"`
-	Status        string `json:"status"`
-	CurrentNodeID string `json:"current_node_id"`
-	CurrentTaskID string `json:"current_task_id"`
-	StartedAt     string `json:"started_at"`
-	FinishedAt    string `json:"finished_at"`
-	LastError     string `json:"last_error"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	WorkflowDefID      string `json:"workflow_def_id"`
+	DeviceID           string `json:"device_id"`
+	Status             string `json:"status"`
+	CurrentNodeID      string `json:"current_node_id"`
+	CurrentTaskID      string `json:"current_task_id"`
+	StartedAt          string `json:"started_at"`
+	FinishedAt         string `json:"finished_at"`
+	LastError          string `json:"last_error"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 // Instance 表示一个工作流实例，实例下可挂多台设备执行。
@@ -192,27 +192,27 @@ type Instance struct {
 
 // Event 表示工作流运行域中的标准化事件记录。
 type Event struct {
-	WorkflowEventID   int64          `json:"workflow_event_id"`
-	WorkflowInstanceID string    `json:"workflow_instance_id"`
-	WorkflowRunID string         `json:"workflow_run_id"`
-	WorkflowDefID string         `json:"workflow_def_id"`
-	DeviceID      string         `json:"device_id"`
-	NodeID        string         `json:"node_id"`
-	EventType     string         `json:"event_type"`
-	Message       string         `json:"message"`
-	Extra         map[string]any `json:"extra"`
-	CreatedAt     string         `json:"created_at"`
+	WorkflowEventID    int64          `json:"workflow_event_id"`
+	WorkflowInstanceID string         `json:"workflow_instance_id"`
+	WorkflowRunID      string         `json:"workflow_run_id"`
+	WorkflowDefID      string         `json:"workflow_def_id"`
+	DeviceID           string         `json:"device_id"`
+	NodeID             string         `json:"node_id"`
+	EventType          string         `json:"event_type"`
+	Message            string         `json:"message"`
+	Extra              map[string]any `json:"extra"`
+	CreatedAt          string         `json:"created_at"`
 }
 
 // StepProgressPayload 描述设备回传的 workflow_step_progress 载荷。
 type StepProgressPayload struct {
-	WorkflowRunID string         `json:"workflow_run_id"`
-	WorkflowNodeID string        `json:"workflow_node_id"`
-	TaskID        string         `json:"task_id"`
-	Status        string         `json:"status"`
-	StepName      string         `json:"step_name"`
-	Message       string         `json:"message"`
-	Extra         map[string]any `json:"extra"`
+	WorkflowRunID  string         `json:"workflow_run_id"`
+	WorkflowNodeID string         `json:"workflow_node_id"`
+	TaskID         string         `json:"task_id"`
+	Status         string         `json:"status"`
+	StepName       string         `json:"step_name"`
+	Message        string         `json:"message"`
+	Extra          map[string]any `json:"extra"`
 }
 
 // CreateDefinitionRequest 描述创建工作流定义的请求。
@@ -237,10 +237,10 @@ type AddDevicesRequest struct {
 
 // Service 负责工作流定义、运行实例与编排推进。
 type Service struct {
-	db         *sql.DB
-	devices    *device.Service
-	tasks      *task.Service
-	dispatcher TaskDispatcher
+	db                 *sql.DB
+	devices            *device.Service
+	tasks              *task.Service
+	dispatcher         TaskDispatcher
 	sessionResultHooks []func(context.Context, string) error
 }
 
@@ -557,7 +557,7 @@ WHERE workflow_instance_id = ?
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE workflow_instances
 SET status = ?, finished_at = CASE WHEN finished_at = '' THEN ? ELSE finished_at END, updated_at = ?
-WHERE workflow_instance_id = ?`,
+WHERE id = ?`,
 		RunStatusStopped,
 		now,
 		now,

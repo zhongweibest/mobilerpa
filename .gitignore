@@ -11,3 +11,6 @@
 .vscode/
 !.vscode/*.example.json
 
+
+# 运行期调试日志产物
+debug.log

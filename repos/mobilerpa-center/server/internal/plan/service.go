@@ -1989,7 +1989,9 @@ LIMIT 1`,
 		return nil, fmt.Errorf("query busy plan device run: %w", err)
 	}
 
-	if targetType == TargetTypeWorkflow && s.workflows != nil {
+	// 工作流占用检查对脚本型和工作流型计划任务都生效：脚本型计划任务也必须避让
+	// 目标设备上未结束的工作流运行，符合“同一设备同一时刻只能属于一个执行域”。
+	if s.workflows != nil {
 		workflowBusy, err := s.workflows.GetDeviceBusyDetail(ctx, deviceID)
 		if err != nil {
 			return nil, err

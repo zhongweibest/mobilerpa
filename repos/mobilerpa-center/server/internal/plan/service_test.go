@@ -6,7 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/storage"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 )
 
 func TestCreateAndListDefinitions(t *testing.T) {
@@ -267,5 +271,64 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 		Status:    RunStatusStopped,
 	}, time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, time.Local)) {
 		t.Fatalf("expected additions deferred for inactive or non-today run")
+	}
+}
+
+// TestScriptPlanBlocksOnWorkflowRun 验证脚本型计划任务启动时也会检查目标设备上的工作流占用。
+// 这是“统一占用判定”的第一步：脚本型计划任务必须避让未结束的工作流运行。
+func TestScriptPlanBlocksOnWorkflowRun(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-script-workflow-busy-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+
+	taskSvc := task.NewService(db)
+	dispatchSvc := dispatch.NewService(taskSvc)
+	deviceSvc := device.NewService(db)
+	workflowSvc := workflow.NewService(db, deviceSvc, taskSvc, dispatchSvc)
+	// 设备域传 nil，跳过 EnsureExecutionReady，只验证占用判定。
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, workflowSvc)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO workflow_instances (workflow_def_id, workflow_name, status, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?)`,
+		1, "wf-busy", "running", now, now, now,
+	); err != nil {
+		t.Fatalf("seed workflow instance: %v", err)
+	}
+	// device 2 上存在一条 pending 的工作流运行。
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO workflow_runs (workflow_instance_id, workflow_def_id, device_id, status, current_node_id, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, 1, 2, "pending", "node_1", now, now, now,
+	); err != nil {
+		t.Fatalf("seed workflow run: %v", err)
+	}
+
+	busy, err := planSvc.ensureDevicesAvailable(ctx, TargetTypeScript, "", []string{"2"})
+	if err != nil {
+		t.Fatalf("ensureDevicesAvailable: %v", err)
+	}
+	if len(busy) == 0 {
+		t.Fatalf("期望脚本型计划任务被目标设备上的工作流运行拦下，实际未拦")
+	}
+	if busy[0].OccupancyType != "workflow" {
+		t.Fatalf("期望 OccupancyType=workflow，实际=%q", busy[0].OccupancyType)
+	}
+
+	// 对照：未被占用的设备不应被拦。
+	busyOther, err := planSvc.ensureDevicesAvailable(ctx, TargetTypeScript, "", []string{"999"})
+	if err != nil {
+		t.Fatalf("ensureDevicesAvailable other device: %v", err)
+	}
+	if len(busyOther) != 0 {
+		t.Fatalf("期望未占用设备不被拦，实际 busy=%#v", busyOther)
 	}
 }
