@@ -77,7 +77,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/scripts/upload", uploadScript(scripts))
 	mux.HandleFunc("/api/v1/scripts", listScripts(scripts))
 	mux.HandleFunc("/api/v1/scripts/", scriptsSubResources(scripts))
-	mux.HandleFunc("/api/v1/tasks", tasksCollection(devices, tasks, dispatcher, workflows))
+	mux.HandleFunc("/api/v1/tasks", tasksCollection(tasks))
 	mux.HandleFunc("/api/v1/tasks/", taskSubResources(tasks))
 	mux.HandleFunc("/api/v1/workflows", workflowsCollection(workflows))
 	mux.HandleFunc("/api/v1/workflows/", workflowSubResources(workflows))
@@ -855,25 +855,6 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 			return
 		}
 
-		if len(parts) == 3 && parts[1] == "manual-tasks" && parts[2] != "" && r.Method == http.MethodPost {
-			if tasks == nil {
-				writeError(w, http.StatusNotFound, "task_resource_not_found")
-				return
-			}
-
-			result, err := tasks.StopManualTask(ctx, parts[2], "人工结束手工任务")
-			if err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
 		switch r.Method {
 		case http.MethodGet:
 			if len(parts) != 1 {
@@ -1032,117 +1013,32 @@ func pairDevice(discoveryService *discovery.Service) http.HandlerFunc {
 	}
 }
 
-func tasksCollection(devices *device.Service, tasks *task.Service, dispatcher *dispatch.Service, workflows *workflow.Service) http.HandlerFunc {
+func tasksCollection(tasks *task.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodPost:
-			var req task.CreateRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			defer cancel()
-
-			if workflows != nil {
-				busyDetail, err := workflows.GetDeviceBusyDetail(ctx, req.DeviceID)
-				if err != nil {
-					writeWorkflowError(w, err)
-					return
-				}
-				if busyDetail != nil {
-					writeWorkflowError(w, &workflow.DeviceBusyError{Details: []workflow.DeviceBusyDetail{*busyDetail}})
-					return
-				}
-			}
-
-			result, err := tasks.Create(ctx, req)
-			if err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-		case http.MethodGet:
-			page, pageSize, err := parsePagination(r)
-			if err != nil {
-				writeError(w, http.StatusBadRequest, err.Error())
-				return
-			}
-
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			defer cancel()
-
-			results, err := tasks.List(ctx, strings.TrimSpace(r.URL.Query().Get("source_type")))
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, err.Error())
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   paginateItems(results, page, pageSize),
-			})
-		case http.MethodPatch:
-			var req struct {
-				TaskID string `json:"task_id"`
-				Action string `json:"action"`
-			}
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-
-			if strings.TrimSpace(req.Action) != "assign" {
-				writeError(w, http.StatusBadRequest, "unsupported_task_action")
-				return
-			}
-
-			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-			defer cancel()
-
-			taskItem, err := tasks.GetByID(ctx, req.TaskID)
-			if err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			if err := devices.EnsureExecutionReady(ctx, taskItem.DeviceID); err != nil {
-				writeDispatchError(w, err)
-				return
-			}
-			if workflows != nil {
-				busyDetail, err := workflows.GetDeviceBusyDetail(ctx, taskItem.DeviceID)
-				if err != nil {
-					writeWorkflowError(w, err)
-					return
-				}
-				if busyDetail != nil && !(busyDetail.OccupancyType == "manual_task" && busyDetail.TaskID == taskItem.TaskID) {
-					writeWorkflowError(w, &workflow.DeviceBusyError{Details: []workflow.DeviceBusyDetail{*busyDetail}})
-					return
-				}
-			}
-
-			result, err := dispatcher.AssignTask(ctx, req.TaskID)
-			if err != nil {
-				writeDispatchError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-		default:
-			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
-				"status":           "method_not_allowed",
-				"expected_methods": []string{http.MethodGet, http.MethodPost, http.MethodPatch},
-			})
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
 		}
+
+		page, pageSize, err := parsePagination(r)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		results, err := tasks.List(ctx, strings.TrimSpace(r.URL.Query().Get("source_type")))
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data":   paginateItems(results, page, pageSize),
+		})
 	}
 }
 
@@ -1164,20 +1060,6 @@ func taskSubResources(tasks *task.Service) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status": "ok",
 				"data":   results,
-			})
-			return
-		}
-
-		if len(parts) == 2 && parts[0] != "" && parts[1] == "terminate" && r.Method == http.MethodPost {
-			result, err := tasks.StopManualTask(ctx, parts[0], "人工结束手工任务")
-			if err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
 			})
 			return
 		}
@@ -1554,9 +1436,6 @@ func writeTaskError(w http.ResponseWriter, err error) {
 	case errors.Is(err, task.ErrTaskAlreadyAssigned):
 		status = http.StatusConflict
 		message = "task_already_assigned"
-	case errors.Is(err, task.ErrTaskManualStopNotAllowed):
-		status = http.StatusConflict
-		message = "task_manual_stop_not_allowed"
 	case errors.Is(err, task.ErrTaskDeleteNotAllowed):
 		status = http.StatusConflict
 		message = "task_delete_not_allowed"

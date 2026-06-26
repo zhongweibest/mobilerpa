@@ -422,40 +422,27 @@ func TestCreateListTasksAndEvents(t *testing.T) {
 		t.Fatalf("decode register response: %v", err)
 	}
 
-	createBody := map[string]any{
-		"device_id":      registerPayload.Data.DeviceID,
-		"script_name":    "shoppe_sync",
-		"script_version": "v0.1.0",
-		"priority":       3,
-		"params": map[string]any{
+	createdTask, err := taskService.Create(t.Context(), task.CreateRequest{
+		DeviceID:      registerPayload.Data.DeviceID,
+		ScriptName:    "shoppe_sync",
+		ScriptVersion: "v0.1.0",
+		Priority:      3,
+		Params: map[string]any{
 			"shop_id": "shop-001",
 			"mode":    "dry-run",
 		},
-		"scheduled_at": "2026-06-12T10:30:00Z",
-	}
-
-	createBodyBytes, err := json.Marshal(createBody)
+		ScheduledAt: "2026-06-12T10:30:00Z",
+	})
 	if err != nil {
-		t.Fatalf("marshal create body: %v", err)
-	}
-
-	createResp, err := http.Post(server.URL+"/api/v1/tasks", "application/json", bytes.NewReader(createBodyBytes))
-	if err != nil {
-		t.Fatalf("create task request: %v", err)
-	}
-	defer createResp.Body.Close()
-
-	if createResp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected create task status: %d", createResp.StatusCode)
+		t.Fatalf("create task: %v", err)
 	}
 
 	var createPayload struct {
 		Status string    `json:"status"`
 		Data   task.Task `json:"data"`
 	}
-	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
-		t.Fatalf("decode create task response: %v", err)
-	}
+	createPayload.Status = "ok"
+	createPayload.Data = createdTask
 
 	if createPayload.Status != "ok" {
 		t.Fatalf("unexpected create task payload status: %s", createPayload.Status)
@@ -626,67 +613,18 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 		t.Fatalf("update execution profile: %v", err)
 	}
 
-	createBody := map[string]any{
-		"device_id":   registerPayload.Data.DeviceID,
-		"script_name": "shoppe_sync",
-		"priority":    1,
-		"params": map[string]any{
-			"shop_id": "shop-ack-001",
-		},
-	}
-
-	createBytes, err := json.Marshal(createBody)
+	createdTask, err := taskService.Create(t.Context(), task.CreateRequest{
+		DeviceID:   registerPayload.Data.DeviceID,
+		ScriptName: "shoppe_sync",
+		Priority:   1,
+		Params:     map[string]any{"shop_id": "shop-ack-001"},
+	})
 	if err != nil {
-		t.Fatalf("marshal create body: %v", err)
+		t.Fatalf("create task: %v", err)
 	}
 
-	createResp, err := http.Post(server.URL+"/api/v1/tasks", "application/json", bytes.NewReader(createBytes))
-	if err != nil {
-		t.Fatalf("create task request: %v", err)
-	}
-	defer createResp.Body.Close()
-
-	var createPayload struct {
-		Data task.Task `json:"data"`
-	}
-	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
-		t.Fatalf("decode create task response: %v", err)
-	}
-
-	assignBody := map[string]any{
-		"task_id": createPayload.Data.TaskID,
-		"action":  "assign",
-	}
-	assignBytes, err := json.Marshal(assignBody)
-	if err != nil {
-		t.Fatalf("marshal assign body: %v", err)
-	}
-
-	assignReq, err := http.NewRequest(http.MethodPatch, server.URL+"/api/v1/tasks", bytes.NewReader(assignBytes))
-	if err != nil {
-		t.Fatalf("new assign request: %v", err)
-	}
-	assignReq.Header.Set("Content-Type", "application/json")
-
-	assignResp, err := http.DefaultClient.Do(assignReq)
-	if err != nil {
-		t.Fatalf("assign task request: %v", err)
-	}
-	defer assignResp.Body.Close()
-
-	if assignResp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected assign task status: %d", assignResp.StatusCode)
-	}
-
-	var assignedPayload struct {
-		Status string    `json:"status"`
-		Data   task.Task `json:"data"`
-	}
-	if err := json.NewDecoder(assignResp.Body).Decode(&assignedPayload); err != nil {
-		t.Fatalf("decode assign task response: %v", err)
-	}
-	if assignedPayload.Data.Status != task.StatusAssigned {
-		t.Fatalf("unexpected assigned task status: %s", assignedPayload.Data.Status)
+	if _, err := dispatchService.AssignTask(t.Context(), createdTask.TaskID); err != nil {
+		t.Fatalf("assign task: %v", err)
 	}
 
 	var assignMessage protocol.Envelope
@@ -707,7 +645,7 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 	if err := json.Unmarshal(assignPayloadBytes, &assignPayload); err != nil {
 		t.Fatalf("decode assign payload: %v", err)
 	}
-	if assignPayload.TaskID != createPayload.Data.TaskID {
+	if assignPayload.TaskID != createdTask.TaskID {
 		t.Fatalf("unexpected assigned task id: %s", assignPayload.TaskID)
 	}
 
@@ -717,7 +655,7 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 		DeviceID:  registerPayload.Data.DeviceID,
 		Timestamp: time.Now().Unix(),
 		Payload: map[string]any{
-			"task_id": createPayload.Data.TaskID,
+			"task_id": createdTask.TaskID,
 			"status":  "ok",
 			"message": "task ack ok",
 		},
@@ -753,7 +691,7 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 		t.Fatalf("unexpected duplicate task_ack response status: %v", duplicatePayload["status"])
 	}
 
-	eventsResp, err := http.Get(server.URL + "/api/v1/tasks/" + createPayload.Data.TaskID + "/events")
+	eventsResp, err := http.Get(server.URL + "/api/v1/tasks/" + createdTask.TaskID + "/events")
 	if err != nil {
 		t.Fatalf("list task events request: %v", err)
 	}
@@ -866,54 +804,25 @@ func TestTaskResultUpdatesTaskStatus(t *testing.T) {
 		t.Fatalf("update execution profile: %v", err)
 	}
 
-	createBody := map[string]any{
-		"device_id":      registerPayload.Data.DeviceID,
-		"script_name":    "shoppe_sync",
-		"script_version": "v0.1.0",
-		"priority":       1,
-		"params": map[string]any{
-			"should_fail": false,
-		},
-	}
-
-	createBytes, err := json.Marshal(createBody)
+	createdTask, err := taskService.Create(t.Context(), task.CreateRequest{
+		DeviceID:      registerPayload.Data.DeviceID,
+		ScriptName:    "shoppe_sync",
+		ScriptVersion: "v0.1.0",
+		Priority:      1,
+		Params:        map[string]any{"should_fail": false},
+	})
 	if err != nil {
-		t.Fatalf("marshal create body: %v", err)
+		t.Fatalf("create task: %v", err)
 	}
-
-	createResp, err := http.Post(server.URL+"/api/v1/tasks", "application/json", bytes.NewReader(createBytes))
-	if err != nil {
-		t.Fatalf("create task request: %v", err)
-	}
-	defer createResp.Body.Close()
 
 	var createPayload struct {
 		Data task.Task `json:"data"`
 	}
-	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
-		t.Fatalf("decode create task response: %v", err)
-	}
+	createPayload.Data = createdTask
 
-	assignBody := map[string]any{
-		"task_id": createPayload.Data.TaskID,
-		"action":  "assign",
+	if _, err := dispatchService.AssignTask(t.Context(), createdTask.TaskID); err != nil {
+		t.Fatalf("assign task: %v", err)
 	}
-	assignBytes, err := json.Marshal(assignBody)
-	if err != nil {
-		t.Fatalf("marshal assign body: %v", err)
-	}
-
-	assignReq, err := http.NewRequest(http.MethodPatch, server.URL+"/api/v1/tasks", bytes.NewReader(assignBytes))
-	if err != nil {
-		t.Fatalf("new assign request: %v", err)
-	}
-	assignReq.Header.Set("Content-Type", "application/json")
-
-	assignResp, err := http.DefaultClient.Do(assignReq)
-	if err != nil {
-		t.Fatalf("assign task request: %v", err)
-	}
-	defer assignResp.Body.Close()
 
 	var assignMessage protocol.Envelope
 	if err := conn.ReadJSON(&assignMessage); err != nil {

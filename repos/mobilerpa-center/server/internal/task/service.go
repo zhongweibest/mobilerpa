@@ -55,8 +55,6 @@ var (
 	ErrTaskScheduledAtInvalid = errors.New("scheduled_at must be RFC3339 format")
 	// ErrTaskAlreadyAssigned 表示任务已经进入下发后的状态，不能重复下发。
 	ErrTaskAlreadyAssigned = errors.New("task already assigned")
-	// ErrTaskManualStopNotAllowed 表示当前任务不允许走人工停止入口。
-	ErrTaskManualStopNotAllowed = errors.New("task manual stop not allowed")
 	// ErrTaskDeleteNotAllowed 表示当前任务仍在执行中，不允许删除。
 	ErrTaskDeleteNotAllowed = errors.New("task delete not allowed")
 )
@@ -355,74 +353,6 @@ WHERE id = ?`, taskID)
 		return Task{}, err
 	}
 	return taskItem, nil
-}
-
-// StopManualTask 人工结束一个仍在占用设备的手工任务，并把它标记为 failed。
-func (s *Service) StopManualTask(ctx context.Context, taskID string, reason string) (Task, error) {
-	taskItem, err := s.GetByID(ctx, taskID)
-	if err != nil {
-		return Task{}, err
-	}
-
-	if strings.TrimSpace(taskItem.TaskSourceType) != "manual" {
-		return Task{}, ErrTaskManualStopNotAllowed
-	}
-	if taskItem.Status != StatusAssigned && taskItem.Status != StatusRunning {
-		return Task{}, ErrTaskManualStopNotAllowed
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		reason = "人工结束手工任务"
-	}
-
-	startedAt := taskItem.StartedAt
-	if startedAt == "" {
-		startedAt = now
-	}
-	if err := s.updateTaskState(ctx, taskID, StatusFailed, taskItem.CurrentStep, "manual_stopped", reason, startedAt, now, now); err != nil {
-		return Task{}, err
-	}
-
-	if _, err := s.db.ExecContext(ctx, `
-UPDATE devices
-SET current_task_id = '',
-    current_step = '',
-    updated_at = ?
-WHERE id = ?
-  AND current_task_id = ?`,
-		now,
-		taskItem.DeviceID,
-		taskItem.TaskID,
-	); err != nil {
-		return Task{}, fmt.Errorf("clear device current task: %w", err)
-	}
-
-	extra := map[string]any{
-		"topic":          TopicTasks,
-		"event_type":     EventTypeTaskResult,
-		"task_status":    StatusFailed,
-		"result_code":    "manual_stopped",
-		"result_message": reason,
-		"source":         "center",
-		"manual_stop":    true,
-	}
-	if err := s.appendEvent(ctx, Event{
-		Topic:      TopicTasks,
-		TaskID:     taskItem.TaskID,
-		DeviceID:   taskItem.DeviceID,
-		EventType:  EventTypeTaskResult,
-		TaskStatus: StatusFailed,
-		StepName:   taskItem.CurrentStep,
-		Message:    reason,
-		Extra:      extra,
-		CreatedAt:  now,
-	}, nil); err != nil {
-		return Task{}, err
-	}
-
-	return s.GetByID(ctx, taskID)
 }
 
 // Delete 删除一个已结束的任务及其事件记录。

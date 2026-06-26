@@ -1536,24 +1536,16 @@ INSERT INTO plan_device_runs (
 }
 
 func (s *Service) stopScriptPlanDevice(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, reason string) error {
-	taskID, taskStatus, err := s.lookupTaskByPlanDeviceRun(ctx, deviceRun.PlanDeviceRunID)
-	if err != nil {
+	if _, _, err := s.lookupTaskByPlanDeviceRun(ctx, deviceRun.PlanDeviceRunID); err != nil {
 		return err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	if taskID != "" && (taskStatus == task.StatusAssigned || taskStatus == task.StatusRunning) {
-		if taskService, ok := s.tasks.(*task.Service); ok {
-			if _, err := taskService.StopManualTask(ctx, taskID, "计划任务移除设备"); err != nil && !errors.Is(err, task.ErrTaskManualStopNotAllowed) {
-				return err
-			}
-		}
-	}
 
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE plan_device_runs
-SET status = ?, finished_at = CASE WHEN finished_at = '' THEN ? ELSE finished_at END, updated_at = ?
-WHERE id = ?`,
+	SET status = ?, finished_at = CASE WHEN finished_at = '' THEN ? ELSE finished_at END, updated_at = ?
+	WHERE id = ?`,
 		DeviceRunStatusStopped,
 		now,
 		now,
@@ -2010,33 +2002,6 @@ LIMIT 1`,
 		}
 	}
 
-	if targetType == TargetTypeScript {
-		row = s.db.QueryRowContext(ctx, `
-SELECT id AS task_id, status
-FROM tasks
-WHERE device_id = ?
-  AND task_source_type = 'manual'
-  AND status IN (?, ?)
-ORDER BY task_id DESC
-LIMIT 1`,
-			deviceID,
-			task.StatusAssigned,
-			task.StatusRunning,
-		)
-		var taskID string
-		var taskStatus string
-		if err := row.Scan(&taskID, &taskStatus); err == nil {
-			return &DeviceBusyDetail{
-				DeviceID:      deviceID,
-				OccupancyType: "manual_task",
-				TaskID:        taskID,
-				TaskStatus:    taskStatus,
-				Message:       "设备已被手工任务占用",
-			}, nil
-		} else if !errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("query busy manual task: %w", err)
-		}
-	}
 	return nil, nil
 }
 

@@ -1606,34 +1606,6 @@ WHERE workflow_instance_id = ?
 		}
 	}
 
-	row = s.db.QueryRowContext(ctx, `
-SELECT id AS task_id, status
-FROM tasks
-WHERE device_id = ?
-  AND task_source_type = 'manual'
-  AND status IN (?, ?)
-ORDER BY id DESC
-LIMIT 1`,
-		deviceID,
-		task.StatusAssigned,
-		task.StatusRunning,
-	)
-	var taskID string
-	var taskStatus string
-	switch err := row.Scan(&taskID, &taskStatus); {
-	case err == nil:
-		return &DeviceBusyDetail{
-			DeviceID:      deviceID,
-			OccupancyType: "manual_task",
-			TaskID:        taskID,
-			TaskStatus:    taskStatus,
-			Message:       "设备当前被手工任务占用",
-		}, nil
-	case errors.Is(err, sql.ErrNoRows):
-	default:
-		return nil, fmt.Errorf("query device manual task occupancy: %w", err)
-	}
-
 	return nil, nil
 }
 
