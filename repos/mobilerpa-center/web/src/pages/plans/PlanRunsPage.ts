@@ -104,17 +104,6 @@ export const PlanRunsPage = defineComponent({
       void loadPageData();
     });
 
-    async function openEventsDialog(item: PlanRunRecord) {
-      deviceEventFilter.value = "";
-      try {
-        selectedRun.value = item;
-        await plansStore.loadPlanEvents(item.plan_def_id, item.plan_run_id);
-        eventsDialogVisible.value = true;
-      } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "计划任务事件加载失败");
-      }
-    }
-
     async function openDeviceEventsDialog(deviceRun: PlanDeviceRunRecord) {
       if (!selectedRun.value) {
         return;
@@ -261,12 +250,11 @@ export const PlanRunsPage = defineComponent({
                             }),
                             h(
                               ElTableColumn,
-                              { label: "操作", width: 320, fixed: "right" },
+                              { label: "操作", width: 260, fixed: "right" },
                               {
                                 default: (scope: { row: PlanRunRecord }) =>
                                   h("div", { class: "table-actions" }, [
                                     h(ElButton, { type: "primary", link: true, onClick: () => openDevicesDialog(scope.row) }, () => "查看执行设备"),
-                                    h(ElButton, { type: "primary", link: true, onClick: () => void openEventsDialog(scope.row) }, () => "查看事件"),
                                     h(ElButton, { type: "primary", link: true, onClick: () => openAppendDialog(scope.row) }, () => "追加设备"),
                                     h(
                                       ElButton,
