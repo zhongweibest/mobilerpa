@@ -1,4 +1,4 @@
-﻿package plan
+package plan
 
 import (
 	"context"
@@ -2136,6 +2136,10 @@ func (s *Service) appendEvent(ctx context.Context, planRunID string, planDefID s
 	if extra == nil {
 		extra = map[string]any{}
 	}
+	// device_id 列是 INTEGER，实例级事件没有具体设备，写入 0 避免存入空串。
+	if strings.TrimSpace(deviceID) == "" {
+		deviceID = "0"
+	}
 	body, err := json.Marshal(extra)
 	if err != nil {
 		return fmt.Errorf("marshal plan event extra: %w", err)
@@ -2555,13 +2559,13 @@ func scanEvent(scanner eventScanner) (Event, error) {
 	var item Event
 	var planRunID int64
 	var planDefID int64
-	var deviceID int64
+	var deviceIDStr string
 	var extraJSON string
 	if err := scanner.Scan(
 		&item.PlanEventID,
 		&planRunID,
 		&planDefID,
-		&deviceID,
+		&deviceIDStr,
 		&item.EventType,
 		&item.Message,
 		&extraJSON,
@@ -2578,6 +2582,9 @@ func scanEvent(scanner eventScanner) (Event, error) {
 	}
 	item.PlanRunID = strconv.FormatInt(planRunID, 10)
 	item.PlanDefID = strconv.FormatInt(planDefID, 10)
+	// device_id 列声明为 INTEGER，但历史数据中实例级事件写入过空串，
+	// SQLite 动态类型会原样保留，直接 Scan 成 int64 会报错，因此按字符串读出再容错解析。
+	deviceID, _ := strconv.ParseInt(strings.TrimSpace(deviceIDStr), 10, 64)
 	item.DeviceID = strconv.FormatInt(deviceID, 10)
 	return item, nil
 }

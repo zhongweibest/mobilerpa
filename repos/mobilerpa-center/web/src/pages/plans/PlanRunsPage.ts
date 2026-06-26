@@ -58,6 +58,13 @@ export const PlanRunsPage = defineComponent({
     const appendForm = reactive({
       device_ids: [] as string[]
     });
+    const deviceEventFilter = ref("");
+    const displayedEvents = computed(() => {
+      if (!deviceEventFilter.value) {
+        return selectedEvents.value;
+      }
+      return selectedEvents.value.filter((item) => item.device_id === deviceEventFilter.value);
+    });
 
     const appendableDevices = computed(() => {
       if (!selectedRun.value) {
@@ -98,12 +105,26 @@ export const PlanRunsPage = defineComponent({
     });
 
     async function openEventsDialog(item: PlanRunRecord) {
+      deviceEventFilter.value = "";
       try {
         selectedRun.value = item;
         await plansStore.loadPlanEvents(item.plan_def_id, item.plan_run_id);
         eventsDialogVisible.value = true;
       } catch (error) {
         ElMessage.error(error instanceof Error ? error.message : "计划任务事件加载失败");
+      }
+    }
+
+    async function openDeviceEventsDialog(deviceRun: PlanDeviceRunRecord) {
+      if (!selectedRun.value) {
+        return;
+      }
+      try {
+        deviceEventFilter.value = deviceRun.device_id;
+        await plansStore.loadPlanEvents(selectedRun.value.plan_def_id, selectedRun.value.plan_run_id);
+        eventsDialogVisible.value = true;
+      } catch (error) {
+        ElMessage.error(error instanceof Error ? error.message : "设备事件加载失败");
       }
     }
 
@@ -323,19 +344,22 @@ export const PlanRunsPage = defineComponent({
                     h(ElTableColumn, { prop: "last_error", label: "最后错误", minWidth: 220 }),
                     h(
                       ElTableColumn,
-                      { label: "操作", width: 140, fixed: "right" },
+                      { label: "操作", width: 200, fixed: "right" },
                       {
                         default: (scope: { row: PlanDeviceRunRecord }) =>
-                          h(
-                            ElButton,
-                            {
-                              type: "danger",
-                              link: true,
-                              loading: mutatingDevices.value,
-                              onClick: () => void stopOrRemoveDevice(scope.row)
-                            },
-                            () => (scope.row.status === "pending" || scope.row.status === "running" ? "停止设备" : "移除设备")
-                          )
+                          h("div", { class: "table-actions" }, [
+                            h(ElButton, { type: "primary", link: true, onClick: () => void openDeviceEventsDialog(scope.row) }, () => "查看事件"),
+                            h(
+                              ElButton,
+                              {
+                                type: "danger",
+                                link: true,
+                                loading: mutatingDevices.value,
+                                onClick: () => void stopOrRemoveDevice(scope.row)
+                              },
+                              () => (scope.row.status === "pending" || scope.row.status === "running" ? "停止设备" : "移除设备")
+                            )
+                          ])
                       }
                     )
                   ]
@@ -349,7 +373,11 @@ export const PlanRunsPage = defineComponent({
           {
             modelValue: eventsDialogVisible.value,
             "onUpdate:modelValue": (value: boolean) => (eventsDialogVisible.value = value),
-            title: selectedRun.value ? `计划任务事件：${selectedRun.value.plan_run_id}` : "计划任务事件",
+            title: selectedRun.value
+              ? deviceEventFilter.value
+                ? `设备 ${deviceEventFilter.value} 事件：${selectedRun.value.plan_run_id}`
+                : `计划任务事件：${selectedRun.value.plan_run_id}`
+              : "计划任务事件",
             width: "980px"
           },
           {
@@ -358,7 +386,7 @@ export const PlanRunsPage = defineComponent({
                 ? h("div", { class: "dialog-loading" }, "加载中...")
                 : h(
                     ElTable,
-                    { data: selectedEvents.value, stripe: true, border: false, class: "app-table", height: "520px" },
+                    { data: displayedEvents.value, stripe: true, border: false, class: "app-table", height: "520px" },
                     {
                       default: () => [
                         h(ElTableColumn, { prop: "id", label: "ID", width: 90 }),
