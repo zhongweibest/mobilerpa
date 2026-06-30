@@ -6,6 +6,9 @@ import {
   ElDescriptions,
   ElDescriptionsItem,
   ElDialog,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
   ElMessage,
   ElOption,
@@ -202,13 +205,6 @@ export const DevicesPage = defineComponent({
           ElCard,
           { class: "page-card page-fill-card", shadow: "never" },
           {
-            header: () =>
-              h("div", { class: "card-header" }, [
-                h("div", null, [
-                  h("div", { class: "card-header__title" }, "设备列表"),
-                  h("div", { class: "card-header__subtitle" }, "集中查看设备 ID、在线状态、绑定状态、心跳、当前任务、物理位置和占用情况，并支持清理离线设备。")
-                ])
-              ]),
             default: () =>
               devices.value.length === 0 && !loading.value
                 ? h(ElEmpty, { description: "当前还没有设备数据。" })
@@ -294,36 +290,12 @@ export const DevicesPage = defineComponent({
                                 ElTableColumn,
                                 {
                                   label: "操作",
-                                  minWidth: 220
+                                  minWidth: 180,
+                                  fixed: "right"
                                 },
                                 {
                                   default: ({ row }) =>
-                                    h("div", { class: "table-actions" }, [
-                                      h(
-                                        ElButton,
-                                        {
-                                          size: "small",
-                                          type: "success",
-                                          plain: true,
-                                          onClick: () => {
-                                            void handleOpenBindDialog(row);
-                                          }
-                                        },
-                                        () => "绑定"
-                                      ),
-                                      h(
-                                        ElButton,
-                                        {
-                                          size: "small",
-                                          type: "primary",
-                                          plain: true,
-                                          loading: loadingOccupancy.value && selectedOccupancy.value?.device_id === row.device_id,
-                                          onClick: () => {
-                                            void handleViewTask(row.device_id);
-                                          }
-                                        },
-                                        () => "查看任务占用"
-                                      ),
+                                    h("div", { class: "table-actions table-actions--nowrap" }, [
                                       h(
                                         ElButton,
                                         {
@@ -336,6 +308,46 @@ export const DevicesPage = defineComponent({
                                           }
                                         },
                                         () => (deletingDeviceID.value === row.device_id ? "删除中..." : "删除")
+                                      ),
+                                      h(
+                                        ElDropdown,
+                                        {
+                                          trigger: "click"
+                                        },
+                                        {
+                                          default: () =>
+                                            h(ElButton, { size: "small", link: true, type: "primary" }, () => "更多"),
+                                          dropdown: () =>
+                                            h(
+                                              ElDropdownMenu,
+                                              null,
+                                              {
+                                                default: () => [
+                                                  h(
+                                                    ElDropdownItem,
+                                                    {
+                                                      key: "bind",
+                                                      onClick: () => {
+                                                        void handleOpenBindDialog(row);
+                                                      }
+                                                    },
+                                                    () => "绑定"
+                                                  ),
+                                                  h(
+                                                    ElDropdownItem,
+                                                    {
+                                                      key: "occupancy",
+                                                      loading: loadingOccupancy.value && selectedOccupancy.value?.device_id === row.device_id,
+                                                      onClick: () => {
+                                                        void handleViewTask(row.device_id);
+                                                      }
+                                                    },
+                                                    () => "查看任务占用"
+                                                  )
+                                                ]
+                                              }
+                                            )
+                                        }
                                       )
                                     ])
                                 }
@@ -484,3 +496,4 @@ export const DevicesPage = defineComponent({
       ]);
   }
 });
+

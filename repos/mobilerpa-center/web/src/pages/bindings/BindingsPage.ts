@@ -462,6 +462,18 @@ export const BindingsPage = defineComponent({
             {
               default: () => [
                 h("div", { class: "bindings-page__tree-search" }, [
+                  h(
+                    ElButton,
+                    {
+                      type: "primary",
+                      onClick: () => {
+                        createForm.node_name = "";
+                        createForm.sort_order = "";
+                        zoneDialogVisible.value = true;
+                      }
+                    },
+                    () => "新增分区"
+                  ),
                   h(ElInput, {
                     modelValue: keyword.value,
                     clearable: true,
@@ -520,47 +532,6 @@ export const BindingsPage = defineComponent({
             }
           ),
           h("div", { class: "bindings-page__main" }, [
-            h("div", { class: "bindings-page__toolbar" }, [
-              h(
-                ElButton,
-                {
-                  type: "primary",
-                  loading: loading.value,
-                  onClick: () => {
-                    void loadData();
-                  }
-                },
-                () => "刷新"
-              ),
-              h(
-                ElButton,
-                {
-                  type: "primary",
-                  onClick: () => {
-                    createForm.node_name = "";
-                    createForm.sort_order = "";
-                    zoneDialogVisible.value = true;
-                  }
-                },
-                () => "新增分区"
-              ),
-              currentNode.value
-                ? nextNodeType.value === "row" || nextNodeType.value === "slot"
-                  ? null
-                  : h(
-                      ElButton,
-                      {
-                        type: "primary",
-                        plain: true,
-                        disabled: !canCreateChild.value,
-                        onClick: () => {
-                          void handleCreateChild();
-                        }
-                      },
-                      () => `新增${resolveNodeTypeLabel(nextNodeType.value)}`
-                  )
-                : null
-            ]),
             h(
               ElCard,
               { class: "page-card bindings-page__detail-card", shadow: "never" },
@@ -569,7 +540,7 @@ export const BindingsPage = defineComponent({
                   !currentNode.value && nodes.value.length === 0 && !loading.value
                     ? h("div", { class: "bindings-page__empty-state" }, [
                         h("div", { class: "card-header__title" }, "还没有位置节点"),
-                        h("div", { class: "card-header__subtitle" }, "点击上方“新增分区”开始创建，后续再逐级新增排号和槽位。")
+                        h("div", { class: "card-header__subtitle" }, "点击左侧“新增分区”开始创建，后续再逐级新增排号和槽位。")
                       ])
                     : h("div", { class: "bindings-page__detail-scroll" }, [
                         currentNode.value
@@ -645,10 +616,10 @@ export const BindingsPage = defineComponent({
                                   })
                                 )
                               ]),
-                              !usesRowTable.value && !usesSlotTable.value
+                              !canBindDevice.value && !usesRowTable.value && !usesSlotTable.value
                                 ? h("div", { class: "bindings-page__section-title" }, canCreateChild.value ? `新增${resolveNodeTypeLabel(nextNodeType.value)}` : "下级节点")
                                 : null,
-                              canCreateChild.value && !usesRowTable.value && !usesSlotTable.value
+                              canCreateChild.value && !canBindDevice.value && !usesRowTable.value && !usesSlotTable.value
                                 ? h("div", { class: "bindings-page__form-grid" }, [
                                     h(ElFormItem, { label: `${resolveNodeTypeLabel(nextNodeType.value)}名称` }, () =>
                                       h(ElInput, {
@@ -669,7 +640,7 @@ export const BindingsPage = defineComponent({
                                       })
                                     )
                                   ])
-                                : !usesRowTable.value && !usesSlotTable.value
+                                : !canBindDevice.value && !usesRowTable.value && !usesSlotTable.value
                                   ? h("div", { class: "bindings-page__hint" }, "当前已是槽位节点，不能再新增下级。")
                                   : null,
                               canBindDevice.value
@@ -725,12 +696,10 @@ export const BindingsPage = defineComponent({
                                     )
                                   ])
                                 : null,
-                              canBindDevice.value
-                                ? null
-                                : h("div", { class: "bindings-page__section-title" }, usesRowTable.value ? "排号列表" : usesSlotTable.value ? "槽位列表" : currentNode.value ? "下级节点列表" : "分区列表"),
                               usesRowTable.value
                                 ? h("div", { class: "bindings-page__child-table" }, [
-                                    h("div", { class: "bindings-page__child-table-toolbar" }, [
+                                    h("div", { class: "bindings-page__child-table-header" }, [
+                                      h("div", { class: "bindings-page__section-title" }, "排号列表"),
                                       h(
                                         ElButton,
                                         {
@@ -775,7 +744,8 @@ export const BindingsPage = defineComponent({
                                   ])
                                 : usesSlotTable.value
                                   ? h("div", { class: "bindings-page__child-table" }, [
-                                      h("div", { class: "bindings-page__child-table-toolbar" }, [
+                                      h("div", { class: "bindings-page__child-table-header" }, [
+                                        h("div", { class: "bindings-page__section-title" }, "槽位列表"),
                                         h(
                                           ElButton,
                                           {

@@ -440,8 +440,16 @@ body {
 }
 
 .bindings-page__tree-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   padding: 14px 14px 10px;
   border-bottom: 1px solid var(--shell-line-soft);
+}
+
+.bindings-page__tree-search .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .bindings-page__tree-card .el-tree {
@@ -601,10 +609,15 @@ body {
   gap: 12px;
 }
 
-.bindings-page__child-table-toolbar {
+.bindings-page__child-table-header {
   display: flex;
-  justify-content: flex-end;
   align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.bindings-page__child-table-header .bindings-page__section-title {
+  margin: 0;
 }
 
 .bindings-page__child-item {
@@ -786,6 +799,10 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.table-actions--nowrap {
+  flex-wrap: nowrap;
 }
 
 .status-tag {

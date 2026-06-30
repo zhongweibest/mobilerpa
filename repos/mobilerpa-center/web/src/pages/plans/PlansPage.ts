@@ -6,6 +6,9 @@ import {
   ElDescriptions,
   ElDescriptionsItem,
   ElDialog,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
   ElForm,
   ElFormItem,
@@ -798,3 +801,4 @@ export const PlansPage = defineComponent({
       ]);
   }
 });
+

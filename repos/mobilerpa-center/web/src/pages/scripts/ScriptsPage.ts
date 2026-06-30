@@ -318,13 +318,6 @@ export const ScriptsPage = defineComponent({
             shadow: "never"
           },
           {
-            header: () =>
-              h("div", { class: "card-header" }, [
-                h("div", null, [
-                  h("div", { class: "card-header__title" }, "脚本版本总览"),
-                  h("div", { class: "card-header__subtitle" }, "相同脚本名称合并为一行，展开后直接查看该脚本的全部版本明细与操作。")
-                ])
-              ]),
             default: () =>
               scripts.value.length === 0
                 ? h(ElEmpty, {

@@ -4,6 +4,9 @@ import {
   ElButton,
   ElCard,
   ElDialog,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
   ElForm,
   ElFormItem,
@@ -832,24 +835,10 @@ export const WorkflowsPage = defineComponent({
         errorMessage.value
           ? h(ElAlert, { class: "page-alert", type: "error", title: `工作流定义加载失败：${errorMessage.value}`, showIcon: true, closable: false })
           : null,
-        h(ElAlert, {
-          class: "page-alert",
-          type: "info",
-          showIcon: true,
-          closable: false,
-          title: "工作流编排页只负责维护工作流定义。正式运行请在“计划任务”页创建 workflow 型计划任务，并在“计划任务实例”页查看运行状态。每日开始、每日截止、次日重启等调度语义归计划任务负责。"
-        }),
         h(
           ElCard,
           { class: "page-card page-fill-card", shadow: "never" },
           {
-            header: () =>
-              h("div", { class: "card-header" }, [
-                h("div", null, [
-                  h("div", { class: "card-header__title" }, "工作流定义列表"),
-                  h("div", { class: "card-header__subtitle" }, `当前仅维护定义，不直接承担运行态调度。${workflowDefinitionSummary.value}`)
-                ])
-              ]),
             default: () =>
               workflows.value.length === 0
                 ? h(ElEmpty, { description: "当前还没有工作流定义，请先点击“创建工作流”。" })
@@ -879,7 +868,7 @@ export const WorkflowsPage = defineComponent({
                             h(ElTableColumn, { label: "更新时间", minWidth: 180, formatter: (row) => formatDateTime(row.updated_at) }),
                             h(
                               ElTableColumn,
-                              { label: "操作", minWidth: 120, fixed: "right" },
+                              { label: "操作", minWidth: 180, fixed: "right" },
                               {
                                 default: ({ row }) =>
                                   h("div", { class: "table-actions" }, [
@@ -987,13 +976,6 @@ export const WorkflowsPage = defineComponent({
                     () => [h(ElOption, { label: "active", value: "active" }), h(ElOption, { label: "draft", value: "draft" })]
                   )
                 ),
-                h(ElAlert, {
-                  class: "dialog-alert",
-                  type: "info",
-                  showIcon: true,
-                  closable: false,
-                  title: "这里维护的是工作流定义本身。每日开始时间、每日截止时间、次日自动重启等调度语义请放到计划任务中配置。"
-                }),
                 h("div", { class: "table-actions workflow-builder-actions" }, [
                   h(ElButton, { onClick: addSequenceSegment }, () => "添加顺序段"),
                   h(ElButton, { onClick: addLoopSegment }, () => "添加循环段")
@@ -1018,3 +1000,5 @@ export const WorkflowsPage = defineComponent({
       ]);
   }
 });
+
+
