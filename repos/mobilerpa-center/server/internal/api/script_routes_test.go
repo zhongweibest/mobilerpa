@@ -40,7 +40,7 @@ func TestScriptUploadManifestAndDownload(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptService := script.NewService(db, filepath.Join(t.TempDir(), "script-library"))
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -143,7 +143,7 @@ func TestScriptUploadSupportsSingleRootDirectoryZip(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptService := script.NewService(db, filepath.Join(t.TempDir(), "script-library"))
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -153,10 +153,10 @@ func TestScriptUploadSupportsSingleRootDirectoryZip(t *testing.T) {
 
 	uploadURL := server.URL + "/api/v1/scripts/upload"
 	uploadBody, contentType := buildUploadRequestBody(t, "shoppe_sync", "v0.1.2", "zip", map[string]string{
-		"shoppe_sync_v0.1.2/index.js":             "\"use strict\";\nmodule.exports = { run: function () { return { status: \"success\" }; } };\n",
-		"shoppe_sync_v0.1.2/utils/common.js":      "\"use strict\";\nmodule.exports = {};\n",
-		"shoppe_sync_v0.1.2/config/config.js":     "\"use strict\";\nmodule.exports = {};\n",
-		"shoppe_sync_v0.1.2/index_debug.js":       "\"use strict\";\n",
+		"shoppe_sync_v0.1.2/index.js":         "\"use strict\";\nmodule.exports = { run: function () { return { status: \"success\" }; } };\n",
+		"shoppe_sync_v0.1.2/utils/common.js":  "\"use strict\";\nmodule.exports = {};\n",
+		"shoppe_sync_v0.1.2/config/config.js": "\"use strict\";\nmodule.exports = {};\n",
+		"shoppe_sync_v0.1.2/index_debug.js":   "\"use strict\";\n",
 	})
 
 	uploadResp, err := http.Post(uploadURL, contentType, uploadBody)
@@ -207,7 +207,7 @@ func TestScriptUploadFailsWithoutIndexJS(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptService := script.NewService(db, filepath.Join(t.TempDir(), "script-library"))
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -254,7 +254,7 @@ func TestDeployScriptToAllOnlineDevices(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptService := script.NewService(db, filepath.Join(t.TempDir(), "script-library"))
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -402,7 +402,7 @@ func TestDeleteScriptVersion(t *testing.T) {
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptRoot := filepath.Join(t.TempDir(), "script-library")
 	scriptService := script.NewService(db, scriptRoot)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -470,7 +470,7 @@ func TestDeleteScript(t *testing.T) {
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptRoot := filepath.Join(t.TempDir(), "script-library")
 	scriptService := script.NewService(db, scriptRoot)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -548,7 +548,7 @@ func TestDeleteScriptVersionNotFound(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	scriptService := script.NewService(db, filepath.Join(t.TempDir(), "script-library"))
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
@@ -587,7 +587,7 @@ func TestListScriptsIncludesWorkflowReferencesAndBlocksDelete(t *testing.T) {
 	scriptRoot := filepath.Join(t.TempDir(), "script-library")
 	scriptService := script.NewService(db, scriptRoot)
 	workflowService := workflow.NewService(db, deviceService, taskService, dispatchService)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, workflowService)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, workflowService)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, workflowService, wsHandler)

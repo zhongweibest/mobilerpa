@@ -1,4 +1,11 @@
-import type { DeviceOccupancyDetail, DeviceRecord } from "../types/device";
+import type {
+  BindLocationNodeRequest,
+  CreateLocationNodeRequest,
+  DeviceOccupancyDetail,
+  DeviceRecord,
+  LocationNodeRecord,
+  UpdateLocationNodeRequest
+} from "../types/device";
 import type { PaginatedResult, PaginationQuery } from "../types/pagination";
 import { requestJSON } from "./http";
 
@@ -20,8 +27,48 @@ export function fetchDeviceOccupancy(deviceID: string): Promise<DeviceOccupancyD
   return requestJSON<DeviceOccupancyDetail>(`/api/v1/devices/${encodeURIComponent(deviceID)}/occupancy`);
 }
 
-export function terminateManualTaskOnDevice(deviceID: string, taskID: string) {
-  return requestJSON(`/api/v1/devices/${encodeURIComponent(deviceID)}/manual-tasks/${encodeURIComponent(taskID)}`, {
+export function fetchLocationNodes(): Promise<LocationNodeRecord[]> {
+  return requestJSON<LocationNodeRecord[]>("/api/v1/location-nodes");
+}
+
+export function createLocationNode(payload: CreateLocationNodeRequest): Promise<LocationNodeRecord> {
+  return requestJSON<LocationNodeRecord>("/api/v1/location-nodes", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function updateLocationNode(nodeID: string, payload: UpdateLocationNodeRequest): Promise<LocationNodeRecord> {
+  return requestJSON<LocationNodeRecord>(`/api/v1/location-nodes/${encodeURIComponent(nodeID)}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function deleteLocationNode(nodeID: string): Promise<{ node_id: string; deleted: boolean }> {
+  return requestJSON<{ node_id: string; deleted: boolean }>(`/api/v1/location-nodes/${encodeURIComponent(nodeID)}`, {
+    method: "DELETE"
+  });
+}
+
+export function bindLocationNode(nodeID: string, payload: BindLocationNodeRequest): Promise<LocationNodeRecord> {
+  return requestJSON<LocationNodeRecord>(`/api/v1/location-nodes/${encodeURIComponent(nodeID)}/bind`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function unbindLocationNode(nodeID: string): Promise<LocationNodeRecord> {
+  return requestJSON<LocationNodeRecord>(`/api/v1/location-nodes/${encodeURIComponent(nodeID)}/unbind`, {
     method: "POST"
   });
 }

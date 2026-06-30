@@ -37,7 +37,7 @@ func TestPlanCreateListAndGet(t *testing.T) {
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, planService, wsHandler)
@@ -160,7 +160,7 @@ func TestPlanStartScriptRun(t *testing.T) {
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, planService, wsHandler)
@@ -309,9 +309,7 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 	workflowService := workflow.NewService(db, deviceService, taskService, dispatchService)
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
-	dispatchService.AddTaskResultHook(workflowService.HandleTaskResult)
-	dispatchService.AddTaskResultHook(planService.SyncWorkflowRunByTask)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, workflowService)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, workflowService)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, planService, workflowService, wsHandler)
@@ -473,45 +471,38 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 	if startPayload.Data.TargetType != "workflow" {
 		t.Fatalf("unexpected target_type: %s", startPayload.Data.TargetType)
 	}
-	if startPayload.Data.TargetRefID == "" {
-		t.Fatalf("expected workflow instance id as target_ref_id")
-	}
 	assignTaskMessage := <-assignTaskDone
-	if assignTaskMessage.Type != protocol.MessageTypeAssignTask && assignTaskMessage.Type != protocol.MessageTypeStartWorkflowSession {
-		t.Fatalf("unexpected message type: %s", assignTaskMessage.Type)
-	}
-	if assignTaskMessage.Type == protocol.MessageTypeStartWorkflowSession {
-		return
+	if assignTaskMessage.Type != protocol.MessageTypeStartWorkflowSession {
+		t.Fatalf("expected start_workflow_session, got %s", assignTaskMessage.Type)
 	}
 
 	payload, ok := assignTaskMessage.Payload.(map[string]any)
 	if !ok {
-		t.Fatalf("unexpected assign_task payload type")
+		t.Fatalf("unexpected start_workflow_session payload type")
 	}
-	taskID, _ := payload["task_id"].(string)
-	workflowRunID, _ := payload["workflow_run_id"].(string)
-	workflowNodeID, _ := payload["workflow_node_id"].(string)
-	if taskID == "" || workflowRunID == "" || workflowNodeID == "" {
-		t.Fatalf("unexpected workflow assign_task payload: %#v", payload)
+	planRunID, _ := payload["plan_run_id"].(string)
+	planDeviceRunID, _ := payload["plan_device_run_id"].(string)
+	workflowNodeID, _ := payload["entry_node_id"].(string)
+	if planRunID == "" || planDeviceRunID == "" || workflowNodeID == "" {
+		t.Fatalf("unexpected start_workflow_session payload: %#v", payload)
 	}
 
 	resultMessage := protocol.Envelope{
-		Type:      protocol.MessageTypeTaskResult,
-		RequestID: "plan-workflow-result-001",
+		Type:      protocol.MessageTypeWorkflowSessionResult,
+		RequestID: "plan-workflow-session-result-001",
 		DeviceID:  registerPayload.Data.DeviceID,
 		Timestamp: 2,
 		Payload: map[string]any{
-			"task_id":          taskID,
-			"status":           "success",
-			"result_code":      "ok",
-			"result_message":   "ok",
-			"step_name":        "DONE",
-			"workflow_run_id":  workflowRunID,
-			"workflow_node_id": workflowNodeID,
+			"plan_run_id":        planRunID,
+			"plan_device_run_id": planDeviceRunID,
+			"workflow_node_id":   workflowNodeID,
+			"status":             "success",
+			"result_code":        "ok",
+			"result_message":     "ok",
 		},
 	}
 	if err := conn.WriteJSON(resultMessage); err != nil {
-		t.Fatalf("write task_result: %v", err)
+		t.Fatalf("write workflow_session_result: %v", err)
 	}
 
 	time.Sleep(150 * time.Millisecond)

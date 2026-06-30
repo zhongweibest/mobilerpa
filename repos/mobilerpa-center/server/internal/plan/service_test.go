@@ -11,7 +11,125 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/storage"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
+	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
+
+func TestWorkflowSessionResultKeepsStoppedDeviceNotBusy(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-workflow-session-stop-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+
+	taskSvc := task.NewService(db)
+	dispatchSvc := dispatch.NewService(taskSvc)
+	deviceSvc := device.NewService(db)
+	workflowSvc := workflow.NewService(db, deviceSvc, taskSvc, dispatchSvc)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, workflowSvc)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	workflowDef, err := workflowSvc.CreateDefinition(ctx, workflow.CreateDefinitionRequest{
+		WorkflowName: "工作流停止态保护",
+		Status:       workflow.DefinitionStatusActive,
+		Nodes: []workflow.Node{
+			{
+				NodeID:        "node_1",
+				NodeType:      workflow.NodeTypeScript,
+				NodeName:      "脚本节点",
+				ScriptName:    "demo_script",
+				ScriptVersion: "v1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create workflow definition: %v", err)
+	}
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "工作流停止态保护",
+		TargetType:          TargetTypeWorkflow,
+		TargetWorkflowDefID: workflowDef.WorkflowDefID,
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		DeviceIDs:           []string{"1"},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	result, err := db.ExecContext(ctx, `
+INSERT INTO plan_runs (plan_def_id, target_ref_id, run_date, target_type, status, started_at, finished_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		definition.PlanDefID, "1", "2026-06-29", TargetTypeWorkflow, RunStatusStopped, now, now, now, now,
+	)
+	if err != nil {
+		t.Fatalf("seed plan run: %v", err)
+	}
+	insertedPlanRunID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("read inserted plan run id: %v", err)
+	}
+	planRunID := strconv.FormatInt(insertedPlanRunID, 10)
+
+	result, err = db.ExecContext(ctx, `
+INSERT INTO plan_device_runs (plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, started_at, finished_at, last_error, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?)`,
+		planRunID, definition.PlanDefID, "1", TargetTypeWorkflow, "1", DeviceRunStatusStopped, now, now, now, now,
+	)
+	if err != nil {
+		t.Fatalf("seed plan device run: %v", err)
+	}
+	insertedPlanDeviceRunID, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("read inserted plan device run id: %v", err)
+	}
+	planDeviceRunID := strconv.FormatInt(insertedPlanDeviceRunID, 10)
+
+	if err := planSvc.HandleWorkflowSessionResult(ctx, protocol.WorkflowSessionResultPayload{
+		PlanRunID:       planRunID,
+		PlanDeviceRunID: planDeviceRunID,
+		Status:          RunStatusStopped,
+		WorkflowNodeID:  "node_1",
+		ResultMessage:   "stopped by test",
+	}, "req-stop-1", "1"); err != nil {
+		t.Fatalf("handle workflow session result: %v", err)
+	}
+
+	row := db.QueryRowContext(ctx, `
+SELECT status, current_node_id, last_error
+FROM plan_device_runs
+WHERE id = ?`, planDeviceRunID)
+
+	var status string
+	var currentNodeID string
+	var lastError string
+	if err := row.Scan(&status, &currentNodeID, &lastError); err != nil {
+		t.Fatalf("query plan device run status: %v", err)
+	}
+	if status != DeviceRunStatusStopped {
+		t.Fatalf("expected stopped status after session result, got %q", status)
+	}
+	if currentNodeID != "node_1" {
+		t.Fatalf("expected current node updated to node_1, got %q", currentNodeID)
+	}
+	if lastError != "" {
+		t.Fatalf("expected stopped result to clear last_error, got %q", lastError)
+	}
+
+	busy, err := planSvc.GetDeviceBusyDetail(ctx, "1")
+	if err != nil {
+		t.Fatalf("get device busy detail: %v", err)
+	}
+	if busy != nil {
+		t.Fatalf("expected stopped device not busy after workflow session stop, got %#v", busy)
+	}
+}
 
 func TestCreateAndListDefinitions(t *testing.T) {
 	t.Parallel()
@@ -274,12 +392,11 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 	}
 }
 
-// TestScriptPlanBlocksOnWorkflowRun 验证脚本型计划任务启动时也会检查目标设备上的工作流占用。
-// 这是“统一占用判定”的第一步：脚本型计划任务必须避让未结束的工作流运行。
-func TestScriptPlanBlocksOnWorkflowRun(t *testing.T) {
+// TestScriptPlanBlocksOnOtherPlanRun 验证脚本型计划任务启动时会避让其他未结束的计划设备运行。
+func TestScriptPlanBlocksOnOtherPlanRun(t *testing.T) {
 	t.Parallel()
 
-	dbPath := filepath.Join(t.TempDir(), "plan-script-workflow-busy-test.db")
+	dbPath := filepath.Join(t.TempDir(), "plan-script-plan-busy-test.db")
 	db, err := storage.Open(dbPath)
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -290,26 +407,22 @@ func TestScriptPlanBlocksOnWorkflowRun(t *testing.T) {
 
 	taskSvc := task.NewService(db)
 	dispatchSvc := dispatch.NewService(taskSvc)
-	deviceSvc := device.NewService(db)
-	workflowSvc := workflow.NewService(db, deviceSvc, taskSvc, dispatchSvc)
-	// 设备域传 nil，跳过 EnsureExecutionReady，只验证占用判定。
-	planSvc := NewService(db, nil, taskSvc, dispatchSvc, workflowSvc)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.ExecContext(ctx, `
-INSERT INTO workflow_instances (workflow_def_id, workflow_name, status, started_at, created_at, updated_at)
-VALUES (?, ?, ?, ?, ?, ?)`,
-		1, "wf-busy", "running", now, now, now,
-	); err != nil {
-		t.Fatalf("seed workflow instance: %v", err)
-	}
-	// device 2 上存在一条 pending 的工作流运行。
-	if _, err := db.ExecContext(ctx, `
-INSERT INTO workflow_runs (workflow_instance_id, workflow_def_id, device_id, status, current_node_id, started_at, created_at, updated_at)
+INSERT INTO plan_runs (plan_def_id, target_ref_id, run_date, target_type, status, started_at, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		1, 1, 2, "pending", "node_1", now, now, now,
+		"other-plan", "demo-script@v1", "2026-06-29", TargetTypeScript, RunStatusRunning, now, now, now,
 	); err != nil {
-		t.Fatalf("seed workflow run: %v", err)
+		t.Fatalf("seed plan run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_device_runs (plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, current_node_id, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, "other-plan", "2", TargetTypeScript, "demo-script@v1", DeviceRunStatusPending, "", now, now, now,
+	); err != nil {
+		t.Fatalf("seed plan device run: %v", err)
 	}
 
 	busy, err := planSvc.ensureDevicesAvailable(ctx, TargetTypeScript, "", []string{"2"})
@@ -317,10 +430,10 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Fatalf("ensureDevicesAvailable: %v", err)
 	}
 	if len(busy) == 0 {
-		t.Fatalf("期望脚本型计划任务被目标设备上的工作流运行拦下，实际未拦")
+		t.Fatalf("期望脚本型计划任务被目标设备上的其他计划设备运行拦下，实际未拦")
 	}
-	if busy[0].OccupancyType != "workflow" {
-		t.Fatalf("期望 OccupancyType=workflow，实际=%q", busy[0].OccupancyType)
+	if busy[0].OccupancyType != "plan" {
+		t.Fatalf("期望 OccupancyType=plan，实际=%q", busy[0].OccupancyType)
 	}
 
 	// 对照：未被占用的设备不应被拦。

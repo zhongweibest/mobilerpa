@@ -8,18 +8,19 @@ import {
   ElDialog,
   ElEmpty,
   ElMessage,
-  ElMessageBox,
+  ElOption,
   ElPagination,
+  ElSelect,
   ElTable,
   ElTableColumn,
-  ElTag
+  ElMessageBox
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { defineComponent, h, onMounted, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
 
-import { fetchDeviceOccupancy, terminateManualTaskOnDevice } from "../../api/devices";
+import { bindLocationNode, fetchDeviceOccupancy, fetchLocationNodes } from "../../api/devices";
 import { useDevicesStore } from "../../stores/devices";
-import type { DeviceOccupancyDetail } from "../../types/device";
+import type { DeviceOccupancyDetail, DeviceRecord, LocationNodeRecord } from "../../types/device";
 import { formatDateTime, getDeviceDisplayName, normalizeBindStatus, normalizeDeviceStatus } from "../../utils/device";
 
 const PAGE_SIZES = [10, 20, 30, 50, 100];
@@ -53,10 +54,14 @@ function renderOccupancyTag(occupancy: DeviceOccupancyDetail["occupancy"]) {
   if (occupancy.occupancy_type === "plan") {
     return h("span", { class: "status-tag status-tag--pending" }, "计划任务占用");
   }
-  if (occupancy.occupancy_type === "manual_task") {
-    return h("span", { class: "status-tag status-tag--offline" }, "手工任务占用");
+  return h("span", { class: "status-tag status-tag--online" }, "运行中占用");
+}
+
+function buildSlotLabel(slot?: LocationNodeRecord | null) {
+  if (!slot) {
+    return "";
   }
-  return h("span", { class: "status-tag status-tag--online" }, "工作流占用");
+  return slot.path_text || [slot.zone_name, slot.row_name, slot.slot_name].map((item) => (item || "").trim()).filter((item) => item !== "").join("-");
 }
 
 export const DevicesPage = defineComponent({
@@ -66,8 +71,27 @@ export const DevicesPage = defineComponent({
     const { devices, total, page, pageSize, loading, deletingDeviceID, errorMessage } = storeToRefs(devicesStore);
     const occupancyDialogVisible = ref(false);
     const loadingOccupancy = ref(false);
-    const terminatingTaskID = ref("");
     const selectedOccupancy = ref<DeviceOccupancyDetail | null>(null);
+    const bindDialogVisible = ref(false);
+    const bindingDevice = ref<DeviceRecord | null>(null);
+    const bindingNodes = ref<LocationNodeRecord[]>([]);
+    const loadingSlots = ref(false);
+    const binding = ref(false);
+    const bindForm = reactive({
+      slot_zone: "",
+      slot_row: "",
+      slot_id: ""
+    });
+
+    const availableZones = computed(() =>
+      bindingNodes.value.filter((item) => item.node_type === "zone")
+    );
+    const availableRows = computed(() =>
+      bindingNodes.value.filter((item) => item.node_type === "row" && item.parent_id === bindForm.slot_zone.trim())
+    );
+    const availableSlots = computed(() =>
+      bindingNodes.value.filter((item) => item.node_type === "slot" && item.parent_id === bindForm.slot_row.trim())
+    );
 
     onMounted(() => {
       void devicesStore.loadDevices();
@@ -106,36 +130,48 @@ export const DevicesPage = defineComponent({
       }
     }
 
-    async function handleTerminateManualTask() {
-      const taskID = selectedOccupancy.value?.occupancy?.task_id || "";
-      if (taskID === "") {
+    async function handleOpenBindDialog(device: DeviceRecord) {
+      bindingDevice.value = device;
+      bindForm.slot_zone = device.slot_zone || "";
+      bindForm.slot_row = device.slot_row || "";
+      bindForm.slot_id = "";
+      loadingSlots.value = true;
+      try {
+        bindingNodes.value = await fetchLocationNodes();
+        const currentSlot = bindingNodes.value.find((item) => item.node_type === "slot" && item.device_id === device.device_id);
+        if (currentSlot) {
+          bindForm.slot_zone = currentSlot.parent_id ? bindingNodes.value.find((item) => item.node_id === bindingNodes.value.find((row) => row.node_id === currentSlot.parent_id)?.parent_id)?.node_id || "" : "";
+          bindForm.slot_row = currentSlot.parent_id || "";
+          bindForm.slot_id = currentSlot.node_id;
+        }
+        bindDialogVisible.value = true;
+      } catch (_error) {
+        ElMessage.error("加载槽位列表失败，请先在设备绑定页创建分区、排号和槽位");
+      } finally {
+        loadingSlots.value = false;
+      }
+    }
+
+    async function handleBindDevice() {
+      if (!bindingDevice.value) {
         return;
       }
-
-      try {
-        await ElMessageBox.confirm(`确认人工结束手工任务 ${taskID} 吗？`, "人工结束任务确认", {
-          confirmButtonText: "确认结束",
-          cancelButtonText: "取消",
-          type: "warning"
-        });
-      } catch (error) {
-        if (error === "cancel" || error === "close") {
-          return;
-        }
+      if (bindForm.slot_id.trim() === "") {
+        ElMessage.warning("请先选择槽位");
+        return;
       }
-
+      binding.value = true;
       try {
-        terminatingTaskID.value = taskID;
-        await terminateManualTaskOnDevice(selectedOccupancy.value.device_id, taskID);
-        if (selectedOccupancy.value) {
-          selectedOccupancy.value = await fetchDeviceOccupancy(selectedOccupancy.value.device_id);
-        }
+        await bindLocationNode(bindForm.slot_id.trim(), {
+          device_id: bindingDevice.value.device_id
+        });
+        bindDialogVisible.value = false;
+        ElMessage.success("设备绑定成功");
         await devicesStore.loadDevices();
-        ElMessage.success(`手工任务 ${taskID} 已结束`);
-      } catch (_error) {
-        ElMessage.error("人工结束手工任务失败，请检查中心服务日志");
+      } catch (error) {
+        ElMessage.error(error instanceof Error ? error.message : "设备绑定失败");
       } finally {
-        terminatingTaskID.value = "";
+        binding.value = false;
       }
     }
 
@@ -267,6 +303,18 @@ export const DevicesPage = defineComponent({
                                         ElButton,
                                         {
                                           size: "small",
+                                          type: "success",
+                                          plain: true,
+                                          onClick: () => {
+                                            void handleOpenBindDialog(row);
+                                          }
+                                        },
+                                        () => "绑定"
+                                      ),
+                                      h(
+                                        ElButton,
+                                        {
+                                          size: "small",
                                           type: "primary",
                                           plain: true,
                                           loading: loadingOccupancy.value && selectedOccupancy.value?.device_id === row.device_id,
@@ -348,8 +396,6 @@ export const DevicesPage = defineComponent({
                     h(ElDescriptionsItem, { label: "占用类型" }, () => occupancy?.occupancy_type || "暂无"),
                     h(ElDescriptionsItem, { label: "任务状态" }, () => occupancy?.task_status || "暂无"),
                     h(ElDescriptionsItem, { label: "任务 ID" }, () => occupancy?.task_id || "暂无"),
-                    h(ElDescriptionsItem, { label: "工作流实例" }, () => occupancy?.workflow_instance_id || "暂无"),
-                    h(ElDescriptionsItem, { label: "运行记录" }, () => occupancy?.workflow_run_id || "暂无"),
                     h(ElDescriptionsItem, { label: "current_task_id" }, () => selectedOccupancy.value?.current_task_id || "暂无"),
                     h(ElDescriptionsItem, { label: "current_step" }, () => selectedOccupancy.value?.current_step || "暂无"),
                     h(ElDescriptionsItem, { label: "last_error" }, () => selectedOccupancy.value?.last_error || "暂无")
@@ -357,26 +403,82 @@ export const DevicesPage = defineComponent({
                 )
               ]);
             },
-            footer: () => {
-              const occupancy = selectedOccupancy.value?.occupancy;
-              const canTerminate = occupancy?.occupancy_type === "manual_task" && (occupancy.task_status === "assigned" || occupancy.task_status === "running");
-              return h("div", { class: "dialog-footer" }, [
-                canTerminate
-                  ? h(
-                      ElButton,
-                      {
-                        type: "danger",
-                        loading: terminatingTaskID.value === occupancy?.task_id,
-                        onClick: () => {
-                          void handleTerminateManualTask();
-                        }
-                      },
-                      () => "人工结束手工任务"
+            footer: () => h("div", { class: "dialog-footer" }, [h(ElButton, { onClick: () => (occupancyDialogVisible.value = false) }, () => "关闭")])
+          }
+        ),
+        h(
+          ElDialog,
+          {
+            modelValue: bindDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => {
+              bindDialogVisible.value = value;
+            },
+            title: bindingDevice.value ? `绑定设备：${getDeviceDisplayName(bindingDevice.value)}` : "绑定设备",
+            width: "560px"
+          },
+          {
+            default: () =>
+              h("div", { class: "device-occupancy-panel" }, [
+                h(ElDescriptions, { border: true, column: 1 }, () => [
+                  h(ElDescriptionsItem, { label: "设备 ID" }, () => bindingDevice.value?.device_id || "暂无"),
+                  h(ElDescriptionsItem, { label: "当前展示位置" }, () => bindingDevice.value?.physical_slot || "未录入")
+                ]),
+                h(
+                  ElSelect,
+                  {
+                    modelValue: bindForm.slot_zone,
+                    filterable: true,
+                    placeholder: "请选择分区",
+                    loading: loadingSlots.value,
+                    "onUpdate:modelValue": (value: string) => {
+                      bindForm.slot_zone = value;
+                      bindForm.slot_row = "";
+                      bindForm.slot_id = "";
+                    }
+                  },
+                    () => availableZones.value.map((item) => h(ElOption, { key: item.node_id, label: item.node_name, value: item.node_id }))
+                ),
+                h(
+                  ElSelect,
+                  {
+                    modelValue: bindForm.slot_row,
+                    filterable: true,
+                    placeholder: "请选择排号",
+                    disabled: bindForm.slot_zone.trim() === "",
+                    "onUpdate:modelValue": (value: string) => {
+                      bindForm.slot_row = value;
+                      bindForm.slot_id = "";
+                    }
+                  },
+                  () => availableRows.value.map((item) => h(ElOption, { key: item.node_id, label: item.node_name, value: item.node_id }))
+                ),
+                h(
+                  ElSelect,
+                  {
+                    modelValue: bindForm.slot_id,
+                    filterable: true,
+                    placeholder: "请选择槽位",
+                    disabled: bindForm.slot_row.trim() === "",
+                    "onUpdate:modelValue": (value: string) => {
+                      bindForm.slot_id = value;
+                    }
+                  },
+                  () =>
+                    availableSlots.value.map((item) =>
+                      h(ElOption, {
+                        key: item.node_id,
+                        label: item.device_id && item.device_id !== bindingDevice.value?.device_id ? `${buildSlotLabel(item)}（已绑定 ${item.device_id}）` : buildSlotLabel(item),
+                        value: item.node_id,
+                        disabled: !!item.device_id && item.device_id !== bindingDevice.value?.device_id
+                      })
                     )
-                  : h(ElTag, { type: "info" }, () => "当前无可人工结束的手工任务"),
-                h(ElButton, { onClick: () => (occupancyDialogVisible.value = false) }, () => "关闭")
-              ]);
-            }
+                )
+              ]),
+            footer: () =>
+              h("div", { class: "dialog-footer" }, [
+                h(ElButton, { onClick: () => (bindDialogVisible.value = false) }, () => "取消"),
+                h(ElButton, { type: "primary", loading: binding.value, onClick: () => void handleBindDevice() }, () => "确认绑定")
+              ])
           }
         )
       ]);

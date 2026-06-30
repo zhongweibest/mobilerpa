@@ -24,17 +24,17 @@ import (
 
 // App 负责装配配置、存储、业务服务和 HTTP 服务。
 type App struct {
-	cfg       config.Config
-	server    *http.Server
-	database  *sql.DB
-	devices   *device.Service
-	tasks     *task.Service
-	dispatch  *dispatch.Service
-	discovery *discovery.Service
-	scripts   *script.Service
-	settings  *settings.Service
-	plans     *plan.Service
-	workflows *workflow.Service
+	cfg            config.Config
+	server         *http.Server
+	database       *sql.DB
+	devices        *device.Service
+	tasks          *task.Service
+	dispatch       *dispatch.Service
+	discovery      *discovery.Service
+	scripts        *script.Service
+	settings       *settings.Service
+	plans          *plan.Service
+	workflows      *workflow.Service
 	planStartQueue chan string
 	planStopQueue  chan string
 }
@@ -58,9 +58,7 @@ func New() (*App, error) {
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService)
 	planService.SetStartFanout(cfg.PlanStartFanout)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
-	dispatchService.AddTaskResultHook(planService.SyncWorkflowRunByTask)
-	workflowService.AddSessionResultHook(planService.SyncWorkflowRunBySession)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, workflowService)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, workflowService)
 
 	mux := http.NewServeMux()
 	api.RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, settingsService, planService, workflowService, wsHandler)
@@ -71,17 +69,17 @@ func New() (*App, error) {
 	}
 
 	return &App{
-		cfg:       cfg,
-		server:    srv,
-		database:  db,
-		devices:   deviceService,
-		tasks:     taskService,
-		dispatch:  dispatchService,
-		discovery: discoveryService,
-		scripts:   scriptService,
-		settings:  settingsService,
-		plans:     planService,
-		workflows: workflowService,
+		cfg:            cfg,
+		server:         srv,
+		database:       db,
+		devices:        deviceService,
+		tasks:          taskService,
+		dispatch:       dispatchService,
+		discovery:      discoveryService,
+		scripts:        scriptService,
+		settings:       settingsService,
+		plans:          planService,
+		workflows:      workflowService,
 		planStartQueue: make(chan string, 256),
 		planStopQueue:  make(chan string, 256),
 	}, nil

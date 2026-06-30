@@ -30,55 +30,6 @@ export interface WorkflowDefinitionRecord {
   updated_at: string;
 }
 
-export interface WorkflowRunRecord {
-  workflow_run_id: string;
-  workflow_instance_id: string;
-  workflow_def_id: string;
-  device_id: string;
-  status: string;
-  current_node_id: string;
-  current_task_id: string;
-  started_at: string;
-  finished_at: string;
-  last_error: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface WorkflowInstanceRecord {
-  workflow_instance_id: string;
-  workflow_def_id: string;
-  workflow_name: string;
-  status: string;
-  started_at: string;
-  finished_at: string;
-  created_at: string;
-  updated_at: string;
-  device_runs: WorkflowRunRecord[];
-}
-
-export interface WorkflowRunSummary {
-  total: number;
-  pending: number;
-  running: number;
-  success: number;
-  failed: number;
-  stopped: number;
-}
-
-export interface WorkflowEventRecord {
-  id: number;
-  workflow_instance_id: string;
-  workflow_run_id: string;
-  workflow_def_id: string;
-  device_id: string;
-  node_id: string;
-  event_type: string;
-  message: string;
-  extra: Record<string, unknown>;
-  created_at: string;
-}
-
 export interface CreateWorkflowRequest {
   workflow_name: string;
   description: string;
@@ -97,6 +48,8 @@ export interface CreateWorkflowRequest {
     edge_type: string;
   }>;
 }
+
+export interface UpdateWorkflowRequest extends CreateWorkflowRequest {}
 
 export interface WorkflowStartRequest {
   device_ids: string[];

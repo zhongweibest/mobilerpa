@@ -12,18 +12,27 @@ function sleepMilliseconds(durationMs) {
     }
 }
 
+function buildSessionRefs(sessionPayload) {
+    return {
+        plan_run_id: String((sessionPayload && sessionPayload.plan_run_id) || ""),
+        plan_device_run_id: String((sessionPayload && sessionPayload.plan_device_run_id) || "")
+    };
+}
+
 function pauseBeforeNextNode(sessionPayload, fromNodeID, toNodeID, options) {
     var sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function () {};
     var isCancelled = options && typeof options.isCancelled === "function" ? options.isCancelled : function () { return false; };
+    var refs = buildSessionRefs(sessionPayload);
 
     if (!toNodeID || isCancelled()) {
         return;
     }
 
     sendEvent({
-        workflow_run_id: String((sessionPayload && sessionPayload.workflow_run_id) || ""),
+        plan_run_id: refs.plan_run_id,
+        plan_device_run_id: refs.plan_device_run_id,
         workflow_node_id: String(fromNodeID || ""),
-        event_type: "workflow_step_progress",
+        event_type: "workflow_session_progress",
         status: "running",
         step_name: "NODE_TRANSITION_WAIT",
         message: "节点切换前等待 2 秒",
@@ -42,7 +51,7 @@ function syncSessionScripts(sessionPayload, options) {
     var logger = options && options.logger ? options.logger : runtime.createLogger();
     var sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function () {};
     var centerBaseURL = String((options && options.centerBaseURL) || "");
-    var workflowRunID = String((sessionPayload && sessionPayload.workflow_run_id) || "");
+    var refs = buildSessionRefs(sessionPayload);
     var index = 0;
     var item = null;
 
@@ -53,9 +62,10 @@ function syncSessionScripts(sessionPayload, options) {
     for (index = 0; index < manifests.length; index += 1) {
         item = manifests[index] || {};
         sendEvent({
-            workflow_run_id: workflowRunID,
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             workflow_node_id: "",
-            event_type: "workflow_step_progress",
+            event_type: "workflow_session_progress",
             status: "running",
             step_name: "SYNC_SCRIPT",
             message: "工作流执行前校验脚本版本",
@@ -104,17 +114,17 @@ function getNextNodeID(edgeMap, fromNodeID, edgeType) {
 }
 
 function createTaskSummaryFromNode(sessionPayload, node) {
+    var refs = buildSessionRefs(sessionPayload);
     return {
-        task_id: "workflow-session-" + String(sessionPayload.workflow_run_id || "") + "-" + String(node.node_id || ""),
-        workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+        task_id: "workflow-session-" + String(refs.plan_device_run_id || "") + "-" + String(node.node_id || ""),
+        plan_run_id: refs.plan_run_id,
+        plan_device_run_id: refs.plan_device_run_id,
         workflow_node_id: String(node.node_id || ""),
-        task_source_type: "workflow_session",
         script_name: String(node.script_name || ""),
         script_version: String(node.script_version || ""),
         priority: 0,
         params: {
             workflow_session_id: String(sessionPayload.workflow_session_id || ""),
-            workflow_instance_id: String(sessionPayload.workflow_instance_id || ""),
             workflow_def_id: String(sessionPayload.workflow_def_id || "")
         }
     };
@@ -126,6 +136,7 @@ function runScriptNode(sessionPayload, node, options) {
     var sendEvent = typeof config.sendEvent === "function" ? config.sendEvent : function () {};
     var isCancelled = typeof config.isCancelled === "function" ? config.isCancelled : function () { return false; };
     var taskSummary = createTaskSummaryFromNode(sessionPayload, node);
+    var refs = buildSessionRefs(sessionPayload);
     var result = null;
 
     if (isCancelled()) {
@@ -138,7 +149,8 @@ function runScriptNode(sessionPayload, node, options) {
     }
 
     sendEvent({
-        workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+        plan_run_id: refs.plan_run_id,
+        plan_device_run_id: refs.plan_device_run_id,
         workflow_node_id: String(node.node_id || ""),
         event_type: "workflow_step_started",
         status: "running",
@@ -158,9 +170,10 @@ function runScriptNode(sessionPayload, node, options) {
         logger: logger,
         onProgress: function (progress) {
             sendEvent({
-                workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+                plan_run_id: refs.plan_run_id,
+                plan_device_run_id: refs.plan_device_run_id,
                 workflow_node_id: String(node.node_id || ""),
-                event_type: "workflow_step_progress",
+                event_type: "workflow_session_progress",
                 status: String((progress && progress.status) || "running"),
                 step_name: String((progress && progress.step_name) || ""),
                 message: String((progress && progress.message) || ""),
@@ -171,7 +184,8 @@ function runScriptNode(sessionPayload, node, options) {
 
     if (result && String(result.status || "") === "success") {
         sendEvent({
-            workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             workflow_node_id: String(node.node_id || ""),
             event_type: "workflow_step_succeeded",
             status: "success",
@@ -185,7 +199,8 @@ function runScriptNode(sessionPayload, node, options) {
     }
 
     sendEvent({
-        workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+        plan_run_id: refs.plan_run_id,
+        plan_device_run_id: refs.plan_device_run_id,
         workflow_node_id: String(node.node_id || ""),
         event_type: "workflow_step_failed",
         status: "failed",
@@ -206,13 +221,15 @@ function runSession(sessionPayload, options) {
     var logger = options && options.logger ? options.logger : runtime.createLogger();
     var sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function () {};
     var isCancelled = options && typeof options.isCancelled === "function" ? options.isCancelled : function () { return false; };
+    var refs = buildSessionRefs(sessionPayload);
     var loopCounters = {};
     var node = null;
     var nextNodeID = "";
     var result = null;
 
     sendEvent({
-        workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+        plan_run_id: refs.plan_run_id,
+        plan_device_run_id: refs.plan_device_run_id,
         workflow_node_id: currentNodeID,
         event_type: "workflow_run_started",
         status: "running",
@@ -289,7 +306,8 @@ function runSession(sessionPayload, options) {
 
             loopCounters[currentNodeID] += 1;
             sendEvent({
-                workflow_run_id: String(sessionPayload.workflow_run_id || ""),
+                plan_run_id: refs.plan_run_id,
+                plan_device_run_id: refs.plan_device_run_id,
                 workflow_node_id: currentNodeID,
                 event_type: "workflow_loop_completed",
                 status: "running",

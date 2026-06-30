@@ -90,11 +90,9 @@ type Task struct {
 	TaskID string `json:"task_id"`
 	// DeviceID 是目标设备标识。
 	DeviceID string `json:"device_id"`
-	// WorkflowRunID 是关联的工作流运行实例标识。
-	WorkflowRunID string `json:"workflow_run_id"`
 	// WorkflowNodeID 是关联的工作流节点标识。
 	WorkflowNodeID string `json:"workflow_node_id"`
-	// TaskSourceType 表示任务来源，例如 manual 或 workflow。
+	// TaskSourceType 表示任务来源，例如 plan_script 或 workflow_session。
 	TaskSourceType string `json:"task_source_type"`
 	// ScriptName 是脚本名称。
 	ScriptName string `json:"script_name"`
@@ -302,7 +300,7 @@ func (s *Service) List(ctx context.Context, sourceType string) ([]Task, error) {
 
 	query := `
 SELECT id, device_id, script_name, script_version, params_json, status, priority,
-       workflow_run_id, workflow_node_id, task_source_type,
+       workflow_node_id, task_source_type,
        retry_count, current_step, result_code, result_message, scheduled_at, started_at,
        finished_at, created_at, updated_at
 FROM tasks`
@@ -342,7 +340,7 @@ func (s *Service) GetByID(ctx context.Context, taskID string) (Task, error) {
 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, device_id, script_name, script_version, params_json, status, priority,
-       workflow_run_id, workflow_node_id, task_source_type,
+       workflow_node_id, task_source_type,
        retry_count, current_step, result_code, result_message, scheduled_at, started_at,
        finished_at, created_at, updated_at
 FROM tasks
@@ -832,11 +830,10 @@ type taskScanner interface {
 
 func scanTask(scanner taskScanner) (Task, error) {
 	var (
-		taskItem      Task
-		paramsJSON    string
-		taskID        int64
-		deviceID      int64
-		workflowRunID int64
+		taskItem   Task
+		paramsJSON string
+		taskID     int64
+		deviceID   int64
 	)
 	err := scanner.Scan(
 		&taskID,
@@ -846,7 +843,6 @@ func scanTask(scanner taskScanner) (Task, error) {
 		&paramsJSON,
 		&taskItem.Status,
 		&taskItem.Priority,
-		&workflowRunID,
 		&taskItem.WorkflowNodeID,
 		&taskItem.TaskSourceType,
 		&taskItem.RetryCount,
@@ -867,9 +863,6 @@ func scanTask(scanner taskScanner) (Task, error) {
 	}
 	taskItem.TaskID = strconv.FormatInt(taskID, 10)
 	taskItem.DeviceID = strconv.FormatInt(deviceID, 10)
-	if workflowRunID > 0 {
-		taskItem.WorkflowRunID = strconv.FormatInt(workflowRunID, 10)
-	}
 
 	params, err := parseJSONObject(paramsJSON)
 	if err != nil {

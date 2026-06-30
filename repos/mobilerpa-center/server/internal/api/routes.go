@@ -65,6 +65,8 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/device/register", registerDevice(devices))
 	mux.HandleFunc("/api/v1/devices", listDevices(devices, plans))
 	mux.HandleFunc("/api/v1/devices/", getDevice(devices, tasks, workflows, plans))
+	mux.HandleFunc("/api/v1/location-nodes", locationNodesCollection(devices))
+	mux.HandleFunc("/api/v1/location-nodes/", locationNodeSubResources(devices))
 	mux.HandleFunc("/api/v1/discovery/devices", listDiscoveredDevices(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-deployments", deployAgents(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-actions", controlAgent(discoveryService))
@@ -77,8 +79,6 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/scripts/upload", uploadScript(scripts))
 	mux.HandleFunc("/api/v1/scripts", listScripts(scripts))
 	mux.HandleFunc("/api/v1/scripts/", scriptsSubResources(scripts))
-	mux.HandleFunc("/api/v1/tasks", tasksCollection(tasks))
-	mux.HandleFunc("/api/v1/tasks/", taskSubResources(tasks))
 	mux.HandleFunc("/api/v1/workflows", workflowsCollection(workflows))
 	mux.HandleFunc("/api/v1/workflows/", workflowSubResources(workflows))
 	mux.HandleFunc("/api/v1/device/upload", notImplemented("device upload"))
@@ -113,19 +113,6 @@ func workflowsCollection(workflows *workflow.Service) http.HandlerFunc {
 		case http.MethodGet:
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
-
-			if strings.TrimSpace(r.URL.Query().Get("view")) == "instances" {
-				result, err := workflows.ListInstances(ctx, "")
-				if err != nil {
-					writeWorkflowError(w, err)
-					return
-				}
-				writeJSON(w, http.StatusOK, map[string]any{
-					"status": "ok",
-					"data":   result,
-				})
-				return
-			}
 
 			page, pageSize, err := parsePagination(r)
 			if err != nil {
@@ -431,6 +418,24 @@ func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 			return
 		}
 
+		if len(parts) == 1 && r.Method == http.MethodPut {
+			var req workflow.UpdateDefinitionRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := workflows.UpdateDefinition(ctx, workflowDefID, req)
+			if err != nil {
+				writeWorkflowError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
 		if len(parts) == 1 && r.Method == http.MethodDelete {
 			if err := workflows.DeleteDefinition(ctx, workflowDefID); err != nil {
 				writeWorkflowError(w, err)
@@ -442,127 +447,6 @@ func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 					"workflow_def_id": workflowDefID,
 					"deleted":         true,
 				},
-			})
-			return
-		}
-
-		if len(parts) == 2 && parts[1] == "runs" && r.Method == http.MethodGet {
-			result, err := workflows.ListRuns(ctx, workflowDefID)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 2 && parts[1] == "instances" && r.Method == http.MethodGet {
-			result, err := workflows.ListInstances(ctx, workflowDefID)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 2 && parts[1] == "events" && r.Method == http.MethodGet {
-			workflowRunID := strings.TrimSpace(r.URL.Query().Get("workflow_run_id"))
-			result, err := workflows.ListEvents(ctx, workflowDefID, workflowRunID)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 2 && parts[1] == "start" && r.Method == http.MethodPost {
-			var req workflow.StartRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-
-			result, err := workflows.Start(ctx, workflowDefID, req)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 4 && parts[1] == "instances" && parts[3] == "devices" && r.Method == http.MethodPost {
-			var req workflow.AddDevicesRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			req.WorkflowInstanceID = strings.TrimSpace(parts[2])
-
-			result, err := workflows.AddDevices(ctx, workflowDefID, req)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 4 && parts[1] == "instances" && parts[3] == "stop" && r.Method == http.MethodPost {
-			result, err := workflows.StopDefinition(ctx, workflowDefID, parts[2])
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
-			return
-		}
-
-		if len(parts) == 3 && parts[1] == "instances" && r.Method == http.MethodDelete {
-			if err := workflows.DeleteInstance(ctx, parts[2]); err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"workflow_def_id":      workflowDefID,
-					"workflow_instance_id": parts[2],
-					"deleted":              true,
-				},
-			})
-			return
-		}
-
-		if len(parts) == 6 && parts[1] == "instances" && parts[3] == "devices" && parts[5] == "stop" && r.Method == http.MethodPost {
-			result, err := workflows.StopRunByDevice(ctx, workflowDefID, parts[2], parts[4])
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
 			})
 			return
 		}
@@ -760,30 +644,33 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 		items := make([]map[string]any, 0, len(results))
 		for _, item := range results {
 			deviceItem := map[string]any{
-				"device_id":                             item.DeviceID,
-				"agent_uuid":                            item.AgentUUID,
-				"device_name":                           item.DeviceName,
-				"physical_slot":                         item.PhysicalSlot,
-				"group_name":                            item.GroupName,
-				"status":                                item.Status,
-				"bind_status":                           item.BindStatus,
-				"ip":                                    item.IP,
-				"brand":                                 item.Brand,
-				"model":                                 item.Model,
-				"android_id":                            item.AndroidID,
-				"adb_serial":                            item.ADBSerial,
-				"current_task_id":                       item.CurrentTaskID,
-				"current_step":                          item.CurrentStep,
-				"last_error":                            item.LastError,
-				"accessibility_status":                  item.AccessibilityStatus,
-				"foreground_service_status":             item.ForegroundServiceStatus,
-				"battery_optimization_ignored_status":   item.BatteryOptimizationIgnoredStatus,
-				"env_checked_at":                        item.EnvCheckedAt,
-				"env_check_message":                     item.EnvCheckMessage,
-				"last_heartbeat_at":                     item.LastHeartbeatAt,
-				"created_at":                            item.CreatedAt,
-				"updated_at":                            item.UpdatedAt,
-				"occupancy":                             nil,
+				"device_id":                           item.DeviceID,
+				"agent_uuid":                          item.AgentUUID,
+				"device_name":                         item.DeviceName,
+				"physical_slot":                       item.PhysicalSlot,
+				"group_name":                          item.GroupName,
+				"slot_zone":                           item.SlotZone,
+				"slot_row":                            item.SlotRow,
+				"slot_position":                       item.SlotPosition,
+				"status":                              item.Status,
+				"bind_status":                         item.BindStatus,
+				"ip":                                  item.IP,
+				"brand":                               item.Brand,
+				"model":                               item.Model,
+				"android_id":                          item.AndroidID,
+				"adb_serial":                          item.ADBSerial,
+				"current_task_id":                     item.CurrentTaskID,
+				"current_step":                        item.CurrentStep,
+				"last_error":                          item.LastError,
+				"accessibility_status":                item.AccessibilityStatus,
+				"foreground_service_status":           item.ForegroundServiceStatus,
+				"battery_optimization_ignored_status": item.BatteryOptimizationIgnoredStatus,
+				"env_checked_at":                      item.EnvCheckedAt,
+				"env_check_message":                   item.EnvCheckMessage,
+				"last_heartbeat_at":                   item.LastHeartbeatAt,
+				"created_at":                          item.CreatedAt,
+				"updated_at":                          item.UpdatedAt,
+				"occupancy":                           nil,
 			}
 			if plans != nil {
 				busyDetail, err := plans.GetDeviceBusyDetail(ctx, item.DeviceID)
@@ -832,13 +719,6 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 					return
 				}
 				busyDetail = planBusyDetail
-			} else {
-				workflowBusyDetail, err := workflows.GetDeviceBusyDetail(ctx, deviceID)
-				if err != nil {
-					writeWorkflowError(w, err)
-					return
-				}
-				busyDetail = workflowBusyDetail
 			}
 
 			writeJSON(w, http.StatusOK, map[string]any{
@@ -894,6 +774,141 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 				"expected_methods": []string{http.MethodGet, http.MethodDelete},
 			})
 		}
+	}
+}
+
+func locationNodesCollection(devices *device.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		switch r.Method {
+		case http.MethodGet:
+			result, err := devices.ListLocationNodes(ctx)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		case http.MethodPost:
+			var req device.CreateLocationNodeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := devices.CreateLocationNode(ctx, req)
+			if err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodGet, http.MethodPost},
+			})
+		}
+	}
+}
+
+func locationNodeSubResources(devices *device.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/location-nodes/")
+		trimmed = strings.Trim(trimmed, "/")
+		parts := strings.Split(trimmed, "/")
+		if len(parts) == 0 || strings.TrimSpace(parts[0]) == "" {
+			writeError(w, http.StatusNotFound, "location_node_not_found")
+			return
+		}
+
+		nodeID := strings.TrimSpace(parts[0])
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if len(parts) == 1 && r.Method == http.MethodGet {
+			result, err := devices.GetLocationNodeByID(ctx, nodeID)
+			if err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
+		if len(parts) == 1 && r.Method == http.MethodPut {
+			var req device.UpdateLocationNodeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := devices.UpdateLocationNode(ctx, nodeID, req)
+			if err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
+		if len(parts) == 1 && r.Method == http.MethodDelete {
+			if err := devices.DeleteLocationNode(ctx, nodeID); err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data": map[string]any{
+					"node_id":  nodeID,
+					"deleted":  true,
+				},
+			})
+			return
+		}
+
+		if len(parts) == 2 && parts[1] == "bind" && r.Method == http.MethodPost {
+			var req device.BindLocationNodeRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := devices.BindDeviceToLocationNode(ctx, nodeID, req)
+			if err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
+		if len(parts) == 2 && parts[1] == "unbind" && r.Method == http.MethodPost {
+			result, err := devices.UnbindLocationNode(ctx, nodeID)
+			if err != nil {
+				writeDeviceError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
+		writeError(w, http.StatusNotFound, "location_node_resource_not_found")
 	}
 }
 
@@ -1010,77 +1025,6 @@ func pairDevice(discoveryService *discovery.Service) http.HandlerFunc {
 			"status": "ok",
 			"data":   result,
 		})
-	}
-}
-
-func tasksCollection(tasks *task.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			methodNotAllowed(w, http.MethodGet)
-			return
-		}
-
-		page, pageSize, err := parsePagination(r)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		results, err := tasks.List(ctx, strings.TrimSpace(r.URL.Query().Get("source_type")))
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"data":   paginateItems(results, page, pageSize),
-		})
-	}
-}
-
-func taskSubResources(tasks *task.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/tasks/")
-		trimmed = strings.Trim(trimmed, "/")
-		parts := strings.Split(trimmed, "/")
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		if len(parts) == 2 && parts[0] != "" && parts[1] == "events" && r.Method == http.MethodGet {
-			results, err := tasks.ListEvents(ctx, parts[0])
-			if err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   results,
-			})
-			return
-		}
-
-		if len(parts) == 1 && parts[0] != "" && r.Method == http.MethodDelete {
-			if err := tasks.Delete(ctx, parts[0]); err != nil {
-				writeTaskError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"task_id": parts[0],
-					"deleted": true,
-				},
-			})
-			return
-		}
-
-		writeError(w, http.StatusNotFound, "task_resource_not_found")
 	}
 }
 
@@ -1458,6 +1402,27 @@ func writeDeviceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, device.ErrDeviceNotFound):
 		status = http.StatusNotFound
 		message = "device_not_found"
+	case errors.Is(err, device.ErrLocationNodeNotFound):
+		status = http.StatusNotFound
+		message = "location_node_not_found"
+	case errors.Is(err, device.ErrLocationNodeOccupied):
+		status = http.StatusConflict
+		message = "location_node_occupied"
+	case errors.Is(err, device.ErrLocationNodeFieldsRequired):
+		status = http.StatusBadRequest
+		message = "location_node_fields_required"
+	case errors.Is(err, device.ErrLocationNodeParentRequired):
+		status = http.StatusBadRequest
+		message = "location_node_parent_required"
+	case errors.Is(err, device.ErrLocationNodeTypeUnsupported):
+		status = http.StatusBadRequest
+		message = "location_node_type_unsupported"
+	case errors.Is(err, device.ErrLocationNodeHierarchyInvalid):
+		status = http.StatusConflict
+		message = "location_node_hierarchy_invalid"
+	case strings.Contains(err.Error(), "UNIQUE constraint failed"):
+		status = http.StatusConflict
+		message = "location_node_duplicate"
 	case errors.Is(err, device.ErrDeviceOnline):
 		status = http.StatusConflict
 		message = "device_online_cannot_delete"
@@ -1599,12 +1564,6 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, workflow.ErrWorkflowDefinitionNotFound):
 		writeError(w, http.StatusNotFound, "workflow_definition_not_found")
-	case errors.Is(err, workflow.ErrWorkflowInstanceNotFound):
-		writeError(w, http.StatusNotFound, "workflow_instance_not_found")
-	case errors.Is(err, workflow.ErrWorkflowInstanceNotActive):
-		writeError(w, http.StatusConflict, "workflow_instance_not_active")
-	case errors.Is(err, workflow.ErrWorkflowRunNotFound):
-		writeError(w, http.StatusNotFound, "workflow_run_not_found")
 	case errors.Is(err, workflow.ErrWorkflowDefinitionNameRequired):
 		writeError(w, http.StatusBadRequest, "workflow_name_required")
 	case errors.Is(err, workflow.ErrWorkflowDefinitionNodesRequired):
@@ -1615,25 +1574,6 @@ func writeWorkflowError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "workflow_node_type_unsupported")
 	case errors.Is(err, workflow.ErrWorkflowScriptNameRequired):
 		writeError(w, http.StatusBadRequest, "workflow_script_name_required")
-	case errors.Is(err, workflow.ErrWorkflowDeviceIDsRequired):
-		writeError(w, http.StatusBadRequest, "workflow_device_ids_required")
-	case errors.Is(err, workflow.ErrWorkflowDeviceBusy):
-		var busyErr *workflow.DeviceBusyError
-		if errors.As(err, &busyErr) {
-			writeErrorWithDetails(w, http.StatusConflict, "workflow_device_busy", map[string]any{
-				"busy_devices": busyErr.Details,
-			})
-			return
-		}
-		writeError(w, http.StatusConflict, "workflow_device_busy")
-	case errors.Is(err, workflow.ErrWorkflowAnotherActive):
-		writeError(w, http.StatusConflict, "workflow_another_active")
-	case errors.Is(err, workflow.ErrWorkflowDefinitionRunning):
-		writeError(w, http.StatusConflict, "workflow_definition_running")
-	case errors.Is(err, workflow.ErrWorkflowInstanceDeleteNotAllowed):
-		writeErrorWithDetails(w, http.StatusConflict, "工作流实例暂不允许删除", map[string]any{
-			"reason": "只有执行成功或执行失败的工作流实例允许删除，运行中、待执行或已停止实例请勿删除",
-		})
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
 	default:

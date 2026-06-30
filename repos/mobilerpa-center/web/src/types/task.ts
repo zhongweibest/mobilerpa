@@ -1,9 +1,7 @@
 export interface TaskRecord {
   task_id: string;
   device_id: string;
-  workflow_run_id: string;
   workflow_node_id: string;
-  task_source_type: string;
   script_name: string;
   script_version: string;
   params: Record<string, unknown>;

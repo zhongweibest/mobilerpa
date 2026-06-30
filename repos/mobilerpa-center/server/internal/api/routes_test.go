@@ -1,8 +1,10 @@
-﻿package api
+package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -10,13 +12,14 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mobilerpa/mobilerpa-center/server/internal/discovery"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/discovery"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/script"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/storage"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/ws"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
@@ -40,7 +43,7 @@ func TestRegisterAndListDevices(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -208,7 +211,7 @@ func TestDeleteOfflineDeviceAndRejectOnlineDevice(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -372,6 +375,488 @@ func TestDeleteOfflineDeviceAndRejectOnlineDevice(t *testing.T) {
 	}
 }
 
+func TestLocationNodeRoutes(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-device-slot-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	registerBody := map[string]any{
+		"agent_uuid":  "agent-slot-route-001",
+		"device_name": "Slot Route Device",
+		"brand":       "Google",
+		"model":       "Pixel 8",
+	}
+	registerBytes, err := json.Marshal(registerBody)
+	if err != nil {
+		t.Fatalf("marshal register body: %v", err)
+	}
+	registerResp, err := http.Post(server.URL+"/api/v1/device/register", "application/json", bytes.NewReader(registerBytes))
+	if err != nil {
+		t.Fatalf("register device request: %v", err)
+	}
+	defer registerResp.Body.Close()
+
+	var registerPayload struct {
+		Data struct {
+			DeviceID string `json:"device_id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(registerResp.Body).Decode(&registerPayload); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+
+	createZoneResp, err := http.Post(server.URL+"/api/v1/location-nodes", "application/json", bytes.NewReader([]byte(`{"node_type":"zone","node_name":"A区"}`)))
+	if err != nil {
+		t.Fatalf("create zone request: %v", err)
+	}
+	defer createZoneResp.Body.Close()
+	if createZoneResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create zone status: %d", createZoneResp.StatusCode)
+	}
+
+	var createZonePayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(createZoneResp.Body).Decode(&createZonePayload); err != nil {
+		t.Fatalf("decode create zone response: %v", err)
+	}
+	createRowBody, err := json.Marshal(map[string]any{
+		"parent_id": createZonePayload.Data.NodeID,
+		"node_type": "row",
+		"node_name": "第2排",
+	})
+	if err != nil {
+		t.Fatalf("marshal create row body: %v", err)
+	}
+	createRowResp, err := http.Post(server.URL+"/api/v1/location-nodes", "application/json", bytes.NewReader(createRowBody))
+	if err != nil {
+		t.Fatalf("create row request: %v", err)
+	}
+	defer createRowResp.Body.Close()
+
+	var createRowPayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(createRowResp.Body).Decode(&createRowPayload); err != nil {
+		t.Fatalf("decode create row response: %v", err)
+	}
+
+	createSlotBody, err := json.Marshal(map[string]any{
+		"parent_id": createRowPayload.Data.NodeID,
+		"node_type": "slot",
+		"node_name": "08",
+	})
+	if err != nil {
+		t.Fatalf("marshal create slot body: %v", err)
+	}
+	createSlotResp, err := http.Post(server.URL+"/api/v1/location-nodes", "application/json", bytes.NewReader(createSlotBody))
+	if err != nil {
+		t.Fatalf("create slot request: %v", err)
+	}
+	defer createSlotResp.Body.Close()
+	if createSlotResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected create slot status: %d", createSlotResp.StatusCode)
+	}
+
+	var createSlotPayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(createSlotResp.Body).Decode(&createSlotPayload); err != nil {
+		t.Fatalf("decode create slot response: %v", err)
+	}
+	if createSlotPayload.Data.PathText != "A区-第2排-08" {
+		t.Fatalf("unexpected created slot path: %#v", createSlotPayload.Data)
+	}
+
+	listSlotsResp, err := http.Get(server.URL + "/api/v1/location-nodes")
+	if err != nil {
+		t.Fatalf("list location nodes request: %v", err)
+	}
+	defer listSlotsResp.Body.Close()
+	if listSlotsResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected list slots status: %d", listSlotsResp.StatusCode)
+	}
+
+	var listSlotsPayload struct {
+		Data []device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(listSlotsResp.Body).Decode(&listSlotsPayload); err != nil {
+		t.Fatalf("decode list slots response: %v", err)
+	}
+	if len(listSlotsPayload.Data) != 3 {
+		t.Fatalf("unexpected location node count: %d", len(listSlotsPayload.Data))
+	}
+
+	bindBodyBytes, err := json.Marshal(map[string]any{
+		"device_id": registerPayload.Data.DeviceID,
+	})
+	if err != nil {
+		t.Fatalf("marshal bind body: %v", err)
+	}
+	bindResp, err := http.Post(server.URL+"/api/v1/location-nodes/"+createSlotPayload.Data.NodeID+"/bind", "application/json", bytes.NewReader(bindBodyBytes))
+	if err != nil {
+		t.Fatalf("bind slot request: %v", err)
+	}
+	defer bindResp.Body.Close()
+	if bindResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected bind slot status: %d", bindResp.StatusCode)
+	}
+
+	var bindPayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(bindResp.Body).Decode(&bindPayload); err != nil {
+		t.Fatalf("decode bind slot response: %v", err)
+	}
+	if bindPayload.Data.DeviceID != registerPayload.Data.DeviceID {
+		t.Fatalf("unexpected bound slot device id: %s", bindPayload.Data.DeviceID)
+	}
+
+	deviceResp, err := http.Get(server.URL + "/api/v1/devices/" + registerPayload.Data.DeviceID)
+	if err != nil {
+		t.Fatalf("get device request: %v", err)
+	}
+	defer deviceResp.Body.Close()
+
+	var devicePayload struct {
+		Data device.Device `json:"data"`
+	}
+	if err := json.NewDecoder(deviceResp.Body).Decode(&devicePayload); err != nil {
+		t.Fatalf("decode device response: %v", err)
+	}
+	if devicePayload.Data.PhysicalSlot != "A区-第2排-08" {
+		t.Fatalf("unexpected physical slot after bind: %s", devicePayload.Data.PhysicalSlot)
+	}
+	if devicePayload.Data.SlotZone != "A区" || devicePayload.Data.SlotRow != "第2排" || devicePayload.Data.SlotPosition != "08" {
+		t.Fatalf("unexpected split slot fields after bind: %#v", devicePayload.Data)
+	}
+
+	unbindResp, err := http.Post(server.URL+"/api/v1/location-nodes/"+createSlotPayload.Data.NodeID+"/unbind", "application/json", bytes.NewReader([]byte(`{}`)))
+	if err != nil {
+		t.Fatalf("unbind slot request: %v", err)
+	}
+	defer unbindResp.Body.Close()
+	if unbindResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected unbind slot status: %d", unbindResp.StatusCode)
+	}
+
+	var unbindPayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(unbindResp.Body).Decode(&unbindPayload); err != nil {
+		t.Fatalf("decode unbind slot response: %v", err)
+	}
+	if unbindPayload.Data.DeviceID != "" {
+		t.Fatalf("expected empty slot after unbind, got %q", unbindPayload.Data.DeviceID)
+	}
+}
+
+func TestUpdateAndDeleteLocationNodeRoutes(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-location-node-update-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	registerBody := map[string]any{
+		"agent_uuid":  "agent-route-node-001",
+		"device_name": "Node Route Device",
+		"brand":       "Google",
+		"model":       "Pixel 8",
+	}
+	registerBytes, err := json.Marshal(registerBody)
+	if err != nil {
+		t.Fatalf("marshal register body: %v", err)
+	}
+	registerResp, err := http.Post(server.URL+"/api/v1/device/register", "application/json", bytes.NewReader(registerBytes))
+	if err != nil {
+		t.Fatalf("register device request: %v", err)
+	}
+	defer registerResp.Body.Close()
+
+	var registerPayload struct {
+		Data struct {
+			DeviceID string `json:"device_id"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(registerResp.Body).Decode(&registerPayload); err != nil {
+		t.Fatalf("decode register response: %v", err)
+	}
+
+	createNode := func(body map[string]any) device.LocationNode {
+		bodyBytes, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal create node body: %v", err)
+		}
+		resp, err := http.Post(server.URL+"/api/v1/location-nodes", "application/json", bytes.NewReader(bodyBytes))
+		if err != nil {
+			t.Fatalf("create node request: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected create node status: %d", resp.StatusCode)
+		}
+		var payload struct {
+			Data device.LocationNode `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode create node response: %v", err)
+		}
+		return payload.Data
+	}
+
+	zoneA := createNode(map[string]any{"node_type": "zone", "node_name": "A区"})
+	zoneB := createNode(map[string]any{"node_type": "zone", "node_name": "B区"})
+	row := createNode(map[string]any{"parent_id": zoneA.NodeID, "node_type": "row", "node_name": "第1排"})
+	slot := createNode(map[string]any{"parent_id": row.NodeID, "node_type": "slot", "node_name": "01"})
+
+	bindBodyBytes, err := json.Marshal(map[string]any{
+		"device_id": registerPayload.Data.DeviceID,
+	})
+	if err != nil {
+		t.Fatalf("marshal bind body: %v", err)
+	}
+	bindResp, err := http.Post(server.URL+"/api/v1/location-nodes/"+slot.NodeID+"/bind", "application/json", bytes.NewReader(bindBodyBytes))
+	if err != nil {
+		t.Fatalf("bind slot request: %v", err)
+	}
+	defer bindResp.Body.Close()
+	if bindResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected bind slot status: %d", bindResp.StatusCode)
+	}
+
+	updateBodyBytes, err := json.Marshal(map[string]any{
+		"parent_id":  zoneB.NodeID,
+		"node_name":  "第9排",
+		"sort_order": 9,
+	})
+	if err != nil {
+		t.Fatalf("marshal update node body: %v", err)
+	}
+	updateReq, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/location-nodes/"+row.NodeID, bytes.NewReader(updateBodyBytes))
+	if err != nil {
+		t.Fatalf("new update location node request: %v", err)
+	}
+	updateReq.Header.Set("Content-Type", "application/json")
+	updateResp, err := http.DefaultClient.Do(updateReq)
+	if err != nil {
+		t.Fatalf("update location node request: %v", err)
+	}
+	defer updateResp.Body.Close()
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected update location node status: %d", updateResp.StatusCode)
+	}
+
+	var updatePayload struct {
+		Data device.LocationNode `json:"data"`
+	}
+	if err := json.NewDecoder(updateResp.Body).Decode(&updatePayload); err != nil {
+		t.Fatalf("decode update location node response: %v", err)
+	}
+	if updatePayload.Data.ParentID != zoneB.NodeID || updatePayload.Data.PathText != "B区-第9排" {
+		t.Fatalf("unexpected updated row response: %#v", updatePayload.Data)
+	}
+
+	deviceResp, err := http.Get(server.URL + "/api/v1/devices/" + registerPayload.Data.DeviceID)
+	if err != nil {
+		t.Fatalf("get device request after node update: %v", err)
+	}
+	defer deviceResp.Body.Close()
+
+	var devicePayload struct {
+		Data device.Device `json:"data"`
+	}
+	if err := json.NewDecoder(deviceResp.Body).Decode(&devicePayload); err != nil {
+		t.Fatalf("decode device response after node update: %v", err)
+	}
+	if devicePayload.Data.PhysicalSlot != "B区-第9排-01" {
+		t.Fatalf("unexpected physical slot after node update: %s", devicePayload.Data.PhysicalSlot)
+	}
+
+	deleteReq, err := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/location-nodes/"+row.NodeID, nil)
+	if err != nil {
+		t.Fatalf("new delete location node request: %v", err)
+	}
+	deleteResp, err := http.DefaultClient.Do(deleteReq)
+	if err != nil {
+		t.Fatalf("delete location node request: %v", err)
+	}
+	defer deleteResp.Body.Close()
+	if deleteResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected delete location node status: %d", deleteResp.StatusCode)
+	}
+
+	deviceRespAfterDelete, err := http.Get(server.URL + "/api/v1/devices/" + registerPayload.Data.DeviceID)
+	if err != nil {
+		t.Fatalf("get device request after node delete: %v", err)
+	}
+	defer deviceRespAfterDelete.Body.Close()
+
+	var devicePayloadAfterDelete struct {
+		Data device.Device `json:"data"`
+	}
+	if err := json.NewDecoder(deviceRespAfterDelete.Body).Decode(&devicePayloadAfterDelete); err != nil {
+		t.Fatalf("decode device response after node delete: %v", err)
+	}
+	if devicePayloadAfterDelete.Data.PhysicalSlot != "" || devicePayloadAfterDelete.Data.BindStatus != "pending" {
+		t.Fatalf("unexpected device fields after node delete: %#v", devicePayloadAfterDelete.Data)
+	}
+}
+
+func TestUpdateWorkflowDefinition(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-update-workflow-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	workflowService := workflow.NewService(db, deviceService, taskService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, workflowService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	createBody := map[string]any{
+		"workflow_name": "原始工作流",
+		"description":   "原始说明",
+		"status":        "active",
+		"nodes": []map[string]any{
+			{"node_id": "node_1", "node_type": "script", "node_name": "打开QQ", "script_name": "qq", "script_version": "v1"},
+			{"node_id": "node_2", "node_type": "stop", "node_name": "结束"},
+		},
+		"edges": []map[string]any{
+			{"from_node_id": "node_1", "to_node_id": "node_2", "edge_type": "next"},
+		},
+	}
+	createBytes, err := json.Marshal(createBody)
+	if err != nil {
+		t.Fatalf("marshal create body: %v", err)
+	}
+
+	createResp, err := http.Post(server.URL+"/api/v1/workflows", "application/json", bytes.NewReader(createBytes))
+	if err != nil {
+		t.Fatalf("create workflow request: %v", err)
+	}
+	defer createResp.Body.Close()
+
+	var createPayload struct {
+		Data workflow.Definition `json:"data"`
+	}
+	if err := json.NewDecoder(createResp.Body).Decode(&createPayload); err != nil {
+		t.Fatalf("decode create workflow response: %v", err)
+	}
+
+	updateBody := map[string]any{
+		"workflow_name": "更新后的工作流",
+		"description":   "更新后的说明",
+		"status":        "draft",
+		"nodes": []map[string]any{
+			{"node_id": "node_1", "node_type": "script", "node_name": "打开微信", "script_name": "wechat", "script_version": "v2"},
+			{"node_id": "node_2", "node_type": "stop", "node_name": "结束"},
+		},
+		"edges": []map[string]any{
+			{"from_node_id": "node_1", "to_node_id": "node_2", "edge_type": "next"},
+		},
+	}
+	updateBytes, err := json.Marshal(updateBody)
+	if err != nil {
+		t.Fatalf("marshal update body: %v", err)
+	}
+
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/api/v1/workflows/"+createPayload.Data.WorkflowDefID, bytes.NewReader(updateBytes))
+	if err != nil {
+		t.Fatalf("new update workflow request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	updateResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("update workflow request: %v", err)
+	}
+	defer updateResp.Body.Close()
+
+	if updateResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected update workflow status: %d", updateResp.StatusCode)
+	}
+
+	var updatePayload struct {
+		Status string              `json:"status"`
+		Data   workflow.Definition `json:"data"`
+	}
+	if err := json.NewDecoder(updateResp.Body).Decode(&updatePayload); err != nil {
+		t.Fatalf("decode update workflow response: %v", err)
+	}
+
+	if updatePayload.Status != "ok" {
+		t.Fatalf("unexpected update payload status: %s", updatePayload.Status)
+	}
+	if updatePayload.Data.WorkflowName != "更新后的工作流" {
+		t.Fatalf("unexpected workflow name: %s", updatePayload.Data.WorkflowName)
+	}
+	if updatePayload.Data.Description != "更新后的说明" {
+		t.Fatalf("unexpected workflow description: %s", updatePayload.Data.Description)
+	}
+	if updatePayload.Data.Status != "draft" {
+		t.Fatalf("unexpected workflow status: %s", updatePayload.Data.Status)
+	}
+	if len(updatePayload.Data.Nodes) != 2 {
+		t.Fatalf("unexpected workflow node count: %d", len(updatePayload.Data.Nodes))
+	}
+	if updatePayload.Data.Nodes[0].NodeName != "打开微信" {
+		t.Fatalf("unexpected updated node name: %s", updatePayload.Data.Nodes[0].NodeName)
+	}
+
+	updated, err := workflowService.GetDefinition(context.Background(), createPayload.Data.WorkflowDefID)
+	if err != nil {
+		t.Fatalf("get updated workflow: %v", err)
+	}
+	if updated.WorkflowName != "更新后的工作流" {
+		t.Fatalf("unexpected persisted workflow name: %s", updated.WorkflowName)
+	}
+}
+
 func TestCreateListTasksAndEvents(t *testing.T) {
 	t.Parallel()
 
@@ -386,7 +871,7 @@ func TestCreateListTasksAndEvents(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -457,75 +942,36 @@ func TestCreateListTasksAndEvents(t *testing.T) {
 		t.Fatalf("unexpected task params: %#v", createPayload.Data.Params)
 	}
 
-	listResp, err := http.Get(server.URL + "/api/v1/tasks")
+	listedTasks, err := taskService.List(t.Context(), "")
 	if err != nil {
-		t.Fatalf("list tasks request: %v", err)
+		t.Fatalf("list tasks: %v", err)
 	}
-	defer listResp.Body.Close()
-
-	if listResp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected list tasks status: %d", listResp.StatusCode)
+	if len(listedTasks) != 1 {
+		t.Fatalf("unexpected task count: %d", len(listedTasks))
 	}
-
-	var listPayload struct {
-		Status string `json:"status"`
-		Data   struct {
-			Items    []task.Task `json:"items"`
-			Total    int         `json:"total"`
-			Page     int         `json:"page"`
-			PageSize int         `json:"page_size"`
-		} `json:"data"`
-	}
-	if err := json.NewDecoder(listResp.Body).Decode(&listPayload); err != nil {
-		t.Fatalf("decode list tasks response: %v", err)
+	if listedTasks[0].TaskID != createPayload.Data.TaskID {
+		t.Fatalf("unexpected listed task id: %s", listedTasks[0].TaskID)
 	}
 
-	if len(listPayload.Data.Items) != 1 {
-		t.Fatalf("unexpected task count: %d", len(listPayload.Data.Items))
-	}
-	if listPayload.Data.Items[0].TaskID != createPayload.Data.TaskID {
-		t.Fatalf("unexpected listed task id: %s", listPayload.Data.Items[0].TaskID)
-	}
-
-	eventsResp, err := http.Get(server.URL + "/api/v1/tasks/" + createPayload.Data.TaskID + "/events")
+	events, err := taskService.ListEvents(t.Context(), createPayload.Data.TaskID)
 	if err != nil {
-		t.Fatalf("list task events request: %v", err)
+		t.Fatalf("list task events: %v", err)
 	}
-	defer eventsResp.Body.Close()
-
-	if eventsResp.StatusCode != http.StatusOK {
-		t.Fatalf("unexpected list task events status: %d", eventsResp.StatusCode)
+	if len(events) != 1 {
+		t.Fatalf("unexpected task event count: %d", len(events))
 	}
-
-	var eventsPayload struct {
-		Status string       `json:"status"`
-		Data   []task.Event `json:"data"`
+	if events[0].EventType != task.EventTypeTaskCreated {
+		t.Fatalf("unexpected task event type: %s", events[0].EventType)
 	}
-	if err := json.NewDecoder(eventsResp.Body).Decode(&eventsPayload); err != nil {
-		t.Fatalf("decode task events response: %v", err)
+	if events[0].TaskStatus != task.StatusPending {
+		t.Fatalf("unexpected task event status: %s", events[0].TaskStatus)
 	}
-
-	if len(eventsPayload.Data) != 1 {
-		t.Fatalf("unexpected task event count: %d", len(eventsPayload.Data))
-	}
-	if eventsPayload.Data[0].EventType != task.EventTypeTaskCreated {
-		t.Fatalf("unexpected task event type: %s", eventsPayload.Data[0].EventType)
-	}
-	if eventsPayload.Data[0].TaskStatus != task.StatusPending {
-		t.Fatalf("unexpected task event status: %s", eventsPayload.Data[0].TaskStatus)
-	}
-	if eventsPayload.Data[0].Topic != task.TopicTasks {
-		t.Fatalf("unexpected task event topic: %s", eventsPayload.Data[0].Topic)
+	if events[0].Topic != task.TopicTasks {
+		t.Fatalf("unexpected task event topic: %s", events[0].Topic)
 	}
 
-	missingEventsResp, err := http.Get(server.URL + "/api/v1/tasks/task_missing/events")
-	if err != nil {
-		t.Fatalf("missing task events request: %v", err)
-	}
-	defer missingEventsResp.Body.Close()
-
-	if missingEventsResp.StatusCode != http.StatusNotFound {
-		t.Fatalf("unexpected missing task events status: %d", missingEventsResp.StatusCode)
+	if _, err := taskService.ListEvents(t.Context(), "task_missing"); !errors.Is(err, task.ErrTaskNotFound) {
+		t.Fatalf("expected task not found for missing task events, got: %v", err)
 	}
 }
 
@@ -543,7 +989,7 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -691,32 +1137,24 @@ func TestAssignTaskAndTaskAck(t *testing.T) {
 		t.Fatalf("unexpected duplicate task_ack response status: %v", duplicatePayload["status"])
 	}
 
-	eventsResp, err := http.Get(server.URL + "/api/v1/tasks/" + createdTask.TaskID + "/events")
+	events, err := taskService.ListEvents(t.Context(), createdTask.TaskID)
 	if err != nil {
-		t.Fatalf("list task events request: %v", err)
+		t.Fatalf("list task events: %v", err)
 	}
-	defer eventsResp.Body.Close()
-
-	var eventsPayload struct {
-		Data []task.Event `json:"data"`
+	if len(events) != 4 {
+		t.Fatalf("expected exactly 4 task events after duplicate task_ack, got %d", len(events))
 	}
-	if err := json.NewDecoder(eventsResp.Body).Decode(&eventsPayload); err != nil {
-		t.Fatalf("decode task events response: %v", err)
+	if events[1].EventType != task.EventTypeTaskAssigned {
+		t.Fatalf("unexpected second task event type: %s", events[1].EventType)
 	}
-	if len(eventsPayload.Data) != 4 {
-		t.Fatalf("expected exactly 4 task events after duplicate task_ack, got %d", len(eventsPayload.Data))
+	if events[2].EventType != task.EventTypeTaskAck {
+		t.Fatalf("unexpected third task event type: %s", events[2].EventType)
 	}
-	if eventsPayload.Data[1].EventType != task.EventTypeTaskAssigned {
-		t.Fatalf("unexpected second task event type: %s", eventsPayload.Data[1].EventType)
-	}
-	if eventsPayload.Data[2].EventType != task.EventTypeTaskAck {
-		t.Fatalf("unexpected third task event type: %s", eventsPayload.Data[2].EventType)
-	}
-	if got := eventsPayload.Data[2].Extra["request_id"]; got != "task-ack-test-001" {
+	if got := events[2].Extra["request_id"]; got != "task-ack-test-001" {
 		t.Fatalf("unexpected task_ack request_id: %v", got)
 	}
-	if eventsPayload.Data[3].EventType != task.EventTypeTaskRunning {
-		t.Fatalf("unexpected fourth task event type: %s", eventsPayload.Data[3].EventType)
+	if events[3].EventType != task.EventTypeTaskRunning {
+		t.Fatalf("unexpected fourth task event type: %s", events[3].EventType)
 	}
 }
 
@@ -734,7 +1172,7 @@ func TestTaskResultUpdatesTaskStatus(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -882,11 +1320,11 @@ func TestTaskResultUpdatesTaskStatus(t *testing.T) {
 		DeviceID:  registerPayload.Data.DeviceID,
 		Timestamp: time.Now().Unix(),
 		Payload: map[string]any{
-			"task_id":         createPayload.Data.TaskID,
-			"status":          "success",
-			"result_code":     "OK",
-			"result_message":  "script done",
-			"step_name":       "RUN_SCRIPT_ENTRY",
+			"task_id":        createPayload.Data.TaskID,
+			"status":         "success",
+			"result_code":    "OK",
+			"result_message": "script done",
+			"step_name":      "RUN_SCRIPT_ENTRY",
 			"extra": map[string]any{
 				"mode": "builtin",
 			},
@@ -904,61 +1342,41 @@ func TestTaskResultUpdatesTaskStatus(t *testing.T) {
 		t.Fatalf("unexpected task_result response type: %s", taskResultResp.Type)
 	}
 
-	taskResp, err := http.Get(server.URL + "/api/v1/tasks")
+	listedTasks, err := taskService.List(t.Context(), "")
 	if err != nil {
-		t.Fatalf("list tasks request: %v", err)
+		t.Fatalf("list tasks: %v", err)
 	}
-	defer taskResp.Body.Close()
-
-	var taskListPayload struct {
-		Data struct {
-			Items []task.Task `json:"items"`
-		} `json:"data"`
+	if len(listedTasks) != 1 {
+		t.Fatalf("unexpected task count: %d", len(listedTasks))
 	}
-	if err := json.NewDecoder(taskResp.Body).Decode(&taskListPayload); err != nil {
-		t.Fatalf("decode task list response: %v", err)
+	if listedTasks[0].Status != task.StatusSuccess {
+		t.Fatalf("unexpected task status after task_result: %s", listedTasks[0].Status)
 	}
-
-	if len(taskListPayload.Data.Items) != 1 {
-		t.Fatalf("unexpected task count: %d", len(taskListPayload.Data.Items))
-	}
-	if taskListPayload.Data.Items[0].Status != task.StatusSuccess {
-		t.Fatalf("unexpected task status after task_result: %s", taskListPayload.Data.Items[0].Status)
-	}
-	if taskListPayload.Data.Items[0].ResultCode != "OK" {
-		t.Fatalf("unexpected task result code: %s", taskListPayload.Data.Items[0].ResultCode)
+	if listedTasks[0].ResultCode != "OK" {
+		t.Fatalf("unexpected task result code: %s", listedTasks[0].ResultCode)
 	}
 
-	eventsResp, err := http.Get(server.URL + "/api/v1/tasks/" + createPayload.Data.TaskID + "/events")
+	events, err := taskService.ListEvents(t.Context(), createPayload.Data.TaskID)
 	if err != nil {
-		t.Fatalf("list task events request: %v", err)
+		t.Fatalf("list task events: %v", err)
 	}
-	defer eventsResp.Body.Close()
-
-	var eventsPayload struct {
-		Data []task.Event `json:"data"`
+	if len(events) != 6 {
+		t.Fatalf("expected 6 task events after task_result, got %d", len(events))
 	}
-	if err := json.NewDecoder(eventsResp.Body).Decode(&eventsPayload); err != nil {
-		t.Fatalf("decode task events response: %v", err)
+	if events[3].EventType != task.EventTypeTaskRunning {
+		t.Fatalf("unexpected running event type: %s", events[3].EventType)
 	}
-
-	if len(eventsPayload.Data) != 6 {
-		t.Fatalf("expected 6 task events after task_result, got %d", len(eventsPayload.Data))
+	if events[4].EventType != task.EventTypeTaskProgress {
+		t.Fatalf("unexpected progress event type: %s", events[4].EventType)
 	}
-	if eventsPayload.Data[3].EventType != task.EventTypeTaskRunning {
-		t.Fatalf("unexpected running event type: %s", eventsPayload.Data[3].EventType)
+	if events[4].StepName != "CHECK_HOME" {
+		t.Fatalf("unexpected progress step name: %s", events[4].StepName)
 	}
-	if eventsPayload.Data[4].EventType != task.EventTypeTaskProgress {
-		t.Fatalf("unexpected progress event type: %s", eventsPayload.Data[4].EventType)
+	if events[5].EventType != task.EventTypeTaskResult {
+		t.Fatalf("unexpected result event type: %s", events[5].EventType)
 	}
-	if eventsPayload.Data[4].StepName != "CHECK_HOME" {
-		t.Fatalf("unexpected progress step name: %s", eventsPayload.Data[4].StepName)
-	}
-	if eventsPayload.Data[5].EventType != task.EventTypeTaskResult {
-		t.Fatalf("unexpected result event type: %s", eventsPayload.Data[5].EventType)
-	}
-	if eventsPayload.Data[5].TaskStatus != task.StatusSuccess {
-		t.Fatalf("unexpected result event task status: %s", eventsPayload.Data[5].TaskStatus)
+	if events[5].TaskStatus != task.StatusSuccess {
+		t.Fatalf("unexpected result event task status: %s", events[5].TaskStatus)
 	}
 }
 
@@ -1015,7 +1433,7 @@ func TestDiscoveryDeployAgentRequiresEndpoints(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -1061,7 +1479,7 @@ func TestDiscoveryControlAgentRejectsUnsupportedAction(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -1107,7 +1525,7 @@ func TestDiscoveryPairRequiresHostPortAndCode(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
@@ -1178,7 +1596,7 @@ func TestDiscoverySettingsRoundTrip(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	settingsService := settings.NewService(db)
-	wsHandler := ws.NewHandler(deviceService, dispatchService, nil)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
 
 	mux := http.NewServeMux()
 	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, settingsService, wsHandler)
@@ -1223,6 +1641,3 @@ func TestDiscoverySettingsRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected center_base_url: %s", payload.Data.CenterBaseURL)
 	}
 }
-
-
-

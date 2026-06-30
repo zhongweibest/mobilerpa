@@ -6,6 +6,9 @@ export interface DeviceRecord {
   agent_uuid: string;
   device_name: string;
   physical_slot: string;
+  slot_zone: string;
+  slot_row: string;
+  slot_position: string;
   group_name: string;
   status: string;
   bind_status: string;
@@ -31,9 +34,6 @@ export interface DeviceRecord {
 export interface DeviceOccupancyRecord {
   device_id: string;
   occupancy_type: string;
-  workflow_def_id: string;
-  workflow_instance_id: string;
-  workflow_run_id: string;
   task_id: string;
   task_status: string;
   message: string;
@@ -46,4 +46,36 @@ export interface DeviceOccupancyDetail {
   current_step: string;
   last_error: string;
   occupancy: DeviceOccupancyRecord | null;
+}
+
+export interface LocationNodeRecord {
+  node_id: string;
+  parent_id: string;
+  node_type: string;
+  node_name: string;
+  device_id: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+  zone_name: string;
+  row_name: string;
+  slot_name: string;
+  path_text: string;
+}
+
+export interface CreateLocationNodeRequest {
+  parent_id: string;
+  node_type: string;
+  node_name: string;
+  sort_order?: number;
+}
+
+export interface UpdateLocationNodeRequest {
+  parent_id: string;
+  node_name: string;
+  sort_order?: number;
+}
+
+export interface BindLocationNodeRequest {
+  device_id: string;
 }

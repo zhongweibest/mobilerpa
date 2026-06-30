@@ -23,7 +23,7 @@ import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
 
 import { useScriptsStore } from "../../stores/scripts";
 import { useWorkflowsStore } from "../../stores/workflows";
-import type { WorkflowDefinitionRecord } from "../../types/workflow";
+import type { WorkflowDefinitionRecord, WorkflowEdgeRecord, WorkflowNodeRecord } from "../../types/workflow";
 import { formatDateTime } from "../../utils/device";
 
 const PAGE_SIZES = [10, 20, 30, 50, 100];
@@ -81,36 +81,30 @@ function nextID(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function getDefaultScriptSelection(scripts: ScriptOption[]) {
-  const firstScript = scripts[0];
-  const firstVersion = firstScript?.versions?.[0];
-  return {
-    script_name: firstScript?.script_name || "",
-    script_version: firstVersion?.script_version || ""
-  };
-}
-
-function createSequenceStep(scripts: ScriptOption[], nodeName = "步骤"): SequenceStepForm {
-  const defaults = getDefaultScriptSelection(scripts);
+function createSequenceStep(nodeName = "", scriptName = "", scriptVersion = ""): SequenceStepForm {
   return {
     id: nextID("step"),
     node_name: nodeName,
-    script_name: defaults.script_name,
-    script_version: defaults.script_version
+    script_name: scriptName,
+    script_version: scriptVersion
   };
 }
 
-function createSequenceSegment(scripts: ScriptOption[], stepNames?: string[]): WorkflowSegmentForm {
-  const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : ["步骤"];
+function cloneStep(step: SequenceStepForm): SequenceStepForm {
+  return createSequenceStep(step.node_name, step.script_name, step.script_version);
+}
+
+function createSequenceSegment(stepNames?: string[]): WorkflowSegmentForm {
+  const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : [""];
   return {
     id: nextID("segment_seq"),
     type: "sequence",
-    steps: names.map((name) => createSequenceStep(scripts, name))
+    steps: names.map((name) => createSequenceStep(name))
   };
 }
 
-function createLoopSegment(scripts: ScriptOption[], stepNames?: string[], loopName = "循环段", maxIterations = 3): WorkflowSegmentForm {
-  const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : ["循环步骤"];
+function createLoopSegment(stepNames?: string[], loopName = "", maxIterations = 3): WorkflowSegmentForm {
+  const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : [""];
   return {
     id: nextID("segment_loop"),
     type: "loop",
@@ -118,7 +112,7 @@ function createLoopSegment(scripts: ScriptOption[], stepNames?: string[], loopNa
       id: nextID("loop"),
       loop_name: loopName,
       max_iterations: maxIterations,
-      steps: names.map((name) => createSequenceStep(scripts, name))
+      steps: names.map((name) => createSequenceStep(name))
     }
   };
 }
@@ -161,6 +155,104 @@ function ensureStepVersion(step: SequenceStepForm, scripts: ScriptOption[]) {
   }
 }
 
+function buildEdgeMaps(edges: WorkflowEdgeRecord[]) {
+  const nextMap = new Map<string, string>();
+  const loopBodyMap = new Map<string, string>();
+  const loopExitMap = new Map<string, string>();
+
+  for (const edge of edges) {
+    if (edge.edge_type === "next") {
+      nextMap.set(edge.from_node_id, edge.to_node_id);
+    } else if (edge.edge_type === "loop_body") {
+      loopBodyMap.set(edge.from_node_id, edge.to_node_id);
+    } else if (edge.edge_type === "loop_exit") {
+      loopExitMap.set(edge.from_node_id, edge.to_node_id);
+    }
+  }
+
+  return { nextMap, loopBodyMap, loopExitMap };
+}
+
+function buildSegmentsFromWorkflow(workflow: WorkflowDefinitionRecord): WorkflowSegmentForm[] {
+  const nodes = getWorkflowNodes(workflow);
+  const edges = getWorkflowEdges(workflow);
+  if (nodes.length === 0) {
+    return [createSequenceSegment()];
+  }
+
+  const nodeMap = new Map<string, WorkflowNodeRecord>();
+  for (const node of nodes) {
+    nodeMap.set(node.node_id, node);
+  }
+
+  const incomingTargets = new Set<string>();
+  for (const edge of edges) {
+    incomingTargets.add(edge.to_node_id);
+  }
+
+  const { nextMap, loopBodyMap, loopExitMap } = buildEdgeMaps(edges);
+  const startNode =
+    nodes.find((node) => !incomingTargets.has(node.node_id) && node.node_type !== "stop") ||
+    nodes.find((node) => node.node_type !== "stop");
+  if (!startNode) {
+    return [createSequenceSegment()];
+  }
+
+  const segments: WorkflowSegmentForm[] = [];
+  const visited = new Set<string>();
+  let cursor: WorkflowNodeRecord | undefined = startNode;
+  let pendingSequence: SequenceStepForm[] = [];
+
+  function flushSequence() {
+    if (pendingSequence.length === 0) {
+      return;
+    }
+    const segment = createSequenceSegment();
+    segment.steps = pendingSequence.map(cloneStep);
+    segments.push(segment);
+    pendingSequence = [];
+  }
+
+  while (cursor && cursor.node_type !== "stop" && !visited.has(cursor.node_id)) {
+    visited.add(cursor.node_id);
+
+    if (cursor.node_type === "script") {
+      pendingSequence.push(createSequenceStep(cursor.node_name || "", cursor.script_name || "", cursor.script_version || ""));
+      cursor = nodeMap.get(nextMap.get(cursor.node_id) || "");
+      continue;
+    }
+
+    if (cursor.node_type === "loop") {
+      flushSequence();
+
+      const loopSteps: SequenceStepForm[] = [];
+      let bodyCursor = nodeMap.get(loopBodyMap.get(cursor.node_id) || "");
+      const loopVisited = new Set<string>();
+
+      while (bodyCursor && bodyCursor.node_type === "script" && !loopVisited.has(bodyCursor.node_id)) {
+        loopVisited.add(bodyCursor.node_id);
+        loopSteps.push(createSequenceStep(bodyCursor.node_name || "", bodyCursor.script_name || "", bodyCursor.script_version || ""));
+        const nextID = nextMap.get(bodyCursor.node_id) || "";
+        if (nextID === cursor.node_id) {
+          break;
+        }
+        bodyCursor = nodeMap.get(nextID);
+      }
+
+      const loopSegment = createLoopSegment(undefined, cursor.node_name || "", Number(cursor.max_iterations || 0) || 1);
+      loopSegment.loop.steps = loopSteps.length > 0 ? loopSteps : [createSequenceStep()];
+      segments.push(loopSegment);
+      cursor = nodeMap.get(loopExitMap.get(cursor.node_id) || nextMap.get(cursor.node_id) || "");
+      continue;
+    }
+
+    cursor = nodeMap.get(nextMap.get(cursor.node_id) || "");
+  }
+
+  flushSequence();
+  return segments.length > 0 ? segments : [createSequenceSegment()];
+}
+
 export const WorkflowsPage = defineComponent({
   name: "WorkflowsPage",
   setup() {
@@ -171,6 +263,8 @@ export const WorkflowsPage = defineComponent({
     const { scripts } = storeToRefs(scriptsStore);
 
     const createDialogVisible = ref(false);
+    const dialogMode = ref<"create" | "copy" | "edit">("create");
+    const editingWorkflowID = ref("");
     const createForm = reactive({
       workflow_name: "",
       description: "",
@@ -188,12 +282,7 @@ export const WorkflowsPage = defineComponent({
       createForm.workflow_name = "";
       createForm.description = "";
       createForm.status = "active";
-      segments.value = [
-        createSequenceSegment(scripts.value, ["步骤A", "步骤B"]),
-        createLoopSegment(scripts.value, ["步骤C", "步骤D", "步骤E"], "循环段1", 3),
-        createLoopSegment(scripts.value, ["步骤F", "步骤G"], "循环段2", 5),
-        createSequenceSegment(scripts.value, ["步骤H"])
-      ];
+      segments.value = [createSequenceSegment()];
     }
 
     async function loadPageData() {
@@ -220,16 +309,48 @@ export const WorkflowsPage = defineComponent({
     });
 
     function openCreateDialog() {
+      dialogMode.value = "create";
+      editingWorkflowID.value = "";
       resetCreateForm();
       createDialogVisible.value = true;
     }
 
+    async function openCopyDialog(workflow: WorkflowDefinitionRecord) {
+      try {
+        const detail = await workflowsStore.loadWorkflowDetail(workflow.workflow_def_id);
+        dialogMode.value = "copy";
+        editingWorkflowID.value = "";
+        createForm.workflow_name = `${detail.workflow_name}-副本`;
+        createForm.description = detail.description || "";
+        createForm.status = detail.status || "active";
+        segments.value = buildSegmentsFromWorkflow(detail);
+        createDialogVisible.value = true;
+      } catch (error) {
+        ElMessage.error("加载工作流详情失败，暂时无法复制");
+      }
+    }
+
+    async function openEditDialog(workflow: WorkflowDefinitionRecord) {
+      try {
+        const detail = await workflowsStore.loadWorkflowDetail(workflow.workflow_def_id);
+        dialogMode.value = "edit";
+        editingWorkflowID.value = detail.workflow_def_id;
+        createForm.workflow_name = detail.workflow_name || "";
+        createForm.description = detail.description || "";
+        createForm.status = detail.status || "active";
+        segments.value = buildSegmentsFromWorkflow(detail);
+        createDialogVisible.value = true;
+      } catch (error) {
+        ElMessage.error("加载工作流详情失败，暂时无法编辑");
+      }
+    }
+
     function addSequenceSegment() {
-      segments.value.push(createSequenceSegment(scripts.value, ["新顺序步骤"]));
+      segments.value.push(createSequenceSegment());
     }
 
     function addLoopSegment() {
-      segments.value.push(createLoopSegment(scripts.value, ["循环步骤1"], `循环段${segments.value.filter((item) => item.type === "loop").length + 1}`, 3));
+      segments.value.push(createLoopSegment(undefined, `循环段${segments.value.filter((item) => item.type === "loop").length + 1}`, 3));
     }
 
     function removeSegment(segmentID: string) {
@@ -253,14 +374,6 @@ export const WorkflowsPage = defineComponent({
       const [current] = copied.splice(index, 1);
       copied.splice(targetIndex, 0, current);
       segments.value = copied;
-    }
-
-    function addStepToSequence(segment: WorkflowSegmentForm & { type: "sequence" }) {
-      segment.steps.push(createSequenceStep(scripts.value, `步骤${segment.steps.length + 1}`));
-    }
-
-    function addStepToLoop(loop: LoopGroupForm) {
-      loop.steps.push(createSequenceStep(scripts.value, `循环步骤${loop.steps.length + 1}`));
     }
 
     function removeStep(stepList: SequenceStepForm[], stepID: string) {
@@ -421,9 +534,9 @@ export const WorkflowsPage = defineComponent({
           if (segment.steps.length === 0) {
             return "顺序段至少需要一个脚本步骤";
           }
-          for (const step of segment.steps) {
+          for (const [index, step] of segment.steps.entries()) {
             if (step.node_name.trim() === "" || step.script_name.trim() === "" || step.script_version.trim() === "") {
-              return "请完整填写顺序段中的步骤名称、脚本名称和版本";
+              return `请完整填写顺序段第 ${index + 1} 行的步骤名称、脚本名称和版本`;
             }
           }
           continue;
@@ -438,9 +551,9 @@ export const WorkflowsPage = defineComponent({
         if (segment.loop.steps.length === 0) {
           return "循环段至少需要一个循环体脚本步骤";
         }
-        for (const step of segment.loop.steps) {
+        for (const [index, step] of segment.loop.steps.entries()) {
           if (step.node_name.trim() === "" || step.script_name.trim() === "" || step.script_version.trim() === "") {
-            return "请完整填写循环段中的步骤名称、脚本名称和版本";
+            return `请完整填写循环段「${segment.loop.loop_name.trim() || "未命名循环段"}」第 ${index + 1} 行的步骤名称、脚本名称和版本`;
           }
         }
       }
@@ -457,18 +570,25 @@ export const WorkflowsPage = defineComponent({
 
       try {
         const payload = buildWorkflowPayload();
-        await workflowsStore.submitWorkflow({
+        const requestPayload = {
           workflow_name: createForm.workflow_name.trim(),
           description: createForm.description.trim(),
           status: createForm.status,
           nodes: payload.nodes,
           edges: payload.edges
-        });
+        };
+        if (dialogMode.value === "edit") {
+          await workflowsStore.saveWorkflow(editingWorkflowID.value, requestPayload);
+        } else {
+          await workflowsStore.submitWorkflow(requestPayload);
+        }
         createDialogVisible.value = false;
-        ElMessage.success("工作流定义已创建");
+        ElMessage.success(
+          dialogMode.value === "copy" ? "工作流副本已创建" : dialogMode.value === "edit" ? "工作流定义已更新" : "工作流定义已创建"
+        );
         await loadPageData();
       } catch (error) {
-        ElMessage.error("创建工作流定义失败，请检查脚本、版本和编排结构");
+        ElMessage.error(dialogMode.value === "edit" ? "更新工作流定义失败，请检查脚本、版本和编排结构" : "创建工作流定义失败，请检查脚本、版本和编排结构");
         throw error;
       }
     }
@@ -491,58 +611,86 @@ export const WorkflowsPage = defineComponent({
       }
     }
 
-    function renderStepEditor(step: SequenceStepForm, stepList: SequenceStepForm[]) {
-      const availableVersions = scripts.value.find((item) => item.script_name === step.script_name)?.versions || [];
-      return h("div", { class: "workflow-step-editor" }, [
-        h("div", { class: "workflow-step-editor__grid" }, [
-          h(ElFormItem, { label: "步骤名称" }, () =>
-            h(ElInput, {
-              modelValue: step.node_name,
-              "onUpdate:modelValue": (value: string) => {
-                step.node_name = value;
-              },
-              placeholder: "例如：打开 QQ"
-            })
-          ),
-          h(ElFormItem, { label: "脚本名称" }, () =>
-            h(
-              ElSelect,
-              {
-                modelValue: step.script_name,
-                "onUpdate:modelValue": (value: string) => {
-                  updateStepScript(step, value);
-                }
-              },
-              () => scripts.value.map((item) => h(ElOption, { key: `${step.id}-${item.script_name}`, label: item.script_name, value: item.script_name }))
-            )
-          ),
-          h(ElFormItem, { label: "脚本版本" }, () =>
-            h(
-              ElSelect,
-              {
-                modelValue: step.script_version,
-                "onUpdate:modelValue": (value: string) => {
-                  step.script_version = value;
-                }
-              },
-              () => availableVersions.map((item) => h(ElOption, { key: `${step.id}-${item.script_version}`, label: item.script_version, value: item.script_version }))
-            )
-          )
-        ]),
-        h(
-          "div",
-          { class: "table-actions" },
+    function renderStepTable(stepList: SequenceStepForm[], addLabel: string) {
+      return h("div", { class: "workflow-step-table" }, [
+        h("div", { class: "workflow-step-table__toolbar" }, [
           h(
             ElButton,
             {
-              link: true,
-              type: "danger",
+              type: "primary",
+              plain: true,
               onClick: () => {
-                removeStep(stepList, step.id);
+                stepList.push(createSequenceStep());
               }
             },
-            () => "删除步骤"
+            () => addLabel
           )
+        ]),
+        h(
+          ElTable,
+          {
+            data: stepList,
+            border: true,
+            stripe: true,
+            class: "workflow-step-table__inner",
+            tableLayout: "fixed"
+          },
+          {
+            default: () => [
+              h(ElTableColumn, { label: "步骤名称", minWidth: 180 }, {
+                default: ({ row }: { row: SequenceStepForm }) =>
+                  h(ElInput, {
+                    modelValue: row.node_name,
+                    "onUpdate:modelValue": (value: string) => {
+                      row.node_name = value;
+                    },
+                    placeholder: "例如：打开 QQ"
+                  })
+              }),
+              h(ElTableColumn, { label: "脚本名称", minWidth: 220 }, {
+                default: ({ row }: { row: SequenceStepForm }) =>
+                  h(
+                    ElSelect,
+                    {
+                      modelValue: row.script_name,
+                      "onUpdate:modelValue": (value: string) => {
+                        updateStepScript(row, value);
+                      }
+                    },
+                    () => scripts.value.map((item) => h(ElOption, { key: `${row.id}-${item.script_name}`, label: item.script_name, value: item.script_name }))
+                  )
+              }),
+              h(ElTableColumn, { label: "脚本版本", minWidth: 180 }, {
+                default: ({ row }: { row: SequenceStepForm }) => {
+                  const availableVersions = scripts.value.find((item) => item.script_name === row.script_name)?.versions || [];
+                  return h(
+                    ElSelect,
+                    {
+                      modelValue: row.script_version,
+                      "onUpdate:modelValue": (value: string) => {
+                        row.script_version = value;
+                      }
+                    },
+                    () => availableVersions.map((item) => h(ElOption, { key: `${row.id}-${item.script_version}`, label: item.script_version, value: item.script_version }))
+                  );
+                }
+              }),
+              h(ElTableColumn, { label: "操作", width: 110, fixed: "right" }, {
+                default: ({ row }: { row: SequenceStepForm }) =>
+                  h(
+                    ElButton,
+                    {
+                      link: true,
+                      type: "danger",
+                      onClick: () => {
+                        removeStep(stepList, row.id);
+                      }
+                    },
+                    () => "删除步骤"
+                  )
+              })
+            ]
+          }
         )
       ]);
     }
@@ -590,15 +738,7 @@ export const WorkflowsPage = defineComponent({
             ]),
           default: () =>
             h("div", { class: "workflow-segment-body" }, [
-              ...segment.steps.map((step) => renderStepEditor(step, segment.steps)),
-              h(
-                ElButton,
-                {
-                  plain: true,
-                  onClick: () => addStepToSequence(segment)
-                },
-                () => "添加步骤"
-              )
+              renderStepTable(segment.steps, "添加步骤")
             ])
         }
       );
@@ -668,15 +808,7 @@ export const WorkflowsPage = defineComponent({
                   })
                 )
               ]),
-              ...segment.loop.steps.map((step) => renderStepEditor(step, segment.loop.steps)),
-              h(
-                ElButton,
-                {
-                  plain: true,
-                  onClick: () => addStepToLoop(segment.loop)
-                },
-                () => "添加循环体步骤"
-              )
+              renderStepTable(segment.loop.steps, "添加步骤")
             ])
         }
       );
@@ -755,6 +887,26 @@ export const WorkflowsPage = defineComponent({
                                       ElButton,
                                       {
                                         link: true,
+                                        onClick: () => {
+                                          void openEditDialog(row);
+                                        }
+                                      },
+                                      () => "编辑"
+                                    ),
+                                    h(
+                                      ElButton,
+                                      {
+                                        link: true,
+                                        onClick: () => {
+                                          void openCopyDialog(row);
+                                        }
+                                      },
+                                      () => "复制"
+                                    ),
+                                    h(
+                                      ElButton,
+                                      {
+                                        link: true,
                                         type: "danger",
                                         loading: deletingWorkflowID.value === row.workflow_def_id,
                                         onClick: () => {
@@ -796,7 +948,7 @@ export const WorkflowsPage = defineComponent({
           {
             modelValue: createDialogVisible.value,
             "onUpdate:modelValue": (value: boolean) => (createDialogVisible.value = value),
-            title: "创建工作流",
+            title: dialogMode.value === "copy" ? "复制工作流" : dialogMode.value === "edit" ? "编辑工作流" : "创建工作流",
             width: "980px",
             closeOnClickModal: false
           },
@@ -857,7 +1009,9 @@ export const WorkflowsPage = defineComponent({
             footer: () =>
               h("div", { class: "dialog-footer" }, [
                 h(ElButton, { onClick: () => (createDialogVisible.value = false) }, () => "取消"),
-                h(ElButton, { type: "primary", loading: creating.value, onClick: () => void handleCreateWorkflow() }, () => "确认创建")
+                h(ElButton, { type: "primary", loading: creating.value, onClick: () => void handleCreateWorkflow() }, () =>
+                  dialogMode.value === "copy" ? "确认复制" : dialogMode.value === "edit" ? "保存修改" : "确认创建"
+                )
               ])
           }
         )

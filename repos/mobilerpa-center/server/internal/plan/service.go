@@ -14,6 +14,7 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
+	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
 
 const (
@@ -95,21 +96,18 @@ var (
 	ErrPlanDailyStartTimeInvalid = errors.New("plan daily_start_time is invalid")
 	// ErrPlanDailyDeadlineTimeInvalid 表示每日截止时间格式不合法。
 	ErrPlanDailyDeadlineTimeInvalid = errors.New("plan daily_deadline_time is invalid")
-	ErrPlanDefinitionRunning       = errors.New("plan definition has active runs")
-	ErrPlanTodayAlreadyStarted     = errors.New("plan today already started")
-	ErrPlanRunDeleteNotAllowed     = errors.New("plan run delete not allowed")
+	ErrPlanDefinitionRunning        = errors.New("plan definition has active runs")
+	ErrPlanTodayAlreadyStarted      = errors.New("plan today already started")
+	ErrPlanRunDeleteNotAllowed      = errors.New("plan run delete not allowed")
 )
 
 // DeviceBusyDetail 描述计划任务启动时发现的设备占用情况。
 type DeviceBusyDetail struct {
-	DeviceID           string `json:"device_id"`
-	OccupancyType      string `json:"occupancy_type"`
-	WorkflowDefID      string `json:"workflow_def_id"`
-	WorkflowInstanceID string `json:"workflow_instance_id"`
-	WorkflowRunID      string `json:"workflow_run_id"`
-	TaskID             string `json:"task_id"`
-	TaskStatus         string `json:"task_status"`
-	Message            string `json:"message"`
+	DeviceID      string `json:"device_id"`
+	OccupancyType string `json:"occupancy_type"`
+	TaskID        string `json:"task_id"`
+	TaskStatus    string `json:"task_status"`
+	Message       string `json:"message"`
 }
 
 // DeviceBusyError 表示某批设备中存在被占用的设备。
@@ -163,6 +161,7 @@ type DeviceRun struct {
 	DeviceID        string `json:"device_id"`
 	TargetType      string `json:"target_type"`
 	TargetRefID     string `json:"target_ref_id"`
+	CurrentNodeID   string `json:"current_node_id"`
 	Status          string `json:"status"`
 	StartedAt       string `json:"started_at"`
 	FinishedAt      string `json:"finished_at"`
@@ -221,26 +220,22 @@ type TaskCreator interface {
 // TaskDispatcher 定义计划任务下发单脚本任务时需要的能力。
 type TaskDispatcher interface {
 	AssignTask(ctx context.Context, taskID string) (task.Task, error)
+	StartWorkflowSession(ctx context.Context, payload protocol.StartWorkflowSessionPayload) error
+	StopWorkflowSession(ctx context.Context, payload protocol.StopWorkflowSessionPayload) error
 }
 
 // WorkflowRunner 定义计划任务调度工作流时依赖的最小工作流能力。
 type WorkflowRunner interface {
-	Start(ctx context.Context, workflowDefID string, req workflow.StartRequest) (workflow.Instance, error)
-	AddDevices(ctx context.Context, workflowDefID string, req workflow.AddDevicesRequest) (workflow.Instance, error)
-	StopDefinition(ctx context.Context, workflowDefID string, workflowInstanceID string) (workflow.Instance, error)
-	StopRunByDevice(ctx context.Context, workflowDefID string, workflowInstanceID string, deviceID string) (workflow.Run, error)
-	GetInstance(ctx context.Context, workflowInstanceID string) (workflow.Instance, error)
-	GetDeviceBusyDetail(ctx context.Context, deviceID string) (*workflow.DeviceBusyDetail, error)
-	GetRunByTaskID(ctx context.Context, taskID string) (workflow.Run, error)
+	GetDefinition(ctx context.Context, workflowDefID string) (workflow.Definition, error)
 }
 
 // Service 负责计划任务定义、实例与统一调度外壳。
 type Service struct {
-	db         *sql.DB
-	devices    *device.Service
-	tasks      TaskCreator
-	dispatcher TaskDispatcher
-	workflows  WorkflowRunner
+	db          *sql.DB
+	devices     *device.Service
+	tasks       TaskCreator
+	dispatcher  TaskDispatcher
+	workflows   WorkflowRunner
 	startFanout int
 	startMu     sync.Mutex
 	starting    map[string]struct{}
@@ -249,11 +244,11 @@ type Service struct {
 // NewService 创建计划任务服务。
 func NewService(db *sql.DB, devices *device.Service, tasks TaskCreator, dispatcher TaskDispatcher, workflows WorkflowRunner) *Service {
 	return &Service{
-		db:         db,
-		devices:    devices,
-		tasks:      tasks,
-		dispatcher: dispatcher,
-		workflows:  workflows,
+		db:          db,
+		devices:     devices,
+		tasks:       tasks,
+		dispatcher:  dispatcher,
+		workflows:   workflows,
 		startFanout: 20,
 		starting:    make(map[string]struct{}),
 	}
@@ -1309,20 +1304,22 @@ INSERT INTO plan_device_runs (
 }
 
 func (s *Service) startWorkflowPlanRun(ctx context.Context, definition Definition, deviceIDs []string) (Run, error) {
-	if s.workflows == nil {
-		return Run{}, fmt.Errorf("workflow runner is not configured")
+	if s.workflows == nil || s.dispatcher == nil {
+		return Run{}, fmt.Errorf("workflow runner or dispatcher is not configured")
+	}
+
+	workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
+	if err != nil {
+		return Run{}, fmt.Errorf("load workflow definition for plan run: %w", err)
+	}
+	entryNodeID, err := findWorkflowEntryNodeID(workflowDefinition)
+	if err != nil {
+		return Run{}, err
 	}
 
 	now := time.Now().UTC()
 	nowText := now.Format(time.RFC3339)
 	runDate := now.In(time.Local).Format("2006-01-02")
-
-	instance, err := s.workflows.Start(ctx, definition.TargetWorkflowDefID, workflow.StartRequest{
-		DeviceIDs: deviceIDs,
-	})
-	if err != nil {
-		return Run{}, err
-	}
 
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1339,10 +1336,10 @@ INSERT INTO plan_runs (
     plan_def_id, target_ref_id, run_date, target_type, status, started_at, finished_at, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
 		definition.PlanDefID,
-		instance.WorkflowInstanceID,
+		definition.TargetWorkflowDefID,
 		runDate,
 		definition.TargetType,
-		RunStatusRunning,
+		RunStatusPending,
 		nowText,
 		nowText,
 		nowText,
@@ -1356,35 +1353,22 @@ INSERT INTO plan_runs (
 	}
 	planRunID := strconv.FormatInt(insertedPlanRunID, 10)
 
-	for _, deviceRun := range instance.DeviceRuns {
+	for _, deviceID := range deviceIDs {
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO plan_device_runs (
-    plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, started_at, finished_at, last_error, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, current_node_id, started_at, finished_at, last_error, created_at, updated_at
+) VALUES (?, ?, ?, ?, '', ?, ?, '', '', '', ?, ?)`,
 			planRunID,
 			definition.PlanDefID,
-			deviceRun.DeviceID,
+			deviceID,
 			definition.TargetType,
-			deviceRun.WorkflowRunID,
-			mapWorkflowStatus(deviceRun.Status),
-			firstNonEmpty(deviceRun.StartedAt, nowText),
-			deviceRun.FinishedAt,
-			deviceRun.LastError,
+			DeviceRunStatusPending,
+			entryNodeID,
 			nowText,
 			nowText,
 		); err != nil {
 			return Run{}, fmt.Errorf("insert workflow plan device run: %w", err)
 		}
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-UPDATE workflow_instances
-SET plan_run_id = ?
-WHERE id = ?`,
-		planRunID,
-		instance.WorkflowInstanceID,
-	); err != nil {
-		return Run{}, fmt.Errorf("bind workflow instance to plan run: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1393,25 +1377,14 @@ WHERE id = ?`,
 	tx = nil
 
 	if err := s.appendEvent(ctx, planRunID, definition.PlanDefID, "", EventTypePlanRunStarted, "计划任务实例已启动", map[string]any{
-		"source":               "center",
-		"target_type":          definition.TargetType,
-		"workflow_instance_id": instance.WorkflowInstanceID,
-		"workflow_def_id":      definition.TargetWorkflowDefID,
+		"source":          "center",
+		"target_type":     definition.TargetType,
+		"workflow_def_id": definition.TargetWorkflowDefID,
 	}); err != nil {
 		return Run{}, err
 	}
 
-	for _, deviceRun := range instance.DeviceRuns {
-		if err := s.appendEvent(ctx, planRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
-			"source":               "center",
-			"workflow_run_id":      deviceRun.WorkflowRunID,
-			"workflow_instance_id": instance.WorkflowInstanceID,
-		}); err != nil {
-			return Run{}, err
-		}
-	}
-
-	if err := s.syncWorkflowPlanRun(ctx, planRunID); err != nil {
+	if err := s.addWorkflowPlanDevices(ctx, definition, Run{PlanRunID: planRunID, PlanDefID: definition.PlanDefID}, deviceIDs); err != nil {
 		return Run{}, err
 	}
 	return s.GetRun(ctx, planRunID)
@@ -1478,59 +1451,72 @@ WHERE id = ?`,
 }
 
 func (s *Service) addWorkflowPlanDevices(ctx context.Context, definition Definition, run Run, deviceIDs []string) error {
-	if s.workflows == nil {
-		return fmt.Errorf("workflow runner is not configured")
+	if s.workflows == nil || s.dispatcher == nil {
+		return fmt.Errorf("workflow runner or dispatcher is not configured")
 	}
 
-	instance, err := s.workflows.AddDevices(ctx, definition.TargetWorkflowDefID, workflow.AddDevicesRequest{
-		WorkflowInstanceID: run.TargetRefID,
-		DeviceIDs:          deviceIDs,
-	})
+	workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
+	if err != nil {
+		return fmt.Errorf("load workflow definition for add devices: %w", err)
+	}
+	entryNodeID, err := findWorkflowEntryNodeID(workflowDefinition)
+	if err != nil {
+		return err
+	}
+	sessionPayloadTemplate, err := buildWorkflowSessionPayloadTemplate(workflowDefinition, entryNodeID)
 	if err != nil {
 		return err
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
-	for _, workflowRun := range instance.DeviceRuns {
-		if !containsDeviceID(deviceIDs, workflowRun.DeviceID) {
-			continue
-		}
-		result, err := s.db.ExecContext(ctx, `
-INSERT INTO plan_device_runs (
-    plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, started_at, finished_at, last_error, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			run.PlanRunID,
-			run.PlanDefID,
-			workflowRun.DeviceID,
-			definition.TargetType,
-			workflowRun.WorkflowRunID,
-			mapWorkflowStatus(workflowRun.Status),
-			firstNonEmpty(workflowRun.StartedAt, now),
-			workflowRun.FinishedAt,
-			workflowRun.LastError,
-			now,
-			now,
-		)
+	for _, deviceID := range deviceIDs {
+		deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, run.PlanRunID, deviceID)
 		if err != nil {
-			return fmt.Errorf("insert appended workflow plan device run: %w", err)
+			return err
 		}
-		insertedPlanDeviceRunID, err := result.LastInsertId()
-		if err != nil {
-			return fmt.Errorf("read inserted appended workflow plan device run id: %w", err)
-		}
-		planDeviceRunID := strconv.FormatInt(insertedPlanDeviceRunID, 10)
 
-		if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, workflowRun.DeviceID, EventTypePlanDeviceAdded, "设备已追加到计划任务实例", map[string]any{
-			"source":               "center",
-			"plan_device_run_id":   planDeviceRunID,
-			"workflow_run_id":      workflowRun.WorkflowRunID,
-			"workflow_instance_id": instance.WorkflowInstanceID,
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_device_runs
+SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ?
+WHERE id = ?`,
+			DeviceRunStatusRunning,
+			entryNodeID,
+			now,
+			now,
+			deviceRun.PlanDeviceRunID,
+		); err != nil {
+			return fmt.Errorf("update workflow plan device run started: %w", err)
+		}
+
+		payload := sessionPayloadTemplate
+		payload.WorkflowSessionID = deviceRun.PlanDeviceRunID
+		payload.PlanRunID = run.PlanRunID
+		payload.PlanDeviceRunID = deviceRun.PlanDeviceRunID
+		payload.DeviceID = deviceID
+		payload.WorkflowDefID = definition.TargetWorkflowDefID
+
+		if err := s.dispatcher.StartWorkflowSession(ctx, payload); err != nil {
+			return fmt.Errorf("dispatch plan workflow session: %w", err)
+		}
+
+		if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, deviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
+			"source":             "center",
+			"plan_device_run_id": deviceRun.PlanDeviceRunID,
+			"workflow_def_id":    definition.TargetWorkflowDefID,
+			"workflow_node_id":   entryNodeID,
 		}); err != nil {
 			return err
 		}
 	}
-	if err := s.syncWorkflowPlanRun(ctx, run.PlanRunID); err != nil {
-		return err
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_runs
+SET status = ?, updated_at = ?
+WHERE id = ?`,
+		RunStatusRunning,
+		now,
+		run.PlanRunID,
+	); err != nil {
+		return fmt.Errorf("update workflow plan run started: %w", err)
 	}
 	return nil
 }
@@ -1558,28 +1544,21 @@ UPDATE plan_device_runs
 }
 
 func (s *Service) stopWorkflowPlanDevice(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, reason string) error {
-	if s.workflows == nil {
-		return fmt.Errorf("workflow runner is not configured")
+	if s.dispatcher == nil {
+		return fmt.Errorf("workflow dispatcher is not configured")
 	}
-
-	workflowInstanceID := strings.TrimSpace(run.TargetRefID)
-	if workflowInstanceID == "" {
-		row := s.db.QueryRowContext(ctx, `
-SELECT id
-FROM workflow_instances
-WHERE plan_run_id = ?
-ORDER BY id DESC
-LIMIT 1`, run.PlanRunID)
-		if err := row.Scan(&workflowInstanceID); err != nil && !errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("query workflow instance by plan run: %w", err)
-		}
-		workflowInstanceID = strings.TrimSpace(workflowInstanceID)
-	}
-
-	if workflowInstanceID != "" {
-		if _, err := s.workflows.StopRunByDevice(ctx, definition.TargetWorkflowDefID, workflowInstanceID, deviceRun.DeviceID); err != nil && !errors.Is(err, workflow.ErrWorkflowRunNotFound) {
-			return err
-		}
+	if err := s.dispatcher.StopWorkflowSession(ctx, protocol.StopWorkflowSessionPayload{
+		WorkflowSessionID: deviceRun.PlanDeviceRunID,
+		PlanRunID:         run.PlanRunID,
+		PlanDeviceRunID:   deviceRun.PlanDeviceRunID,
+		WorkflowDefID:     definition.TargetWorkflowDefID,
+		DeviceID:          deviceRun.DeviceID,
+		Reason:            strings.TrimSpace(reason),
+		Extra: map[string]any{
+			"source": "center",
+		},
+	}); err != nil {
+		return fmt.Errorf("dispatch stop workflow session: %w", err)
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -1593,9 +1572,6 @@ WHERE id = ?`,
 		deviceRun.PlanDeviceRunID,
 	); err != nil {
 		return fmt.Errorf("stop workflow plan device run: %w", err)
-	}
-	if err := s.syncWorkflowPlanRun(ctx, run.PlanRunID); err != nil {
-		return err
 	}
 	return nil
 }
@@ -1676,100 +1652,151 @@ WHERE id = ?`,
 	return s.refreshRunStatus(ctx, planRunID)
 }
 
-// SyncWorkflowRunByTask 在工作流任务结果推进后，把工作流实例状态回写到计划任务实例。
-func (s *Service) SyncWorkflowRunByTask(ctx context.Context, taskID string) error {
-	taskID = strings.TrimSpace(taskID)
-	if taskID == "" || s.workflows == nil {
+// HandleWorkflowSessionAck 处理设备回传的 workflow_session_ack，并直接更新计划任务设备运行态。
+func (s *Service) HandleWorkflowSessionAck(ctx context.Context, payload protocol.WorkflowSessionAckPayload, requestID string, deviceID string) error {
+	run, deviceRun, err := s.resolveWorkflowSessionDeviceRun(ctx, payload.PlanRunID, payload.PlanDeviceRunID)
+	if err != nil {
+		return err
+	}
+	if run.PlanRunID == "" || deviceRun.PlanDeviceRunID == "" {
 		return nil
 	}
 
-	row := s.db.QueryRowContext(ctx, `
-SELECT plan_run_id, workflow_instance_id
-FROM tasks
-WHERE id = ?`,
-		taskID,
-	)
+	deviceID = firstNonEmpty(strings.TrimSpace(deviceID), deviceRun.DeviceID)
+	status := strings.TrimSpace(payload.Status)
+	if status == "" {
+		status = "ok"
+	}
+	message := strings.TrimSpace(payload.Message)
+	if message == "" {
+		message = "设备已收到工作流会话"
+	}
 
-	var planRunID string
-	var workflowInstanceID string
-	if err := row.Scan(&planRunID, &workflowInstanceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("query workflow plan task metadata: %w", err)
-	}
-	planRunID = strings.TrimSpace(planRunID)
-	workflowInstanceID = strings.TrimSpace(workflowInstanceID)
-	if workflowInstanceID == "" {
-		return nil
-	}
-	if planRunID == "" {
-		instanceRow := s.db.QueryRowContext(ctx, `
-SELECT plan_run_id
-FROM workflow_instances
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_device_runs
+SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ?
 WHERE id = ?`,
-			workflowInstanceID,
-		)
-		if err := instanceRow.Scan(&planRunID); err != nil {
-			if errors.Is(err, sql.ErrNoRows) {
-				return nil
-			}
-			return fmt.Errorf("query plan run by workflow instance: %w", err)
-		}
-		planRunID = strings.TrimSpace(planRunID)
+		DeviceRunStatusRunning,
+		now,
+		now,
+		deviceRun.PlanDeviceRunID,
+	); err != nil {
+		return fmt.Errorf("mark plan workflow device run running on session ack: %w", err)
 	}
-	if planRunID == "" {
-		return nil
+
+	if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, deviceID, EventTypePlanDeviceStarted, message, map[string]any{
+		"source":             "agent",
+		"request_id":         requestID,
+		"status":             status,
+		"plan_device_run_id": deviceRun.PlanDeviceRunID,
+	}); err != nil {
+		return err
 	}
-	return s.syncWorkflowPlanRun(ctx, planRunID)
+	return s.refreshRunStatus(ctx, run.PlanRunID)
 }
 
-// SyncWorkflowRunBySession 在工作流会话结果回传后，把工作流实例状态回写到计划任务实例。
-func (s *Service) SyncWorkflowRunBySession(ctx context.Context, workflowRunID string) error {
-	workflowRunID = strings.TrimSpace(workflowRunID)
-	if workflowRunID == "" {
+// HandleWorkflowSessionEvent 处理设备回传的 workflow_session_event，并直接写入计划任务事件域。
+func (s *Service) HandleWorkflowSessionEvent(ctx context.Context, payload protocol.WorkflowSessionEventPayload, requestID string, deviceID string) error {
+	run, deviceRun, err := s.resolveWorkflowSessionDeviceRun(ctx, payload.PlanRunID, payload.PlanDeviceRunID)
+	if err != nil {
+		return err
+	}
+	if run.PlanRunID == "" || deviceRun.PlanDeviceRunID == "" {
 		return nil
 	}
 
-	row := s.db.QueryRowContext(ctx, `
-SELECT workflow_instance_id
-FROM workflow_runs
+	deviceID = firstNonEmpty(strings.TrimSpace(deviceID), deviceRun.DeviceID)
+	workflowNodeID := strings.TrimSpace(payload.WorkflowNodeID)
+	eventType := strings.TrimSpace(payload.EventType)
+	if eventType == "" {
+		eventType = "workflow_session_event"
+	}
+	message := strings.TrimSpace(payload.Message)
+	if message == "" {
+		message = "工作流会话事件"
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if workflowNodeID != "" {
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_device_runs
+SET current_node_id = ?, updated_at = ?
 WHERE id = ?`,
-		workflowRunID,
-	)
-
-	var workflowInstanceID string
-	if err := row.Scan(&workflowInstanceID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
+			workflowNodeID,
+			now,
+			deviceRun.PlanDeviceRunID,
+		); err != nil {
+			return fmt.Errorf("update plan workflow device current node by event: %w", err)
 		}
-		return fmt.Errorf("query workflow instance by workflow run: %w", err)
 	}
-	workflowInstanceID = strings.TrimSpace(workflowInstanceID)
-	if workflowInstanceID == "" {
+
+	extra := map[string]any{
+		"source":             "agent",
+		"request_id":         requestID,
+		"status":             strings.TrimSpace(payload.Status),
+		"step_name":          strings.TrimSpace(payload.StepName),
+		"workflow_node_id":   workflowNodeID,
+		"plan_device_run_id": deviceRun.PlanDeviceRunID,
+	}
+	for key, value := range payload.Extra {
+		extra[key] = value
+	}
+	return s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, deviceID, eventType, message, extra)
+}
+
+// HandleWorkflowSessionResult 处理设备回传的 workflow_session_result，并直接更新计划任务设备运行态。
+func (s *Service) HandleWorkflowSessionResult(ctx context.Context, payload protocol.WorkflowSessionResultPayload, requestID string, deviceID string) error {
+	run, deviceRun, err := s.resolveWorkflowSessionDeviceRun(ctx, payload.PlanRunID, payload.PlanDeviceRunID)
+	if err != nil {
+		return err
+	}
+	if run.PlanRunID == "" || deviceRun.PlanDeviceRunID == "" {
 		return nil
 	}
 
-	instanceRow := s.db.QueryRowContext(ctx, `
-SELECT plan_run_id
-FROM workflow_instances
+	deviceID = firstNonEmpty(strings.TrimSpace(deviceID), deviceRun.DeviceID)
+	workflowNodeID := strings.TrimSpace(payload.WorkflowNodeID)
+	nextStatus := DeviceRunStatusFailed
+	switch strings.TrimSpace(payload.Status) {
+	case RunStatusSuccess:
+		nextStatus = DeviceRunStatusSuccess
+	case RunStatusStopped:
+		nextStatus = DeviceRunStatusStopped
+	}
+
+	lastError := strings.TrimSpace(payload.ResultMessage)
+	if nextStatus == DeviceRunStatusSuccess || nextStatus == DeviceRunStatusStopped {
+		lastError = ""
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_device_runs
+SET status = ?, current_node_id = ?, finished_at = CASE WHEN finished_at = '' THEN ? ELSE finished_at END,
+    last_error = ?, updated_at = ?
 WHERE id = ?`,
-		workflowInstanceID,
-	)
-
-	var planRunID string
-	if err := instanceRow.Scan(&planRunID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("query plan run by workflow instance: %w", err)
-	}
-	planRunID = strings.TrimSpace(planRunID)
-	if planRunID == "" {
-		return nil
+		nextStatus,
+		workflowNodeID,
+		now,
+		lastError,
+		now,
+		deviceRun.PlanDeviceRunID,
+	); err != nil {
+		return fmt.Errorf("update plan workflow device run by session result: %w", err)
 	}
 
-	return s.syncWorkflowPlanRun(ctx, planRunID)
+	if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, deviceID, EventTypePlanDeviceCompleted, "设备计划任务执行已结束", map[string]any{
+		"source":             "agent",
+		"request_id":         requestID,
+		"status":             strings.TrimSpace(payload.Status),
+		"result_code":        strings.TrimSpace(payload.ResultCode),
+		"result_message":     strings.TrimSpace(payload.ResultMessage),
+		"workflow_node_id":   workflowNodeID,
+		"plan_device_run_id": deviceRun.PlanDeviceRunID,
+	}); err != nil {
+		return err
+	}
+	return s.refreshRunStatus(ctx, run.PlanRunID)
 }
 
 func (s *Service) refreshRunStatus(ctx context.Context, planRunID string) error {
@@ -1872,62 +1899,9 @@ WHERE id = ?`,
 }
 
 func (s *Service) syncWorkflowPlanRun(ctx context.Context, planRunID string) error {
-	run, err := s.GetRun(ctx, planRunID)
-	if err != nil {
-		return err
-	}
-	if run.TargetType != TargetTypeWorkflow || s.workflows == nil || strings.TrimSpace(run.TargetRefID) == "" {
-		return nil
-	}
-
-	workflowInstance, err := s.workflows.GetInstance(ctx, run.TargetRefID)
-	if err != nil {
-		return err
-	}
-
-	existingMap := make(map[string]DeviceRun, len(run.DeviceRuns))
-	for _, item := range run.DeviceRuns {
-		existingMap[item.DeviceID] = item
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	for _, workflowRun := range workflowInstance.DeviceRuns {
-		existing, exists := existingMap[workflowRun.DeviceID]
-		if !exists {
-			continue
-		}
-		nextStatus := mapWorkflowStatus(workflowRun.Status)
-		lastError := workflowRun.LastError
-		if _, err := s.db.ExecContext(ctx, `
-UPDATE plan_device_runs
-SET status = ?, target_ref_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END,
-    finished_at = ?, last_error = ?, updated_at = ?
-WHERE id = ?`,
-			nextStatus,
-			workflowRun.WorkflowRunID,
-			firstNonEmpty(workflowRun.StartedAt, now),
-			workflowRun.FinishedAt,
-			lastError,
-			now,
-			existing.PlanDeviceRunID,
-		); err != nil {
-			return fmt.Errorf("sync workflow plan device run: %w", err)
-		}
-
-		if nextStatus == DeviceRunStatusSuccess || nextStatus == DeviceRunStatusFailed || nextStatus == DeviceRunStatusStopped {
-			if err := s.appendEvent(ctx, planRunID, run.PlanDefID, workflowRun.DeviceID, EventTypePlanDeviceCompleted, "设备计划任务执行已结束", map[string]any{
-				"source":             "center",
-				"plan_device_run_id": existing.PlanDeviceRunID,
-				"workflow_run_id":    workflowRun.WorkflowRunID,
-				"status":             nextStatus,
-				"last_error":         lastError,
-			}); err != nil {
-				return err
-			}
-		}
-	}
-
-	return s.refreshRunStatus(ctx, planRunID)
+	_ = ctx
+	_ = planRunID
+	return nil
 }
 
 func (s *Service) ensureDevicesAvailable(ctx context.Context, targetType string, currentPlanRunID string, deviceIDs []string) ([]DeviceBusyDetail, error) {
@@ -1981,31 +1955,10 @@ LIMIT 1`,
 		return nil, fmt.Errorf("query busy plan device run: %w", err)
 	}
 
-	// 工作流占用检查对脚本型和工作流型计划任务都生效：脚本型计划任务也必须避让
-	// 目标设备上未结束的工作流运行，符合“同一设备同一时刻只能属于一个执行域”。
-	if s.workflows != nil {
-		workflowBusy, err := s.workflows.GetDeviceBusyDetail(ctx, deviceID)
-		if err != nil {
-			return nil, err
-		}
-		if workflowBusy != nil {
-			return &DeviceBusyDetail{
-				DeviceID:           workflowBusy.DeviceID,
-				OccupancyType:      workflowBusy.OccupancyType,
-				WorkflowDefID:      workflowBusy.WorkflowDefID,
-				WorkflowInstanceID: workflowBusy.WorkflowInstanceID,
-				WorkflowRunID:      workflowBusy.WorkflowRunID,
-				TaskID:             workflowBusy.TaskID,
-				TaskStatus:         workflowBusy.TaskStatus,
-				Message:            workflowBusy.Message,
-			}, nil
-		}
-	}
-
 	return nil, nil
 }
 
-// GetDeviceBusyDetail 返回某台设备当前是否被计划任务、工作流或手工任务占用。
+// GetDeviceBusyDetail 返回某台设备当前是否被计划任务占用。
 func (s *Service) GetDeviceBusyDetail(ctx context.Context, deviceID string) (*DeviceBusyDetail, error) {
 	if s == nil || s.db == nil {
 		return nil, nil
@@ -2041,7 +1994,7 @@ ORDER BY plan_def_id ASC, position ASC, device_id ASC`)
 func (s *Service) listDeviceRunsByPlanRun(ctx context.Context, planRunID string) ([]DeviceRun, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
-       started_at, finished_at, last_error, created_at, updated_at
+       current_node_id, started_at, finished_at, last_error, created_at, updated_at
 FROM plan_device_runs
 WHERE plan_run_id = ?
 ORDER BY id ASC`, planRunID)
@@ -2067,7 +2020,7 @@ ORDER BY id ASC`, planRunID)
 func (s *Service) getDeviceRunByPlanAndDevice(ctx context.Context, planRunID string, deviceID string) (DeviceRun, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
-       started_at, finished_at, last_error, created_at, updated_at
+       current_node_id, started_at, finished_at, last_error, created_at, updated_at
 FROM plan_device_runs
 WHERE plan_run_id = ?
   AND device_id = ?
@@ -2075,6 +2028,17 @@ ORDER BY id DESC
 LIMIT 1`,
 		planRunID,
 		deviceID,
+	)
+	return scanDeviceRun(row)
+}
+
+func (s *Service) getDeviceRunByID(ctx context.Context, planDeviceRunID string) (DeviceRun, error) {
+	row := s.db.QueryRowContext(ctx, `
+SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
+       current_node_id, started_at, finished_at, last_error, created_at, updated_at
+FROM plan_device_runs
+WHERE id = ?`,
+		planDeviceRunID,
 	)
 	return scanDeviceRun(row)
 }
@@ -2095,6 +2059,88 @@ LIMIT 1`, planDeviceRunID)
 		return "", "", fmt.Errorf("query task by plan_device_run_id: %w", err)
 	}
 	return taskID, status, nil
+}
+
+func (s *Service) resolveWorkflowSessionDeviceRun(ctx context.Context, planRunID string, planDeviceRunID string) (Run, DeviceRun, error) {
+	planRunID = strings.TrimSpace(planRunID)
+	planDeviceRunID = strings.TrimSpace(planDeviceRunID)
+
+	if planRunID == "" || planDeviceRunID == "" {
+		return Run{}, DeviceRun{}, nil
+	}
+
+	run, err := s.GetRun(ctx, planRunID)
+	if err != nil {
+		if errors.Is(err, ErrPlanRunNotFound) {
+			return Run{}, DeviceRun{}, nil
+		}
+		return Run{}, DeviceRun{}, err
+	}
+	deviceRun, err := s.getDeviceRunByID(ctx, planDeviceRunID)
+	if err != nil {
+		if errors.Is(err, ErrPlanDeviceRunNotFound) {
+			return Run{}, DeviceRun{}, nil
+		}
+		return Run{}, DeviceRun{}, err
+	}
+	return run, deviceRun, nil
+}
+
+func findWorkflowEntryNodeID(definition workflow.Definition) (string, error) {
+	if len(definition.Nodes) == 0 {
+		return "", fmt.Errorf("workflow definition has no nodes")
+	}
+	return strings.TrimSpace(definition.Nodes[0].NodeID), nil
+}
+
+func buildWorkflowSessionPayloadTemplate(definition workflow.Definition, entryNodeID string) (protocol.StartWorkflowSessionPayload, error) {
+	nodeSnapshots := make([]protocol.WorkflowNodeSnapshot, 0, len(definition.Nodes))
+	edgeSnapshots := make([]protocol.WorkflowEdgeSnapshot, 0, len(definition.Edges))
+	scriptManifest := make([]protocol.WorkflowScriptManifest, 0)
+	seenScripts := make(map[string]struct{})
+
+	for _, node := range definition.Nodes {
+		nodeSnapshots = append(nodeSnapshots, protocol.WorkflowNodeSnapshot{
+			NodeID:        node.NodeID,
+			NodeType:      node.NodeType,
+			NodeName:      node.NodeName,
+			ScriptName:    node.ScriptName,
+			ScriptVersion: node.ScriptVersion,
+			MaxIterations: node.MaxIterations,
+			Position:      node.Position,
+		})
+		if node.NodeType == workflow.NodeTypeScript {
+			key := node.ScriptName + "@" + node.ScriptVersion
+			if _, exists := seenScripts[key]; !exists {
+				seenScripts[key] = struct{}{}
+				scriptManifest = append(scriptManifest, protocol.WorkflowScriptManifest{
+					ScriptName:    node.ScriptName,
+					ScriptVersion: node.ScriptVersion,
+				})
+			}
+		}
+	}
+
+	for _, edge := range definition.Edges {
+		edgeSnapshots = append(edgeSnapshots, protocol.WorkflowEdgeSnapshot{
+			FromNodeID: edge.FromNodeID,
+			ToNodeID:   edge.ToNodeID,
+			EdgeType:   edge.EdgeType,
+		})
+	}
+
+	return protocol.StartWorkflowSessionPayload{
+		WorkflowName: definition.WorkflowName,
+		EntryNodeID:  entryNodeID,
+		DefinitionSnapshot: protocol.WorkflowDefinitionSnapshot{
+			Nodes: nodeSnapshots,
+			Edges: edgeSnapshots,
+		},
+		ScriptManifest: scriptManifest,
+		RuntimePolicy: map[string]any{
+			"event_mode": "key_events",
+		},
+	}, nil
 }
 
 func (s *Service) appendEvent(ctx context.Context, planRunID string, planDefID string, deviceID string, eventType string, message string, extra map[string]any) error {
@@ -2404,15 +2450,15 @@ func scriptTargetRef(definition Definition) string {
 
 func mapWorkflowStatus(status string) string {
 	switch strings.TrimSpace(status) {
-	case workflow.RunStatusPending:
+	case RunStatusPending:
 		return DeviceRunStatusPending
-	case workflow.RunStatusRunning:
+	case RunStatusRunning:
 		return DeviceRunStatusRunning
-	case workflow.RunStatusSuccess:
+	case RunStatusSuccess:
 		return DeviceRunStatusSuccess
-	case workflow.RunStatusFailed:
+	case RunStatusFailed:
 		return DeviceRunStatusFailed
-	case workflow.RunStatusStopped:
+	case RunStatusStopped:
 		return DeviceRunStatusStopped
 	default:
 		return DeviceRunStatusPending
@@ -2494,6 +2540,7 @@ func scanDeviceRun(scanner deviceRunScanner) (DeviceRun, error) {
 		&item.TargetType,
 		&item.TargetRefID,
 		&item.Status,
+		&item.CurrentNodeID,
 		&item.StartedAt,
 		&item.FinishedAt,
 		&item.LastError,
@@ -2621,4 +2668,3 @@ func isManualStartAllowed(definition Definition, now time.Time) bool {
 func isSameLocalRunDate(runDate string, now time.Time) bool {
 	return strings.TrimSpace(runDate) == now.In(time.Local).Format("2006-01-02")
 }
-

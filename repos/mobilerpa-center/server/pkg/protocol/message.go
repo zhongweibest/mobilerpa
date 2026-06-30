@@ -27,8 +27,6 @@ const (
 	MessageTypeScriptSyncResult = "script_sync_result"
 	// MessageTypeTaskProgress 表示设备回传任务执行过程中的关键步骤事件。
 	MessageTypeTaskProgress = "task_progress"
-	// MessageTypeWorkflowStepProgress 表示设备回传工作流步骤过程中的关键进度事件。
-	MessageTypeWorkflowStepProgress = "workflow_step_progress"
 	// MessageTypeTaskResult 表示设备回传任务执行结果的消息。
 	MessageTypeTaskResult = "task_result"
 )
@@ -49,23 +47,23 @@ type Envelope struct {
 
 // StartWorkflowSessionPayload 描述中心下发给设备的工作流会话。
 type StartWorkflowSessionPayload struct {
-	WorkflowSessionID  string                   `json:"workflow_session_id"`
-	WorkflowInstanceID string                   `json:"workflow_instance_id"`
-	WorkflowRunID      string                   `json:"workflow_run_id"`
-	WorkflowDefID      string                   `json:"workflow_def_id"`
-	WorkflowName       string                   `json:"workflow_name"`
-	DeviceID           string                   `json:"device_id"`
-	EntryNodeID        string                   `json:"entry_node_id"`
+	WorkflowSessionID  string                     `json:"workflow_session_id"`
+	PlanRunID          string                     `json:"plan_run_id"`
+	PlanDeviceRunID    string                     `json:"plan_device_run_id"`
+	WorkflowDefID      string                     `json:"workflow_def_id"`
+	WorkflowName       string                     `json:"workflow_name"`
+	DeviceID           string                     `json:"device_id"`
+	EntryNodeID        string                     `json:"entry_node_id"`
 	DefinitionSnapshot WorkflowDefinitionSnapshot `json:"definition_snapshot"`
-	ScriptManifest     []WorkflowScriptManifest `json:"script_manifest"`
-	RuntimePolicy      map[string]any           `json:"runtime_policy"`
+	ScriptManifest     []WorkflowScriptManifest   `json:"script_manifest"`
+	RuntimePolicy      map[string]any             `json:"runtime_policy"`
 }
 
 // StopWorkflowSessionPayload 描述中心要求设备停止某次工作流会话。
 type StopWorkflowSessionPayload struct {
 	WorkflowSessionID string         `json:"workflow_session_id"`
-	WorkflowInstanceID string        `json:"workflow_instance_id"`
-	WorkflowRunID     string         `json:"workflow_run_id"`
+	PlanRunID         string         `json:"plan_run_id"`
+	PlanDeviceRunID   string         `json:"plan_device_run_id"`
 	WorkflowDefID     string         `json:"workflow_def_id"`
 	DeviceID          string         `json:"device_id"`
 	Reason            string         `json:"reason"`
@@ -104,28 +102,31 @@ type WorkflowScriptManifest struct {
 
 // WorkflowSessionAckPayload 描述设备对工作流会话的确认回执。
 type WorkflowSessionAckPayload struct {
-	WorkflowRunID string `json:"workflow_run_id"`
-	Status        string `json:"status"`
-	Message       string `json:"message"`
+	PlanRunID       string `json:"plan_run_id"`
+	PlanDeviceRunID string `json:"plan_device_run_id"`
+	Status          string `json:"status"`
+	Message         string `json:"message"`
 }
 
 // WorkflowSessionEventPayload 描述设备回传的工作流会话关键事件。
 type WorkflowSessionEventPayload struct {
-	WorkflowRunID string         `json:"workflow_run_id"`
-	WorkflowNodeID string        `json:"workflow_node_id"`
-	EventType     string         `json:"event_type"`
-	Status        string         `json:"status"`
-	StepName      string         `json:"step_name"`
-	Message       string         `json:"message"`
-	Extra         map[string]any `json:"extra"`
+	PlanRunID       string         `json:"plan_run_id"`
+	PlanDeviceRunID string         `json:"plan_device_run_id"`
+	WorkflowNodeID  string         `json:"workflow_node_id"`
+	EventType       string         `json:"event_type"`
+	Status          string         `json:"status"`
+	StepName        string         `json:"step_name"`
+	Message         string         `json:"message"`
+	Extra           map[string]any `json:"extra"`
 }
 
 // WorkflowSessionResultPayload 描述设备回传的工作流会话最终结果。
 type WorkflowSessionResultPayload struct {
-	WorkflowRunID string         `json:"workflow_run_id"`
-	WorkflowNodeID string        `json:"workflow_node_id"`
-	Status        string         `json:"status"`
-	ResultCode    string         `json:"result_code"`
-	ResultMessage string         `json:"result_message"`
-	Extra         map[string]any `json:"extra"`
+	PlanRunID       string         `json:"plan_run_id"`
+	PlanDeviceRunID string         `json:"plan_device_run_id"`
+	WorkflowNodeID  string         `json:"workflow_node_id"`
+	Status          string         `json:"status"`
+	ResultCode      string         `json:"result_code"`
+	ResultMessage   string         `json:"result_message"`
+	Extra           map[string]any `json:"extra"`
 }

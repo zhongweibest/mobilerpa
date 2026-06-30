@@ -84,13 +84,18 @@ function buildTaskSummary(taskPayload) {
     var payload = taskPayload || {};
     return {
         task_id: String(payload.task_id || ""),
-        workflow_run_id: String(payload.workflow_run_id || ""),
-        workflow_node_id: String(payload.workflow_node_id || ""),
-        task_source_type: String(payload.task_source_type || "manual"),
         script_name: String(payload.script_name || ""),
         script_version: String(payload.script_version || ""),
         priority: Number(payload.priority || 0),
         params: payload.params || {}
+    };
+}
+
+function buildWorkflowSessionRefs(payload) {
+    var sessionPayload = payload || {};
+    return {
+        plan_run_id: String(sessionPayload.plan_run_id || ""),
+        plan_device_run_id: String(sessionPayload.plan_device_run_id || "")
     };
 }
 
@@ -185,33 +190,7 @@ function connectAutoJs(options) {
         logger.info("已发送 task_progress：" + summary.task_id + " -> " + String(payload.step_name || ""));
     }
 
-    function sendWorkflowStepProgress(taskSummary, progress) {
-        var summary = taskSummary || {};
-        var payload = progress || {};
-        send("workflow_step_progress", createRequestID("agent-workflow-step-progress"), {
-            workflow_run_id: String(summary.workflow_run_id || ""),
-            workflow_node_id: String(summary.workflow_node_id || ""),
-            task_id: String(summary.task_id || ""),
-            status: String(payload.status || "running"),
-            step_name: String(payload.step_name || ""),
-            message: String(payload.message || ""),
-            extra: payload.extra || {}
-        });
-        logger.info("已发送 workflow_step_progress：" + String(summary.workflow_run_id || "") + " / " + String(payload.step_name || ""));
-    }
-
-    function isWorkflowTask(taskSummary) {
-        var summary = taskSummary || {};
-        return String(summary.task_source_type || "") === "workflow" &&
-            !!String(summary.workflow_run_id || "").trim() &&
-            !!String(summary.workflow_node_id || "").trim();
-    }
-
     function sendUnifiedProgress(taskSummary, progress) {
-        if (isWorkflowTask(taskSummary)) {
-            sendWorkflowStepProgress(taskSummary, progress);
-            return;
-        }
         sendTaskProgress(taskSummary, progress);
     }
 
@@ -242,18 +221,22 @@ function connectAutoJs(options) {
 
     function sendWorkflowSessionAck(sessionPayload) {
         var payload = sessionPayload || {};
+        var refs = buildWorkflowSessionRefs(payload);
         send("workflow_session_ack", createRequestID("agent-workflow-session-ack"), {
-            workflow_run_id: String(payload.workflow_run_id || ""),
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             status: "ok",
             message: "Agent 已收到工作流会话"
         });
-        logger.info("已发送 workflow_session_ack：" + String(payload.workflow_run_id || ""));
+        logger.info("已发送 workflow_session_ack：" + String(refs.plan_device_run_id || ""));
     }
 
     function sendWorkflowSessionEvent(eventPayload) {
         var payload = eventPayload || {};
+        var refs = buildWorkflowSessionRefs(payload);
         send("workflow_session_event", createRequestID("agent-workflow-session-event"), {
-            workflow_run_id: String(payload.workflow_run_id || ""),
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             workflow_node_id: String(payload.workflow_node_id || ""),
             event_type: String(payload.event_type || ""),
             status: String(payload.status || "running"),
@@ -265,39 +248,41 @@ function connectAutoJs(options) {
 
     function sendWorkflowSessionResult(resultPayload) {
         var payload = resultPayload || {};
+        var refs = buildWorkflowSessionRefs(payload);
         send("workflow_session_result", createRequestID("agent-workflow-session-result"), {
-            workflow_run_id: String(payload.workflow_run_id || ""),
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             workflow_node_id: String(payload.workflow_node_id || ""),
             status: String(payload.status || "failed"),
             result_code: String(payload.result_code || ""),
             result_message: String(payload.result_message || ""),
             extra: payload.extra || {}
         });
-        logger.info("已发送 workflow_session_result：" + String(payload.workflow_run_id || "") + " -> " + String(payload.status || "failed"));
+        logger.info("已发送 workflow_session_result：" + String(refs.plan_device_run_id || "") + " -> " + String(payload.status || "failed"));
     }
 
-    function markWorkflowStopRequested(workflowRunID) {
-        workflowRunID = String(workflowRunID || "").trim();
-        if (!workflowRunID) {
+    function markWorkflowStopRequested(sessionKey) {
+        sessionKey = String(sessionKey || "").trim();
+        if (!sessionKey) {
             return;
         }
-        workflowStopFlags[workflowRunID] = true;
+        workflowStopFlags[sessionKey] = true;
     }
 
-    function clearWorkflowStopRequested(workflowRunID) {
-        workflowRunID = String(workflowRunID || "").trim();
-        if (!workflowRunID) {
+    function clearWorkflowStopRequested(sessionKey) {
+        sessionKey = String(sessionKey || "").trim();
+        if (!sessionKey) {
             return;
         }
-        delete workflowStopFlags[workflowRunID];
+        delete workflowStopFlags[sessionKey];
     }
 
-    function isWorkflowStopRequested(workflowRunID) {
-        workflowRunID = String(workflowRunID || "").trim();
-        if (!workflowRunID) {
+    function isWorkflowStopRequested(sessionKey) {
+        sessionKey = String(sessionKey || "").trim();
+        if (!sessionKey) {
             return false;
         }
-        return workflowStopFlags[workflowRunID] === true;
+        return workflowStopFlags[sessionKey] === true;
     }
 
     function stopHeartbeat() {
@@ -509,16 +494,17 @@ function connectAutoJs(options) {
     function executeWorkflowSession(sessionPayload) {
         var payload = sessionPayload || {};
         var result = null;
-        var workflowRunID = String(payload.workflow_run_id || "");
+        var refs = buildWorkflowSessionRefs(payload);
+        var sessionKey = String(refs.plan_device_run_id || "");
 
         if (workflowSessionExecuting) {
-            logger.warn("当前已有工作流会话在执行，忽略新的 start_workflow_session: " + String(payload.workflow_run_id || ""));
+            logger.warn("当前已有工作流会话在执行，忽略新的 start_workflow_session: " + String(sessionKey || ""));
             return;
         }
 
         workflowSessionExecuting = true;
-        currentWorkflowRunID = workflowRunID;
-        clearWorkflowStopRequested(workflowRunID);
+        currentWorkflowRunID = sessionKey;
+        clearWorkflowStopRequested(sessionKey);
         try {
             result = workflowSessionRunner.runSession(payload, {
                 deviceID: deviceID,
@@ -526,14 +512,15 @@ function connectAutoJs(options) {
                 centerBaseURL: options.centerBaseURL,
                 logger: logger,
                 isCancelled: function () {
-                    return isWorkflowStopRequested(workflowRunID);
+                    return isWorkflowStopRequested(sessionKey);
                 },
                 sendEvent: function (eventPayload) {
                     sendWorkflowSessionEvent(eventPayload);
                 }
             });
             sendWorkflowSessionResult({
-                workflow_run_id: String(payload.workflow_run_id || ""),
+                plan_run_id: refs.plan_run_id,
+                plan_device_run_id: refs.plan_device_run_id,
                 workflow_node_id: String((result && result.workflow_node_id) || ""),
                 status: String((result && result.status) || "failed"),
                 result_code: String((result && result.result_code) || ""),
@@ -543,7 +530,8 @@ function connectAutoJs(options) {
         } catch (error) {
             logger.error("本地工作流会话执行失败：" + String(error));
             sendWorkflowSessionResult({
-                workflow_run_id: String(payload.workflow_run_id || ""),
+                plan_run_id: refs.plan_run_id,
+                plan_device_run_id: refs.plan_device_run_id,
                 workflow_node_id: "",
                 status: "failed",
                 result_code: "WORKFLOW_SESSION_EXCEPTION",
@@ -551,7 +539,7 @@ function connectAutoJs(options) {
                 extra: {}
             });
         } finally {
-            clearWorkflowStopRequested(workflowRunID);
+            clearWorkflowStopRequested(sessionKey);
             currentWorkflowRunID = "";
             workflowSessionExecuting = false;
         }
@@ -599,8 +587,10 @@ function connectAutoJs(options) {
 
     function handleStartWorkflowSession(message) {
         var payload = message && message.payload ? message.payload : {};
+        var refs = buildWorkflowSessionRefs(payload);
         logger.info("收到 start_workflow_session：" + JSON.stringify({
-            workflow_run_id: payload.workflow_run_id || "",
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             workflow_def_id: payload.workflow_def_id || "",
             entry_node_id: payload.entry_node_id || ""
         }));
@@ -610,15 +600,18 @@ function connectAutoJs(options) {
 
     function handleStopWorkflowSession(message) {
         var payload = message && message.payload ? message.payload : {};
-        var workflowRunID = String(payload.workflow_run_id || "");
+        var refs = buildWorkflowSessionRefs(payload);
+        var sessionKey = String(refs.plan_device_run_id || "");
         logger.info("收到 stop_workflow_session：" + JSON.stringify({
-            workflow_run_id: workflowRunID,
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
             reason: String(payload.reason || "")
         }));
-        markWorkflowStopRequested(workflowRunID);
-        if (!workflowSessionExecuting || currentWorkflowRunID !== workflowRunID) {
+        markWorkflowStopRequested(sessionKey);
+        if (!workflowSessionExecuting || currentWorkflowRunID !== sessionKey) {
             sendWorkflowSessionResult({
-                workflow_run_id: workflowRunID,
+                plan_run_id: refs.plan_run_id,
+                plan_device_run_id: refs.plan_device_run_id,
                 workflow_node_id: "",
                 status: "stopped",
                 result_code: "WORKFLOW_SESSION_STOPPED",
@@ -627,7 +620,7 @@ function connectAutoJs(options) {
                     reason: String(payload.reason || "")
                 }
             });
-            clearWorkflowStopRequested(workflowRunID);
+            clearWorkflowStopRequested(sessionKey);
         }
     }
 
@@ -669,8 +662,6 @@ function connectAutoJs(options) {
                         logger.info("WebSocket task_ack 已确认。");
                     } else if (isOkAck(message, "task_progress")) {
                         logger.info("WebSocket task_progress 已确认。");
-                    } else if (isOkAck(message, "workflow_step_progress")) {
-                        logger.info("WebSocket workflow_step_progress 已确认。");
                     } else if (isOkAck(message, "script_sync_ack")) {
                         logger.info("WebSocket script_sync_ack 已确认。");
                     } else if (isOkAck(message, "script_sync_result")) {

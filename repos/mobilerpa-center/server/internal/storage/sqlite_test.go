@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"database/sql"
 	"path/filepath"
 	"testing"
 )
@@ -26,7 +25,6 @@ func TestOpenCreatesCurrentSchema(t *testing.T) {
 		{table: "devices", column: "id"},
 		{table: "tasks", column: "id"},
 		{table: "workflow_defs", column: "id"},
-		{table: "workflow_runs", column: "id"},
 		{table: "plan_defs", column: "id"},
 		{table: "plan_runs", column: "id"},
 		{table: "plan_device_runs", column: "id"},
@@ -45,28 +43,49 @@ func TestOpenCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
-func columnExists(ctx context.Context, db *sql.DB, table string, column string) (bool, error) {
-	rows, err := db.QueryContext(ctx, "PRAGMA table_info("+table+")")
-	if err != nil {
-		return false, err
-	}
-	defer rows.Close()
+func TestOpenMigratesPlanDeviceRunsCurrentNodeID(t *testing.T) {
+	t.Parallel()
 
-	for rows.Next() {
-		var (
-			cid       int
-			name      string
-			valueType string
-			notNull   int
-			defaultV  any
-			pk        int
-		)
-		if err := rows.Scan(&cid, &name, &valueType, &notNull, &defaultV, &pk); err != nil {
-			return false, err
-		}
-		if name == column {
-			return true, nil
-		}
+	dbPath := filepath.Join(t.TempDir(), "legacy.db")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
 	}
-	return false, rows.Err()
+
+	if _, err := db.Exec(`
+DROP TABLE plan_device_runs;
+CREATE TABLE plan_device_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_run_id INTEGER NOT NULL,
+    plan_def_id INTEGER NOT NULL,
+    device_id INTEGER NOT NULL,
+    target_type TEXT NOT NULL,
+    target_ref_id TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+)`); err != nil {
+		db.Close()
+		t.Fatalf("prepare legacy plan_device_runs: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close sqlite: %v", err)
+	}
+
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatalf("reopen sqlite: %v", err)
+	}
+	defer db.Close()
+
+	exists, err := columnExists(context.Background(), db, "plan_device_runs", "current_node_id")
+	if err != nil {
+		t.Fatalf("check migrated column: %v", err)
+	}
+	if !exists {
+		t.Fatalf("column not found after migration: plan_device_runs.current_node_id")
+	}
 }

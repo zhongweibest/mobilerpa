@@ -56,7 +56,7 @@ func (c *DeviceConn) RawConn() *websocket.Conn {
 
 // Service 负责管理在线连接、任务下发与任务回执处理。
 type Service struct {
-	tasks *task.Service
+	tasks           *task.Service
 	taskResultHooks []func(ctx context.Context, taskID string) error
 
 	mu    sync.RWMutex
@@ -130,17 +130,15 @@ func (s *Service) AssignTask(ctx context.Context, taskID string) (task.Task, err
 		DeviceID:  taskItem.DeviceID,
 		Timestamp: time.Now().Unix(),
 		Payload: map[string]any{
-			"task_id":         taskItem.TaskID,
-			"workflow_run_id": taskItem.WorkflowRunID,
+			"task_id":          taskItem.TaskID,
 			"workflow_node_id": taskItem.WorkflowNodeID,
-			"task_source_type": taskItem.TaskSourceType,
-			"script_name":     taskItem.ScriptName,
-			"script_version":  taskItem.ScriptVersion,
-			"params":          taskItem.Params,
-			"priority":        taskItem.Priority,
-			"scheduled_at":    taskItem.ScheduledAt,
-			"task_status":     taskItem.Status,
-			"dispatch_source": "center",
+			"script_name":      taskItem.ScriptName,
+			"script_version":   taskItem.ScriptVersion,
+			"params":           taskItem.Params,
+			"priority":         taskItem.Priority,
+			"scheduled_at":     taskItem.ScheduledAt,
+			"task_status":      taskItem.Status,
+			"dispatch_source":  "center",
 		},
 	}
 
@@ -205,7 +203,8 @@ func (s *Service) StartWorkflowSession(_ context.Context, payload protocol.Start
 		return ErrDeviceNotConnected
 	}
 
-	requestID := fmt.Sprintf("start-workflow-session-%s-%d", payload.WorkflowRunID, time.Now().UnixNano())
+	sessionKey := strings.TrimSpace(payload.PlanDeviceRunID)
+	requestID := fmt.Sprintf("start-workflow-session-%s-%d", sessionKey, time.Now().UnixNano())
 	message := protocol.Envelope{
 		Type:      protocol.MessageTypeStartWorkflowSession,
 		RequestID: requestID,
@@ -214,12 +213,24 @@ func (s *Service) StartWorkflowSession(_ context.Context, payload protocol.Start
 		Payload:   payload,
 	}
 
-	log.Printf("dispatch start_workflow_session start: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	log.Printf(
+		"dispatch start_workflow_session start: device_id=%s plan_run_id=%s plan_device_run_id=%s request_id=%s",
+		deviceID,
+		payload.PlanRunID,
+		payload.PlanDeviceRunID,
+		requestID,
+	)
 	if err := conn.WriteJSON(message); err != nil {
 		s.UnregisterDeviceConn(deviceID, conn.RawConn())
 		return fmt.Errorf("write start_workflow_session: %w", err)
 	}
-	log.Printf("dispatch start_workflow_session done: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	log.Printf(
+		"dispatch start_workflow_session done: device_id=%s plan_run_id=%s plan_device_run_id=%s request_id=%s",
+		deviceID,
+		payload.PlanRunID,
+		payload.PlanDeviceRunID,
+		requestID,
+	)
 	return nil
 }
 
@@ -235,7 +246,8 @@ func (s *Service) StopWorkflowSession(_ context.Context, payload protocol.StopWo
 		return ErrDeviceNotConnected
 	}
 
-	requestID := fmt.Sprintf("stop-workflow-session-%s-%d", payload.WorkflowRunID, time.Now().UnixNano())
+	sessionKey := strings.TrimSpace(payload.PlanDeviceRunID)
+	requestID := fmt.Sprintf("stop-workflow-session-%s-%d", sessionKey, time.Now().UnixNano())
 	message := protocol.Envelope{
 		Type:      protocol.MessageTypeStopWorkflowSession,
 		RequestID: requestID,
@@ -244,12 +256,24 @@ func (s *Service) StopWorkflowSession(_ context.Context, payload protocol.StopWo
 		Payload:   payload,
 	}
 
-	log.Printf("dispatch stop_workflow_session start: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	log.Printf(
+		"dispatch stop_workflow_session start: device_id=%s plan_run_id=%s plan_device_run_id=%s request_id=%s",
+		deviceID,
+		payload.PlanRunID,
+		payload.PlanDeviceRunID,
+		requestID,
+	)
 	if err := conn.WriteJSON(message); err != nil {
 		s.UnregisterDeviceConn(deviceID, conn.RawConn())
 		return fmt.Errorf("write stop_workflow_session: %w", err)
 	}
-	log.Printf("dispatch stop_workflow_session done: device_id=%s workflow_run_id=%s request_id=%s", deviceID, payload.WorkflowRunID, requestID)
+	log.Printf(
+		"dispatch stop_workflow_session done: device_id=%s plan_run_id=%s plan_device_run_id=%s request_id=%s",
+		deviceID,
+		payload.PlanRunID,
+		payload.PlanDeviceRunID,
+		requestID,
+	)
 	return nil
 }
 

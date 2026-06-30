@@ -1,6 +1,7 @@
 import type { RouteRecordRaw } from "vue-router";
 
 import { AppShell } from "../layouts/AppShell";
+import { BindingsPage } from "../pages/bindings/BindingsPage";
 import { PlaceholderPage } from "../pages/common/PlaceholderPage";
 import { DevicesPage } from "../pages/devices/DevicesPage";
 import { DiscoveryPage } from "../pages/discovery/DiscoveryPage";
@@ -9,7 +10,6 @@ import { PlansPage } from "../pages/plans/PlansPage";
 import { PlanRunsPage } from "../pages/plans/PlanRunsPage";
 import { ScriptsPage } from "../pages/scripts/ScriptsPage";
 import { SettingsPage } from "../pages/settings/SettingsPage";
-import { WorkflowInstancesPage } from "../pages/workflows/WorkflowInstancesPage";
 import { WorkflowsPage } from "../pages/workflows/WorkflowsPage";
 
 type AppRouteMeta = {
@@ -110,19 +110,6 @@ export const appRoutes: RouteRecordRaw[] = [
         })
       },
       {
-        path: "workflow-instances",
-        name: "workflow-instances",
-        component: WorkflowInstancesPage,
-        meta: meta({
-          title: "工作流实例",
-          section: "工作流",
-          navGroup: "workflow",
-          navOrder: 4,
-          navVisible: true,
-          summary: "兼容查看历史工作流实例、设备执行情况与事件流水，后续将逐步收口到计划任务实例。"
-        })
-      },
-      {
         path: "scripts",
         name: "scripts",
         component: ScriptsPage,
@@ -151,15 +138,14 @@ export const appRoutes: RouteRecordRaw[] = [
       {
         path: "bindings",
         name: "bindings",
-        component: PlaceholderPage,
+        component: BindingsPage,
         meta: meta({
           title: "设备绑定",
           section: "设备管理",
           navGroup: "main",
           navOrder: 4,
           navVisible: true,
-          navBadge: "规划中",
-          summary: "后续在这里维护设备物理位置、分组、标签与批量绑定能力。"
+          summary: "维护分区、排号、槽位号三级位置模型，并在槽位级别完成设备绑定。"
         })
       },
       {
