@@ -565,23 +565,6 @@ export const BindingsPage = defineComponent({
               ElCard,
               { class: "page-card bindings-page__detail-card", shadow: "never" },
               {
-                header: () =>
-                  h("div", { class: "card-header" }, [
-                    h("div", null, [
-                      h("div", { class: "card-header__title" }, "位置树管理"),
-                      h("div", { class: "card-header__subtitle" }, "维护分区、排号、槽位并完成设备绑定。")
-                    ]),
-                    h(
-                      ElButton,
-                      {
-                        loading: loading.value,
-                        onClick: () => {
-                          void loadData();
-                        }
-                      },
-                      () => "刷新"
-                    )
-                  ]),
                 default: () =>
                   !currentNode.value && nodes.value.length === 0 && !loading.value
                     ? h("div", { class: "bindings-page__empty-state" }, [
