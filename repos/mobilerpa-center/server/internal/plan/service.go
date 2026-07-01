@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
@@ -238,6 +239,7 @@ type TaskDispatcher interface {
 	AssignTask(ctx context.Context, taskID string) (task.Task, error)
 	StartWorkflowSession(ctx context.Context, payload protocol.StartWorkflowSessionPayload) error
 	StopWorkflowSession(ctx context.Context, payload protocol.StopWorkflowSessionPayload) error
+	HasDeviceConnection(deviceID string) bool
 }
 
 // WorkflowRunner 定义计划任务调度工作流时依赖的最小工作流能力。
@@ -631,6 +633,22 @@ func (s *Service) startPlanRunWithRows(ctx context.Context, definition Definitio
 	}
 	if len(targets) == 0 {
 		return Run{}, ErrPlanRowsRequired
+	}
+	deviceIDs := make([]string, 0, len(targets))
+	seenDeviceIDs := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		if _, exists := seenDeviceIDs[target.DeviceID]; exists {
+			continue
+		}
+		seenDeviceIDs[target.DeviceID] = struct{}{}
+		deviceIDs = append(deviceIDs, target.DeviceID)
+	}
+	busyDetails, err := s.collectBusyDevices(ctx, definition.TargetType, "", deviceIDs)
+	if err != nil {
+		return Run{}, err
+	}
+	if len(busyDetails) > 0 {
+		return Run{}, &DeviceBusyError{Details: busyDetails}
 	}
 
 	now := time.Now().UTC()
@@ -1080,34 +1098,20 @@ func isRetryWindowOpen(deadlineTime string, now time.Time) bool {
 }
 
 func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, retryInterval time.Duration) error {
+	_ = retryInterval
+	reachable, err := s.isDeviceReachableForPlanStart(ctx, deviceRun.DeviceID)
+	if err != nil {
+		return err
+	}
+	if !reachable {
+		return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+	}
 	if s.devices == nil {
 		return fmt.Errorf("device service is not configured")
 	}
 
 	if err := s.devices.EnsureExecutionReady(ctx, deviceRun.DeviceID); err != nil {
-		nextRetryAt := time.Time{}
-		if parsed, parseErr := time.Parse(time.RFC3339, nowText); parseErr == nil {
-			nextRetryAt = parsed.Add(retryInterval)
-		}
-		nextRetryText := ""
-		if !nextRetryAt.IsZero() {
-			nextRetryText = nextRetryAt.UTC().Format(time.RFC3339)
-		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, nextRetryText, nowText, deviceRun.PlanDeviceRunID); err != nil {
-			return fmt.Errorf("update plan device next retry: %w", err)
-		}
-		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, nowText+" 设备离线未启动", map[string]any{
-			"source":             "center",
-			"plan_device_run_id": deviceRun.PlanDeviceRunID,
-			"retry_at":           nextRetryText,
-		}); err != nil {
-			return err
-		}
-		return nil
-	}
-
-	if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, next_retry_at = '', updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, nowText, nowText, deviceRun.PlanDeviceRunID); err != nil {
-		return fmt.Errorf("update plan device run retry start: %w", err)
+		return err
 	}
 
 	switch definition.TargetType {
@@ -1119,6 +1123,18 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET plan_run_id = ?, plan_device_run_id = ?, task_source_type = 'plan_script' WHERE id = ?`, run.PlanRunID, deviceRun.PlanDeviceRunID, createdTask.TaskID); err != nil {
 			return err
 		}
+		if err := s.dispatcherAssign(ctx, createdTask.TaskID); err != nil {
+			if errors.Is(err, dispatch.ErrDeviceNotConnected) {
+				if cleanupErr := s.deleteTaskRecord(ctx, createdTask.TaskID); cleanupErr != nil {
+					return cleanupErr
+				}
+				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+			}
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, next_retry_at = '', updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, nowText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+			return fmt.Errorf("update plan device run retry start: %w", err)
+		}
 		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
 			"source":             "center",
 			"plan_device_run_id": deviceRun.PlanDeviceRunID,
@@ -1128,7 +1144,7 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 		}); err != nil {
 			return err
 		}
-		return s.dispatcherAssign(ctx, createdTask.TaskID)
+		return nil
 	case TargetTypeWorkflow:
 		workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
 		if err != nil {
@@ -1148,7 +1164,13 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 		sessionPayload.DeviceID = deviceRun.DeviceID
 		sessionPayload.WorkflowDefID = definition.TargetWorkflowDefID
 		if err := s.dispatcher.StartWorkflowSession(ctx, sessionPayload); err != nil {
+			if errors.Is(err, dispatch.ErrDeviceNotConnected) {
+				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+			}
 			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, next_retry_at = '', updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, entryNodeID, nowText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+			return fmt.Errorf("update plan device run retry start: %w", err)
 		}
 		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
 			"source":             "center",
@@ -1633,20 +1655,20 @@ func (s *Service) startScriptPlanTargets(ctx context.Context, definition Definit
 		if err != nil {
 			return err
 		}
-		if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
-			if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "unknown") {
-				if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, now, now, deviceRun.PlanDeviceRunID); err != nil {
-					return err
-				}
-				if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备不在线未启动", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID}); err != nil {
-					return err
-				}
-				continue
-			}
+		reachable, err := s.isDeviceReachableForPlanStart(ctx, target.DeviceID)
+		if err != nil {
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, now, now, deviceRun.PlanDeviceRunID); err != nil {
-			return err
+		if !reachable {
+			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
+				return err
+			}
+			continue
+		}
+		if s.devices != nil {
+			if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
+				return err
+			}
 		}
 		createdTask, err := s.tasks.Create(ctx, task.CreateRequest{DeviceID: target.DeviceID, ScriptName: definition.TargetScriptName, ScriptVersion: definition.TargetScriptVersion})
 		if err != nil {
@@ -1655,12 +1677,16 @@ func (s *Service) startScriptPlanTargets(ctx context.Context, definition Definit
 		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET plan_run_id = ?, plan_device_run_id = ?, task_source_type = 'plan_script' WHERE id = ?`, run.PlanRunID, deviceRun.PlanDeviceRunID, createdTask.TaskID); err != nil {
 			return err
 		}
-		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID, "task_id": createdTask.TaskID, "script_name": definition.TargetScriptName, "script_version": definition.TargetScriptVersion}); err != nil {
-			return err
-		}
-		dispatchItems = append(dispatchItems, scriptPlanDispatchItem{taskID: createdTask.TaskID})
+		dispatchItems = append(dispatchItems, scriptPlanDispatchItem{
+			taskID:          createdTask.TaskID,
+			deviceID:        target.DeviceID,
+			planDeviceRunID: deviceRun.PlanDeviceRunID,
+		})
 	}
-	return s.dispatchScriptPlanTasks(ctx, dispatchItems)
+	if err := s.dispatchScriptPlanTasks(ctx, definition, run, dispatchItems); err != nil {
+		return err
+	}
+	return s.refreshRunStatus(ctx, run.PlanRunID)
 }
 
 func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Definition, run Run, targets []planDeviceTarget) error {
@@ -1685,22 +1711,20 @@ func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Defin
 		if err != nil {
 			return err
 		}
-		if s.devices != nil {
-			if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
-				if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "unknown") {
-					if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, now, now, deviceRun.PlanDeviceRunID); err != nil {
-						return err
-					}
-					if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备不在线未启动", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID}); err != nil {
-						return err
-					}
-					continue
-				}
+		reachable, err := s.isDeviceReachableForPlanStart(ctx, target.DeviceID)
+		if err != nil {
+			return err
+		}
+		if !reachable {
+			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
 				return err
 			}
+			continue
 		}
-		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, entryNodeID, now, now, deviceRun.PlanDeviceRunID); err != nil {
-			return err
+		if s.devices != nil {
+			if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
+				return err
+			}
 		}
 		payload := sessionPayloadTemplate
 		payload.WorkflowSessionID = deviceRun.PlanDeviceRunID
@@ -1709,26 +1733,47 @@ func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Defin
 		payload.DeviceID = target.DeviceID
 		payload.WorkflowDefID = definition.TargetWorkflowDefID
 		if err := s.dispatcher.StartWorkflowSession(ctx, payload); err != nil {
+			if errors.Is(err, dispatch.ErrDeviceNotConnected) {
+				if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
+					return err
+				}
+				continue
+			}
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, entryNodeID, now, now, deviceRun.PlanDeviceRunID); err != nil {
 			return err
 		}
 		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID, "workflow_def_id": definition.TargetWorkflowDefID, "workflow_node_id": entryNodeID}); err != nil {
 			return err
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE plan_runs SET status = ?, updated_at = ? WHERE id = ?`, RunStatusRunning, now, run.PlanRunID); err != nil {
-		return err
-	}
-	return nil
+	return s.refreshRunStatus(ctx, run.PlanRunID)
 }
 
 func (s *Service) ensureDevicesAvailable(ctx context.Context, targetType string, currentPlanRunID string, deviceIDs []string) ([]DeviceBusyDetail, error) {
+	details, err := s.collectBusyDevices(ctx, targetType, currentPlanRunID, deviceIDs)
+	if err != nil {
+		return nil, err
+	}
+	for _, deviceID := range deviceIDs {
+		reachable, err := s.isDeviceReachableForPlanStart(ctx, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		if !reachable || s.devices == nil {
+			continue
+		}
+		if err := s.devices.EnsureExecutionReady(ctx, deviceID); err != nil {
+			return nil, err
+		}
+	}
+	return details, nil
+}
+
+func (s *Service) collectBusyDevices(ctx context.Context, targetType string, currentPlanRunID string, deviceIDs []string) ([]DeviceBusyDetail, error) {
 	details := make([]DeviceBusyDetail, 0)
 	for _, deviceID := range deviceIDs {
-		if s.devices != nil {
-			if err := s.devices.EnsureExecutionReady(ctx, deviceID); err != nil {
-				return nil, err
-			}
-		}
 		detail, err := s.inspectDeviceBusy(ctx, targetType, currentPlanRunID, deviceID)
 		if err != nil {
 			return nil, err
@@ -2369,12 +2414,15 @@ func (s *Service) dispatcherAssign(ctx context.Context, taskID string) error {
 		return fmt.Errorf("task dispatcher is not configured")
 	}
 	if _, err := s.dispatcher.AssignTask(ctx, taskID); err != nil {
+		if errors.Is(err, dispatch.ErrDeviceNotConnected) {
+			return err
+		}
 		return fmt.Errorf("assign plan task: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) dispatchScriptPlanTasks(ctx context.Context, items []scriptPlanDispatchItem) error {
+func (s *Service) dispatchScriptPlanTasks(ctx context.Context, definition Definition, run Run, items []scriptPlanDispatchItem) error {
 	if len(items) == 0 {
 		return nil
 	}
@@ -2387,14 +2435,60 @@ func (s *Service) dispatchScriptPlanTasks(ctx context.Context, items []scriptPla
 		workerCount = len(items)
 	}
 
-	taskCh := make(chan string)
+	taskCh := make(chan scriptPlanDispatchItem)
 	errCh := make(chan error, 1)
 	var wg sync.WaitGroup
 
 	worker := func() {
 		defer wg.Done()
-		for taskID := range taskCh {
-			if err := s.dispatcherAssign(ctx, taskID); err != nil {
+		for item := range taskCh {
+			if err := s.dispatcherAssign(ctx, item.taskID); err != nil {
+				if errors.Is(err, dispatch.ErrDeviceNotConnected) {
+					if cleanupErr := s.deleteTaskRecord(ctx, item.taskID); cleanupErr != nil {
+						select {
+						case errCh <- cleanupErr:
+						default:
+						}
+						continue
+					}
+					deviceRun, lookupErr := s.getDeviceRunByID(ctx, item.planDeviceRunID)
+					if lookupErr != nil {
+						select {
+						case errCh <- lookupErr:
+						default:
+						}
+						continue
+					}
+					if deferErr := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, time.Now().UTC().Format(time.RFC3339), false); deferErr != nil {
+						select {
+						case errCh <- deferErr:
+						default:
+						}
+					}
+					continue
+				}
+				select {
+				case errCh <- err:
+				default:
+				}
+				continue
+			}
+
+			now := time.Now().UTC().Format(time.RFC3339)
+			if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, now, now, item.planDeviceRunID); err != nil {
+				select {
+				case errCh <- err:
+				default:
+				}
+				continue
+			}
+			if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, item.deviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
+				"source":             "center",
+				"plan_device_run_id": item.planDeviceRunID,
+				"task_id":            item.taskID,
+				"script_name":        definition.TargetScriptName,
+				"script_version":     definition.TargetScriptVersion,
+			}); err != nil {
 				select {
 				case errCh <- err:
 				default:
@@ -2414,7 +2508,7 @@ func (s *Service) dispatchScriptPlanTasks(ctx context.Context, items []scriptPla
 			close(taskCh)
 			wg.Wait()
 			return ctx.Err()
-		case taskCh <- item.taskID:
+		case taskCh <- item:
 		}
 	}
 	close(taskCh)
@@ -2426,6 +2520,69 @@ func (s *Service) dispatchScriptPlanTasks(ctx context.Context, items []scriptPla
 	default:
 		return nil
 	}
+}
+
+func (s *Service) isDeviceReachableForPlanStart(ctx context.Context, deviceID string) (bool, error) {
+	if s.devices == nil {
+		return true, nil
+	}
+	current, err := s.devices.GetByID(ctx, deviceID)
+	if err != nil {
+		return false, err
+	}
+	if strings.TrimSpace(current.Status) != "online" {
+		return false, nil
+	}
+	if s.dispatcher != nil && !s.dispatcher.HasDeviceConnection(deviceID) {
+		return false, nil
+	}
+	return true, nil
+}
+
+func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, includeRetryTimestamp bool) error {
+	nextRetryText := ""
+	if definition.ScheduleType == ScheduleTypeDaily {
+		nextRetryText = nowText
+	}
+	if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, nextRetryText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+		return fmt.Errorf("update plan device next retry: %w", err)
+	}
+	message := "设备不在线未启动"
+	if includeRetryTimestamp {
+		message = nowText + " 设备离线未启动"
+	}
+	extra := map[string]any{
+		"source":             "center",
+		"plan_device_run_id": deviceRun.PlanDeviceRunID,
+	}
+	if nextRetryText != "" {
+		extra["retry_at"] = nextRetryText
+	}
+	return s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, message, extra)
+}
+
+func (s *Service) deleteTaskRecord(ctx context.Context, taskID string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete undispatched task tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_events WHERE task_id = ?`, taskID); err != nil {
+		return fmt.Errorf("delete undispatched task events: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, taskID); err != nil {
+		return fmt.Errorf("delete undispatched task: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete undispatched task tx: %w", err)
+	}
+	tx = nil
+	return nil
 }
 
 func (s *Service) tryAcquireStarting(planDefID string) bool {
@@ -2634,7 +2791,9 @@ type eventScanner interface {
 }
 
 type scriptPlanDispatchItem struct {
-	taskID string
+	taskID          string
+	deviceID        string
+	planDeviceRunID string
 }
 
 func scanEvent(scanner eventScanner) (Event, error) {

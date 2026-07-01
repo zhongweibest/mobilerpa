@@ -1,8 +1,12 @@
 package plan
 
 import (
+	"context"
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +17,92 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
+
+type stubPlanDispatcher struct {
+	hasConnection bool
+	assignCalls   int
+}
+
+func (s *stubPlanDispatcher) AssignTask(_ context.Context, _ string) (task.Task, error) {
+	s.assignCalls += 1
+	if !s.hasConnection {
+		return task.Task{}, dispatch.ErrDeviceNotConnected
+	}
+	return task.Task{}, nil
+}
+
+func (s *stubPlanDispatcher) StartWorkflowSession(_ context.Context, payload protocol.StartWorkflowSessionPayload) error {
+	if !s.hasConnection && strings.TrimSpace(payload.DeviceID) != "" {
+		return dispatch.ErrDeviceNotConnected
+	}
+	return nil
+}
+
+func (s *stubPlanDispatcher) StopWorkflowSession(_ context.Context, payload protocol.StopWorkflowSessionPayload) error {
+	if !s.hasConnection && strings.TrimSpace(payload.DeviceID) != "" {
+		return dispatch.ErrDeviceNotConnected
+	}
+	return nil
+}
+
+func (s *stubPlanDispatcher) HasDeviceConnection(_ string) bool {
+	return s.hasConnection
+}
+
+func seedBoundRowDevice(t *testing.T, ctx context.Context, db *sql.DB, deviceStatus string) (string, string, string) {
+	t.Helper()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	deviceResult, err := db.ExecContext(ctx, `
+INSERT INTO devices (
+    agent_uuid, device_name, physical_slot, group_name, slot_zone, slot_row, slot_position, status, bind_status, ip,
+    brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+    accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
+    last_heartbeat_at, created_at, updated_at
+) VALUES (?, ?, '', '', '', '', '', ?, 'bound', '', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
+		"agent-"+strconv.FormatInt(time.Now().UnixNano(), 10),
+		"test-device",
+		deviceStatus,
+		now,
+		now,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("insert device: %v", err)
+	}
+	deviceIDInt, err := deviceResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("device last insert id: %v", err)
+	}
+	deviceID := strconv.FormatInt(deviceIDInt, 10)
+
+	zoneResult, err := db.ExecContext(ctx, `INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at) VALUES (0, 'zone', 'A区', 0, 1, ?, ?)`, now, now)
+	if err != nil {
+		t.Fatalf("insert zone: %v", err)
+	}
+	zoneIDInt, err := zoneResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("zone last insert id: %v", err)
+	}
+	zoneID := strconv.FormatInt(zoneIDInt, 10)
+
+	rowResult, err := db.ExecContext(ctx, `INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at) VALUES (?, 'row', '第1排', 0, 1, ?, ?)`, zoneID, now, now)
+	if err != nil {
+		t.Fatalf("insert row: %v", err)
+	}
+	rowIDInt, err := rowResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("row last insert id: %v", err)
+	}
+	rowID := strconv.FormatInt(rowIDInt, 10)
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at) VALUES (?, 'slot', '01', ?, 1, ?, ?)`, rowID, deviceID, now, now); err != nil {
+		t.Fatalf("insert slot: %v", err)
+	}
+
+	return deviceID, zoneID, rowID
+}
 
 func TestWorkflowSessionResultKeepsStoppedDeviceNotBusy(t *testing.T) {
 	t.Parallel()
@@ -459,5 +549,313 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 	}
 	if len(busyOther) != 0 {
 		t.Fatalf("期望未占用设备不被拦，实际 busy=%#v", busyOther)
+	}
+}
+
+func TestStartPlanFailsBeforeCreatingRunWhenTargetDeviceBusy(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-start-busy-precheck-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
+	now := time.Now().UTC().Format(time.RFC3339)
+
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_runs (plan_def_id, target_ref_id, run_date, target_type, status, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"other-plan", "demo_script@v1", "2026-07-01", TargetTypeScript, RunStatusRunning, now, now, now,
+	); err != nil {
+		t.Fatalf("seed busy plan run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_device_runs (plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		1, "other-plan", zoneID, rowID, 1, deviceID, TargetTypeScript, "demo_script@v1", DeviceRunStatusRunning, now, now,
+	); err != nil {
+		t.Fatalf("seed busy plan device run: %v", err)
+	}
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "占用前置校验",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	_, err = planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err == nil {
+		t.Fatalf("expected busy precheck to block plan start")
+	}
+	var busyErr *DeviceBusyError
+	if !errors.As(err, &busyErr) {
+		t.Fatalf("expected DeviceBusyError, got %T %v", err, err)
+	}
+	if len(busyErr.Details) == 0 || busyErr.Details[0].DeviceID != deviceID {
+		t.Fatalf("unexpected busy details: %#v", busyErr.Details)
+	}
+
+	runs, err := planSvc.ListRuns(ctx, definition.PlanDefID)
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("expected no new run created when busy precheck fails, got %d", len(runs))
+	}
+	if dispatcherStub.assignCalls != 0 {
+		t.Fatalf("expected no dispatch attempt when busy precheck fails, got %d", dispatcherStub.assignCalls)
+	}
+}
+
+func TestStartOncePlanSkipsOfflineDeviceWithoutError(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-start-once-offline-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "一次性离线跳过",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("start once plan should not fail on offline device: %v", err)
+	}
+	if dispatcherStub.assignCalls != 0 {
+		t.Fatalf("expected offline device not dispatched, got assignCalls=%d", dispatcherStub.assignCalls)
+	}
+	if run.Status != RunStatusPending {
+		t.Fatalf("expected run status pending when nothing started, got %q", run.Status)
+	}
+	if len(run.DeviceRuns) != 1 {
+		t.Fatalf("expected one device run, got %d", len(run.DeviceRuns))
+	}
+	if run.DeviceRuns[0].Status != DeviceRunStatusPending {
+		t.Fatalf("expected device run pending, got %q", run.DeviceRuns[0].Status)
+	}
+	if run.DeviceRuns[0].NextRetryAt != "" {
+		t.Fatalf("expected once plan not to schedule retry, got %q", run.DeviceRuns[0].NextRetryAt)
+	}
+
+	events, err := planSvc.ListEvents(ctx, run.PlanRunID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	foundOfflineEvent := false
+	for _, item := range events {
+		if item.DeviceID == run.DeviceRuns[0].DeviceID && item.Message == "设备不在线未启动" {
+			foundOfflineEvent = true
+			break
+		}
+	}
+	if !foundOfflineEvent {
+		t.Fatalf("expected offline skip event, got %#v", events)
+	}
+
+	tasks, err := taskSvc.List(ctx, "")
+	if err != nil {
+		t.Fatalf("list tasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks created for offline once plan, got %d", len(tasks))
+	}
+}
+
+func TestStartOncePlanDoesNotValidateOfflineDeviceExecutionProfile(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-start-once-offline-no-env-check-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
+	if _, err := db.ExecContext(ctx, `
+UPDATE devices
+SET accessibility_status = 'disabled', foreground_service_status = 'disabled', battery_optimization_ignored_status = 'disabled'
+WHERE id = ?`, deviceID); err != nil {
+		t.Fatalf("update offline device execution profile: %v", err)
+	}
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "离线设备不做环境校验",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("offline device should be skipped before execution-profile validation: %v", err)
+	}
+	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].DeviceID != deviceID {
+		t.Fatalf("unexpected run device runs: %#v", run.DeviceRuns)
+	}
+	if run.DeviceRuns[0].Status != DeviceRunStatusPending {
+		t.Fatalf("expected pending device run, got %q", run.DeviceRuns[0].Status)
+	}
+}
+
+func TestStartOncePlanSkipsDisconnectedOnlineDeviceWithoutError(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-start-once-disconnected-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "一次性连接缺失跳过",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("start once plan should not fail on disconnected online device: %v", err)
+	}
+	if dispatcherStub.assignCalls != 0 {
+		t.Fatalf("expected disconnected device not dispatched, got assignCalls=%d", dispatcherStub.assignCalls)
+	}
+	if run.Status != RunStatusPending {
+		t.Fatalf("expected run status pending when connection missing, got %q", run.Status)
+	}
+	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].NextRetryAt != "" {
+		t.Fatalf("expected pending device run without retry, got %#v", run.DeviceRuns)
+	}
+}
+
+func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-retry-disconnected-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "按天循环连接缺失重试",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeDaily,
+		DailyStartTime:      "09:00:00",
+		DailyDeadlineTime:   "23:00:00",
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{})
+	if err != nil {
+		t.Fatalf("start daily plan should not fail on disconnected device: %v", err)
+	}
+	if len(run.DeviceRuns) != 1 {
+		t.Fatalf("expected one device run, got %d", len(run.DeviceRuns))
+	}
+	if run.DeviceRuns[0].NextRetryAt == "" {
+		t.Fatalf("expected daily deferred device to keep retry timestamp")
+	}
+
+	processedRuns, err := planSvc.RetryDueTargets(ctx, time.Now().Add(2*time.Minute), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("retry due targets should not fail on disconnected device: %v", err)
+	}
+	if len(processedRuns) != 1 || processedRuns[0] != run.PlanRunID {
+		t.Fatalf("unexpected processed runs: %v", processedRuns)
+	}
+
+	events, err := planSvc.ListEvents(ctx, run.PlanRunID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	foundRetryEvent := false
+	for _, item := range events {
+		if item.DeviceID == deviceID && strings.Contains(item.Message, "设备离线未启动") {
+			foundRetryEvent = true
+		}
+	}
+	if !foundRetryEvent {
+		t.Fatalf("expected retry offline event, got %#v", events)
 	}
 }

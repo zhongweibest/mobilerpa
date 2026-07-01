@@ -379,6 +379,16 @@ func (s *Service) getConn(deviceID string) (*DeviceConn, bool) {
 	return conn, ok
 }
 
+// HasDeviceConnection 判断目标设备当前是否存在可用连接。
+func (s *Service) HasDeviceConnection(deviceID string) bool {
+	deviceID = strings.TrimSpace(deviceID)
+	if deviceID == "" {
+		return false
+	}
+	_, ok := s.getConn(deviceID)
+	return ok
+}
+
 func (s *Service) getTaskResultHooks() []func(ctx context.Context, taskID string) error {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
