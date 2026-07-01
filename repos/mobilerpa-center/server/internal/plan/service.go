@@ -1915,7 +1915,9 @@ func (s *Service) stopWorkflowPlanDevice(ctx context.Context, definition Definit
 			"source": "center",
 		},
 	}); err != nil {
-		return fmt.Errorf("dispatch stop workflow session: %w", err)
+		if !errors.Is(err, dispatch.ErrDeviceNotConnected) {
+			return fmt.Errorf("dispatch stop workflow session: %w", err)
+		}
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)

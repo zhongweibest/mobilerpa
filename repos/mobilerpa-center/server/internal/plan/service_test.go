@@ -223,6 +223,92 @@ WHERE id = ?`, planDeviceRunID)
 	}
 }
 
+func TestStopRunAllowsDisconnectedWorkflowDevice(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-stop-run-disconnected-workflow.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	workflowSvc := workflow.NewService(db, nil, nil, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, workflowSvc)
+
+	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
+	workflowDef, err := workflowSvc.CreateDefinition(ctx, workflow.CreateDefinitionRequest{
+		WorkflowName: "停止离线工作流设备",
+		Nodes: []workflow.Node{
+			{
+				NodeID:       "node_1",
+				NodeType:     "script",
+				NodeName:     "打开QQ",
+				ScriptName:   "qq",
+				ScriptVersion:"v1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("create workflow definition: %v", err)
+	}
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "停止离线工作流实例",
+		TargetType:          TargetTypeWorkflow,
+		TargetWorkflowDefID: workflowDef.WorkflowDefID,
+		ScheduleType:        ScheduleTypeDaily,
+		DailyStartTime:      "09:00:00",
+		DailyDeadlineTime:   "23:00:00",
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := db.ExecContext(ctx, `
+INSERT INTO plan_runs (plan_def_id, target_ref_id, run_date, target_type, status, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		definition.PlanDefID, workflowDef.WorkflowDefID, "2026-07-01", TargetTypeWorkflow, RunStatusRunning, now, now, now,
+	)
+	if err != nil {
+		t.Fatalf("insert plan run: %v", err)
+	}
+	planRunIDInt, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("plan run last insert id: %v", err)
+	}
+	planRunID := strconv.FormatInt(planRunIDInt, 10)
+
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_device_runs (
+    plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id,
+    status, current_node_id, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '', '', ?, ?)`,
+		planRunID, definition.PlanDefID, zoneID, rowID, "1", deviceID, TargetTypeWorkflow, workflowDef.WorkflowDefID,
+		DeviceRunStatusRunning, "node_1", now, now, now,
+	); err != nil {
+		t.Fatalf("insert plan device run: %v", err)
+	}
+
+	run, err := planSvc.StopRun(ctx, planRunID)
+	if err != nil {
+		t.Fatalf("stop run should allow disconnected workflow device: %v", err)
+	}
+	if run.Status != RunStatusStopped {
+		t.Fatalf("expected stopped run, got %q", run.Status)
+	}
+	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].Status != DeviceRunStatusStopped {
+		t.Fatalf("expected stopped device run, got %#v", run.DeviceRuns)
+	}
+}
+
 func TestCreateAndListDefinitions(t *testing.T) {
 	t.Parallel()
 

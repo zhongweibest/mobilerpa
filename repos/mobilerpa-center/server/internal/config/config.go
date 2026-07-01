@@ -21,7 +21,7 @@ const (
 	defaultToolkitPath          = ""
 	defaultWorkflowScanInterval = 15 * time.Second
 	defaultPlanScanInterval     = 1 * time.Second
-	defaultPlanRetryInterval     = 5 * time.Minute
+	defaultPlanRetryInterval     = 1 * time.Minute
 	defaultPlanStartWorkers     = 2
 	defaultPlanStartFanout      = 20
 )
