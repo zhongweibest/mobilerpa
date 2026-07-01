@@ -88,7 +88,7 @@ func New() (*App, error) {
 // Run 启动中心服务的 HTTP 服务。
 func (a *App) Run() error {
 	log.Printf(
-		"mobilerpa-center listening on %s with db %s, heartbeat_interval=%s, offline_timeout=%s, offline_scan_interval=%s, plan_scan_interval=%s",
+	"mobilerpa-center listening on %s with db %s, heartbeat_interval=%s, offline_timeout=%s, offline_scan_interval=%s, plan_scan_interval=%s",
 		a.cfg.HTTPAddr,
 		a.cfg.DBPath,
 		a.cfg.HeartbeatInterval,
@@ -130,9 +130,9 @@ func (a *App) runPlanScheduler() {
 	for range ticker.C {
 		now := time.Now()
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		dueDefinitionIDs, err := a.plans.ListDueDefinitionIDs(ctx, now)
-		cancel()
+		startCtx, startCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		dueDefinitionIDs, err := a.plans.ListDueDefinitionIDs(startCtx, now)
+		startCancel()
 		if err != nil {
 			log.Printf("scan plan auto starts: %v", err)
 		} else {
@@ -145,9 +145,9 @@ func (a *App) runPlanScheduler() {
 			}
 		}
 
-		ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
-		expiredPlanRunIDs, err := a.plans.ListExpiredRunIDs(ctx, now)
-		cancel()
+		stopCtx, stopCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		expiredPlanRunIDs, err := a.plans.ListExpiredRunIDs(stopCtx, now)
+		stopCancel()
 		if err != nil {
 			log.Printf("scan plan deadlines: %v", err)
 		} else {
@@ -158,6 +158,17 @@ func (a *App) runPlanScheduler() {
 					log.Printf("plan stop queue is full, skip enqueue plan_run_id=%s", planRunID)
 				}
 			}
+		}
+
+		retryCtx, retryCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		retriedRuns, err := a.plans.RetryDueTargets(retryCtx, now, a.cfg.PlanRetryInterval)
+		retryCancel()
+		if err != nil {
+			log.Printf("scan plan retries: %v", err)
+			continue
+		}
+		if len(retriedRuns) > 0 {
+			log.Printf("retry scan processed plan runs: %v", retriedRuns)
 		}
 	}
 }

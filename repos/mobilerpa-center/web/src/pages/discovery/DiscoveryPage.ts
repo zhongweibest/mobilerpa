@@ -8,7 +8,6 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
-  ElMessage,
   ElMessageBox,
   ElPagination,
   ElTable,
@@ -122,7 +121,7 @@ export const DiscoveryPage = defineComponent({
 
     async function handlePairDevice() {
       if (pairForm.host.trim() === "" || pairForm.port.trim() === "" || pairForm.pair_code.trim() === "") {
-        ElMessage.warning("请完整填写手机 IP、端口和配对码");
+        noticesStore.warning("请完整填写手机 IP、端口和配对码", 5000);
         return;
       }
 
@@ -132,19 +131,19 @@ export const DiscoveryPage = defineComponent({
         pairForm.host = "";
         pairForm.port = "";
         pairForm.pair_code = "";
-        ElMessage.success("配对命令已执行，设备发现结果已刷新");
+        noticesStore.success("配对命令已执行，设备发现结果已刷新", 3000);
       } catch (_error) {
-        ElMessage.error("连接设备失败，请检查无线调试 IP、端口和配对码");
+        noticesStore.error("连接设备失败，请检查无线调试 IP、端口和配对码", 5000);
       }
     }
 
     function openDeployDialog() {
       if (selectedEndpoints.value.length === 0) {
-        ElMessage.warning("请先选择至少一台设备");
+        noticesStore.warning("请先选择至少一台设备", 5000);
         return;
       }
       if (centerBaseURL.value.trim() === "") {
-        ElMessage.warning("请先在系统配置中维护中心地址");
+        noticesStore.warning("请先在系统配置中维护中心地址", 5000);
         return;
       }
       deployDialogVisible.value = true;
@@ -156,13 +155,13 @@ export const DiscoveryPage = defineComponent({
         deployDialogVisible.value = false;
         deploymentResultsDialogVisible.value = true;
       } catch (_error) {
-        ElMessage.error("批量下发失败，请查看页面错误提示和结果弹窗");
+        noticesStore.error("批量下发失败，请查看页面错误提示和结果弹窗", 5000);
       }
     }
 
     async function handleSingleDeploy(adbEndpoint: string) {
       if (centerBaseURL.value.trim() === "") {
-        ElMessage.warning("请先在系统配置中维护中心地址");
+        noticesStore.warning("请先在系统配置中维护中心地址", 5000);
         return;
       }
 
@@ -170,7 +169,7 @@ export const DiscoveryPage = defineComponent({
         await discoveryStore.submitSingleDeployment(adbEndpoint);
         deploymentResultsDialogVisible.value = true;
       } catch (_error) {
-        ElMessage.error("当前设备下发 Agent 失败，请查看页面错误提示和结果弹窗");
+        noticesStore.error("当前设备下发 Agent 失败，请查看页面错误提示和结果弹窗", 5000);
       }
     }
 
@@ -196,7 +195,7 @@ export const DiscoveryPage = defineComponent({
           await discoveryStore.loadDevices();
         }
       } catch (_error) {
-        ElMessage.error(action === "disconnect" ? "断开设备连接失败，请查看页面错误提示" : `${actionLabel} Agent 失败，请查看页面错误提示`);
+        noticesStore.error(action === "disconnect" ? "断开设备连接失败，请查看页面错误提示" : `${actionLabel} Agent 失败，请查看页面错误提示`, 5000);
       }
     }
 

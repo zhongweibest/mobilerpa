@@ -57,7 +57,9 @@ func TestWorkflowSessionResultKeepsStoppedDeviceNotBusy(t *testing.T) {
 		TargetWorkflowDefID: workflowDef.WorkflowDefID,
 		ScheduleType:        ScheduleTypeOnce,
 		Status:              StatusEnabled,
-		DeviceIDs:           []string{"1"},
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "1"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan definition: %v", err)
@@ -153,7 +155,11 @@ func TestCreateAndListDefinitions(t *testing.T) {
 		DailyStartTime:      "09:00:00",
 		DailyDeadlineTime:   "23:59:00",
 		Status:              StatusEnabled,
-		DeviceIDs:           []string{"dev_000001", "dev_000002", "dev_000001"},
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "1"},
+			{ZoneID: "1", RowID: "2"},
+			{ZoneID: "1", RowID: "2"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan definition: %v", err)
@@ -162,8 +168,8 @@ func TestCreateAndListDefinitions(t *testing.T) {
 	if created.PlanDefID == "" {
 		t.Fatalf("expected plan_def_id")
 	}
-	if len(created.DeviceIDs) != 2 {
-		t.Fatalf("unexpected device ids: %#v", created.DeviceIDs)
+	if len(created.Rows) != 2 {
+		t.Fatalf("unexpected rows: %#v", created.Rows)
 	}
 
 	items, err := service.ListDefinitions(ctx)
@@ -203,7 +209,9 @@ func TestPlanDailyStartAndStopSelection(t *testing.T) {
 		DailyStartTime:      "09:00:00",
 		DailyDeadlineTime:   "23:00:00",
 		Status:              StatusEnabled,
-		DeviceIDs:           []string{"dev_000001"},
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "1"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan definition: %v", err)
@@ -284,7 +292,7 @@ func TestPlanDailyStartAndStopSelection(t *testing.T) {
 	}
 }
 
-func TestDeleteDefinitionAndUpdateDevices(t *testing.T) {
+func TestDeleteDefinitionAndUpdateRows(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "plan-service-update-test.db")
@@ -304,20 +312,26 @@ func TestDeleteDefinitionAndUpdateDevices(t *testing.T) {
 		TargetScriptVersion: "v0.1.0",
 		ScheduleType:        ScheduleTypeOnce,
 		Status:              StatusEnabled,
-		DeviceIDs:           []string{"dev_000001", "dev_000002"},
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "1"},
+			{ZoneID: "1", RowID: "2"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan definition: %v", err)
 	}
 
-	updated, err := service.UpdateDefinitionDevices(ctx, created.PlanDefID, UpdateDefinitionDevicesRequest{
-		DeviceIDs: []string{"dev_000002", "dev_000003"},
+	updated, err := service.UpdateDefinitionRows(ctx, created.PlanDefID, UpdateDefinitionRowsRequest{
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "2"},
+			{ZoneID: "1", RowID: "3"},
+		},
 	})
 	if err != nil {
-		t.Fatalf("update plan definition devices: %v", err)
+		t.Fatalf("update plan definition rows: %v", err)
 	}
-	if len(updated.DeviceIDs) != 2 || updated.DeviceIDs[0] != "dev_000002" || updated.DeviceIDs[1] != "dev_000003" {
-		t.Fatalf("unexpected updated device ids: %#v", updated.DeviceIDs)
+	if len(updated.Rows) != 2 || updated.Rows[0].RowID != "2" || updated.Rows[1].RowID != "3" {
+		t.Fatalf("unexpected updated rows: %#v", updated.Rows)
 	}
 
 	if err := service.DeleteDefinition(ctx, created.PlanDefID); err != nil {
@@ -355,7 +369,9 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 		DailyStartTime:      "09:00:00",
 		DailyDeadlineTime:   "23:00:00",
 		Status:              StatusEnabled,
-		DeviceIDs:           []string{"dev_000001"},
+		Rows: []PlanRowBinding{
+			{ZoneID: "1", RowID: "1"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("create plan definition: %v", err)

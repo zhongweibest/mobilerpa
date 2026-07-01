@@ -21,6 +21,7 @@ const (
 	defaultToolkitPath          = ""
 	defaultWorkflowScanInterval = 15 * time.Second
 	defaultPlanScanInterval     = 1 * time.Second
+	defaultPlanRetryInterval     = 5 * time.Minute
 	defaultPlanStartWorkers     = 2
 	defaultPlanStartFanout      = 20
 )
@@ -52,6 +53,7 @@ type Config struct {
 	// WorkflowScanInterval 是工作流时间规则后台扫描周期。
 	WorkflowScanInterval time.Duration
 	PlanScanInterval     time.Duration
+	PlanRetryInterval    time.Duration
 	PlanStartWorkers     int
 	PlanStartFanout      int
 }
@@ -72,6 +74,7 @@ func Load() Config {
 		"CENTER_TOOLKIT_PATH":                 defaultToolkitPath,
 		"CENTER_WORKFLOW_SCAN_INTERVAL":       defaultWorkflowScanInterval.String(),
 		"CENTER_PLAN_SCAN_INTERVAL":           defaultPlanScanInterval.String(),
+		"CENTER_PLAN_RETRY_INTERVAL":          defaultPlanRetryInterval.String(),
 		"CENTER_PLAN_START_WORKERS":           "2",
 		"CENTER_PLAN_START_FANOUT":            "20",
 	}
@@ -84,6 +87,7 @@ func Load() Config {
 	scanInterval := parseDurationValue(values["CENTER_DEVICE_OFFLINE_SCAN_INTERVAL"], defaultOfflineScanInterval)
 	workflowScanInterval := parseDurationValue(values["CENTER_WORKFLOW_SCAN_INTERVAL"], defaultWorkflowScanInterval)
 	planScanInterval := parseDurationValue(values["CENTER_PLAN_SCAN_INTERVAL"], defaultPlanScanInterval)
+	planRetryInterval := parseDurationValue(values["CENTER_PLAN_RETRY_INTERVAL"], defaultPlanRetryInterval)
 	planStartWorkers := parseIntValue(values["CENTER_PLAN_START_WORKERS"], defaultPlanStartWorkers)
 	planStartFanout := parseIntValue(values["CENTER_PLAN_START_FANOUT"], defaultPlanStartFanout)
 
@@ -101,6 +105,7 @@ func Load() Config {
 		ToolkitPath:               values["CENTER_TOOLKIT_PATH"],
 		WorkflowScanInterval:      workflowScanInterval,
 		PlanScanInterval:          planScanInterval,
+		PlanRetryInterval:         planRetryInterval,
 		PlanStartWorkers:          planStartWorkers,
 		PlanStartFanout:           planStartFanout,
 	}

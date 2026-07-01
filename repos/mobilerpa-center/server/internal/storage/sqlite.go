@@ -183,6 +183,16 @@ CREATE TABLE IF NOT EXISTS plan_devices (
     UNIQUE (plan_def_id, device_id)
 );
 
+CREATE TABLE IF NOT EXISTS plan_definition_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_def_id INTEGER NOT NULL,
+    zone_id INTEGER NOT NULL,
+    row_id INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE (plan_def_id, zone_id, row_id)
+);
+
 CREATE TABLE IF NOT EXISTS plan_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_def_id INTEGER NOT NULL,
@@ -200,11 +210,33 @@ CREATE TABLE IF NOT EXISTS plan_device_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_run_id INTEGER NOT NULL,
     plan_def_id INTEGER NOT NULL,
+    zone_id INTEGER NOT NULL DEFAULT 0,
+    row_id INTEGER NOT NULL DEFAULT 0,
+    slot_id INTEGER NOT NULL DEFAULT 0,
     device_id INTEGER NOT NULL,
     target_type TEXT NOT NULL,
     target_ref_id TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'pending',
     current_node_id TEXT NOT NULL DEFAULT '',
+    next_retry_at TEXT NOT NULL DEFAULT '',
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT '',
+    last_error TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_run_targets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_run_id INTEGER NOT NULL,
+    plan_def_id INTEGER NOT NULL,
+    zone_id INTEGER NOT NULL DEFAULT 0,
+    row_id INTEGER NOT NULL DEFAULT 0,
+    slot_id INTEGER NOT NULL DEFAULT 0,
+    device_id INTEGER NOT NULL,
+    target_type TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    next_retry_at TEXT NOT NULL DEFAULT '',
     started_at TEXT NOT NULL DEFAULT '',
     finished_at TEXT NOT NULL DEFAULT '',
     last_error TEXT NOT NULL DEFAULT '',
@@ -213,6 +245,17 @@ CREATE TABLE IF NOT EXISTS plan_device_runs (
 );
 
 CREATE TABLE IF NOT EXISTS plan_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    plan_run_id INTEGER NOT NULL,
+    plan_def_id INTEGER NOT NULL,
+    device_id INTEGER NOT NULL DEFAULT 0,
+    event_type TEXT NOT NULL,
+    message TEXT NOT NULL DEFAULT '',
+    extra_json TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS plan_run_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     plan_run_id INTEGER NOT NULL,
     plan_def_id INTEGER NOT NULL,
@@ -296,6 +339,18 @@ GROUP BY script_name`); err != nil {
         return fmt.Errorf("backfill script names: %w", err)
     }
 	if err := ensureColumn(ctx, db, "plan_device_runs", "current_node_id", "ALTER TABLE plan_device_runs ADD COLUMN current_node_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_device_runs", "zone_id", "ALTER TABLE plan_device_runs ADD COLUMN zone_id INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_device_runs", "row_id", "ALTER TABLE plan_device_runs ADD COLUMN row_id INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_device_runs", "slot_id", "ALTER TABLE plan_device_runs ADD COLUMN slot_id INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_device_runs", "next_retry_at", "ALTER TABLE plan_device_runs ADD COLUMN next_retry_at TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureColumn(ctx, db, "devices", "slot_zone", "ALTER TABLE devices ADD COLUMN slot_zone TEXT NOT NULL DEFAULT ''"); err != nil {

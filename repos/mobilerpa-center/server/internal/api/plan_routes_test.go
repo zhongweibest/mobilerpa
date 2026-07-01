@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"database/sql"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -20,6 +21,19 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/ws"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
+
+func seedLocationRow(t *testing.T, db *sql.DB, deviceID string) {
+	t.Helper()
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(t.Context(), `
+INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at)
+VALUES (0, 'zone', 'A区', 0, 1, ?, ?),
+       (1, 'row', '1排', 0, 1, ?, ?),
+       (2, 'slot', '1槽', ?, 1, ?, ?)`,
+		now, now, now, now, deviceID, now, now); err != nil {
+		t.Fatalf("seed location nodes: %v", err)
+	}
+}
 
 func TestPlanCreateListAndGet(t *testing.T) {
 	t.Parallel()
@@ -54,7 +68,10 @@ func TestPlanCreateListAndGet(t *testing.T) {
 		"daily_start_time":      "09:00:00",
 		"daily_deadline_time":   "23:00:00",
 		"status":                "enabled",
-		"device_ids":            []string{"dev_000001", "dev_000002"},
+		"rows": []map[string]any{
+			{"zone_id": "1", "row_id": "1"},
+			{"zone_id": "1", "row_id": "2"},
+		},
 	}
 
 	rawBody, err := json.Marshal(createBody)
@@ -139,8 +156,8 @@ func TestPlanCreateListAndGet(t *testing.T) {
 	if getPayload.Data.PlanDefID != createPayload.Data.PlanDefID {
 		t.Fatalf("unexpected plan_def_id: %s", getPayload.Data.PlanDefID)
 	}
-	if len(getPayload.Data.DeviceIDs) != 2 {
-		t.Fatalf("unexpected device ids: %#v", getPayload.Data.DeviceIDs)
+	if len(getPayload.Data.Rows) != 2 {
+		t.Fatalf("unexpected rows: %#v", getPayload.Data.Rows)
 	}
 }
 
@@ -203,6 +220,7 @@ func TestPlanStartScriptRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update execution profile: %v", err)
 	}
+	seedLocationRow(t, db, registerPayload.Data.DeviceID)
 
 	wsURL := "ws" + server.URL[len("http"):] + "/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -241,7 +259,9 @@ func TestPlanStartScriptRun(t *testing.T) {
 		"target_script_version": "v0.1.0",
 		"schedule_type":         "once",
 		"status":                "enabled",
-		"device_ids":            []string{registerPayload.Data.DeviceID},
+		"rows": []map[string]any{
+			{"zone_id": "1", "row_id": "2"},
+		},
 	}
 	rawCreateBody, err := json.Marshal(createBody)
 	if err != nil {
@@ -351,6 +371,7 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update execution profile: %v", err)
 	}
+	seedLocationRow(t, db, registerPayload.Data.DeviceID)
 
 	wsURL := "ws" + server.URL[len("http"):] + "/ws"
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
@@ -431,7 +452,9 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 		"target_workflow_def_id": createWorkflowPayload.Data.WorkflowDefID,
 		"schedule_type":          "once",
 		"status":                 "enabled",
-		"device_ids":             []string{registerPayload.Data.DeviceID},
+		"rows": []map[string]any{
+			{"zone_id": "1", "row_id": "2"},
+		},
 	}
 	rawCreatePlanBody, err := json.Marshal(createPlanBody)
 	if err != nil {

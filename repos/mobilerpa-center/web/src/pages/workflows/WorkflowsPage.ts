@@ -11,7 +11,6 @@ import {
   ElFormItem,
   ElInput,
   ElInputNumber,
-  ElMessage,
   ElMessageBox,
   ElOption,
   ElPagination,
@@ -339,7 +338,7 @@ export const WorkflowsPage = defineComponent({
         segments.value = buildSegmentsFromWorkflow(detail);
         createDialogVisible.value = true;
       } catch (error) {
-        ElMessage.error("加载工作流详情失败，暂时无法复制");
+        noticesStore.error("加载工作流详情失败，暂时无法复制", 5000);
       }
     }
 
@@ -354,7 +353,7 @@ export const WorkflowsPage = defineComponent({
         segments.value = buildSegmentsFromWorkflow(detail);
         createDialogVisible.value = true;
       } catch (error) {
-        ElMessage.error("加载工作流详情失败，暂时无法编辑");
+        noticesStore.error("加载工作流详情失败，暂时无法编辑", 5000);
       }
     }
 
@@ -368,7 +367,7 @@ export const WorkflowsPage = defineComponent({
 
     function removeSegment(segmentID: string) {
       if (segments.value.length <= 1) {
-        ElMessage.warning("至少需要保留一个编排段");
+        noticesStore.warning("至少需要保留一个编排段", 5000);
         return;
       }
       segments.value = segments.value.filter((item) => item.id !== segmentID);
@@ -391,7 +390,7 @@ export const WorkflowsPage = defineComponent({
 
     function removeStep(stepList: SequenceStepForm[], stepID: string) {
       if (stepList.length <= 1) {
-        ElMessage.warning("每个段至少保留一个脚本步骤");
+        noticesStore.warning("每个段至少保留一个脚本步骤", 5000);
         return;
       }
       const index = stepList.findIndex((item) => item.id === stepID);
@@ -577,7 +576,7 @@ export const WorkflowsPage = defineComponent({
     async function handleCreateWorkflow() {
       const validationMessage = validateCreateForm();
       if (validationMessage !== "") {
-        ElMessage.warning(validationMessage);
+        noticesStore.warning(validationMessage, 5000);
         return;
       }
 
@@ -596,12 +595,12 @@ export const WorkflowsPage = defineComponent({
           await workflowsStore.submitWorkflow(requestPayload);
         }
         createDialogVisible.value = false;
-        ElMessage.success(
+        noticesStore.success(
           dialogMode.value === "copy" ? "工作流副本已创建" : dialogMode.value === "edit" ? "工作流定义已更新" : "工作流定义已创建"
-        );
+        , 3000);
         await loadPageData();
       } catch (error) {
-        ElMessage.error(dialogMode.value === "edit" ? "更新工作流定义失败，请检查脚本、版本和编排结构" : "创建工作流定义失败，请检查脚本、版本和编排结构");
+        noticesStore.error(dialogMode.value === "edit" ? "更新工作流定义失败，请检查脚本、版本和编排结构" : "创建工作流定义失败，请检查脚本、版本和编排结构", 5000);
         throw error;
       }
     }
@@ -615,12 +614,12 @@ export const WorkflowsPage = defineComponent({
         });
 
         await workflowsStore.removeWorkflow(workflow.workflow_def_id);
-        ElMessage.success("工作流定义已删除");
+        noticesStore.success("工作流定义已删除", 3000);
       } catch (error) {
         if (error === "cancel" || error === "close") {
           return;
         }
-        ElMessage.error("删除工作流定义失败。如果该工作流仍有运行中的实例，请先停止对应计划任务实例。");
+        noticesStore.error("删除工作流定义失败。如果该工作流仍有运行中的实例，请先停止对应计划任务实例。", 5000);
       }
     }
 

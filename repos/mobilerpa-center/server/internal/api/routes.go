@@ -252,13 +252,13 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 			return
 		}
 
-		if len(parts) == 2 && parts[1] == "devices" && r.Method == http.MethodPut {
-			var req plan.UpdateDefinitionDevicesRequest
+		if len(parts) == 2 && parts[1] == "rows" && r.Method == http.MethodPut {
+			var req plan.UpdateDefinitionRowsRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
 				return
 			}
-			result, err := plans.UpdateDefinitionDevices(ctx, planDefID, req)
+			result, err := plans.UpdateDefinitionRows(ctx, planDefID, req)
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -357,13 +357,13 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 			return
 		}
 
-		if len(parts) == 4 && parts[1] == "runs" && parts[3] == "devices" && r.Method == http.MethodPost {
-			var req plan.AddDevicesRequest
+		if len(parts) == 4 && parts[1] == "runs" && parts[3] == "rows" && r.Method == http.MethodPost {
+			var req plan.AddRowsRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
 				return
 			}
-			result, err := plans.AddDevices(ctx, parts[2], req)
+			result, err := plans.AddRows(ctx, parts[2], req)
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -375,8 +375,8 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 			return
 		}
 
-		if len(parts) == 5 && parts[1] == "runs" && parts[3] == "devices" && r.Method == http.MethodDelete {
-			result, err := plans.RemoveDevice(ctx, parts[2], parts[4])
+		if len(parts) == 6 && parts[1] == "runs" && parts[3] == "rows" && r.Method == http.MethodDelete {
+			result, err := plans.RemoveRow(ctx, parts[2], parts[4], parts[5])
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -1648,8 +1648,6 @@ func writePlanError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "plan_target_script_name_required")
 	case errors.Is(err, plan.ErrPlanTargetWorkflowDefIDRequired):
 		writeError(w, http.StatusBadRequest, "plan_target_workflow_def_id_required")
-	case errors.Is(err, plan.ErrPlanDeviceIDsRequired):
-		writeError(w, http.StatusBadRequest, "plan_device_ids_required")
 	case errors.Is(err, plan.ErrPlanDailyStartTimeInvalid):
 		writeError(w, http.StatusBadRequest, "plan_daily_start_time_invalid")
 	case errors.Is(err, plan.ErrPlanDailyDeadlineTimeInvalid):

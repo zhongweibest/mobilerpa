@@ -10,19 +10,38 @@ export interface PlanDefinitionRecord {
   daily_start_time: string;
   daily_deadline_time: string;
   status: string;
-  device_ids: string[];
+  rows: PlanRowBinding[];
   created_at: string;
   updated_at: string;
 }
 
-export interface UpdatePlanDevicesRequest {
-  device_ids: string[];
+export interface PlanRowBinding {
+  plan_definition_row_id?: string;
+  plan_def_id?: string;
+  zone_id: string;
+  row_id: string;
+  zone_name?: string;
+  row_name?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface PlanRowTargetRecord {
+  zone_id: string;
+  row_id: string;
+  zone_name?: string;
+  row_name?: string;
+  slot_count?: number;
+  device_count?: number;
 }
 
 export interface PlanDeviceRunRecord {
   plan_device_run_id: string;
   plan_run_id: string;
   plan_def_id: string;
+  zone_id: string;
+  row_id: string;
+  slot_id: string;
   device_id: string;
   target_type: string;
   target_ref_id: string;
@@ -71,5 +90,5 @@ export interface CreatePlanRequest {
   daily_start_time?: string;
   daily_deadline_time?: string;
   status: string;
-  device_ids: string[];
+  rows: PlanRowBinding[];
 }

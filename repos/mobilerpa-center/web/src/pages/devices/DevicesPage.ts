@@ -9,7 +9,6 @@ import {
   ElDropdownItem,
   ElDropdownMenu,
   ElEmpty,
-  ElMessage,
   ElOption,
   ElPagination,
   ElSelect,
@@ -125,9 +124,9 @@ export const DevicesPage = defineComponent({
 
       try {
         await devicesStore.removeDevice(deviceID);
-        ElMessage.success(`设备 ${deviceID} 已删除`);
+        noticesStore.success(`设备 ${deviceID} 已删除`, 3000);
       } catch (_error) {
-        ElMessage.error("删除设备失败，请先确认该设备已经离线");
+        noticesStore.error("删除设备失败，请先确认该设备已经离线", 5000);
       }
     }
 
@@ -137,7 +136,7 @@ export const DevicesPage = defineComponent({
         selectedOccupancy.value = await fetchDeviceOccupancy(deviceID);
         occupancyDialogVisible.value = true;
       } catch (_error) {
-        ElMessage.error("加载设备占用详情失败，请稍后重试");
+        noticesStore.error("加载设备占用详情失败，请稍后重试", 5000);
       } finally {
         loadingOccupancy.value = false;
       }
@@ -159,7 +158,7 @@ export const DevicesPage = defineComponent({
         }
         bindDialogVisible.value = true;
       } catch (_error) {
-        ElMessage.error("加载槽位列表失败，请先在设备绑定页创建分区、排号和槽位");
+        noticesStore.error("加载槽位列表失败，请先在设备绑定页创建分区、排号和槽位", 5000);
       } finally {
         loadingSlots.value = false;
       }
@@ -170,7 +169,7 @@ export const DevicesPage = defineComponent({
         return;
       }
       if (bindForm.slot_id.trim() === "") {
-        ElMessage.warning("请先选择槽位");
+        noticesStore.warning("请先选择槽位", 5000);
         return;
       }
       binding.value = true;
@@ -179,10 +178,10 @@ export const DevicesPage = defineComponent({
           device_id: bindingDevice.value.device_id
         });
         bindDialogVisible.value = false;
-        ElMessage.success("设备绑定成功");
+        noticesStore.success("设备绑定成功", 3000);
         await devicesStore.loadDevices();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "设备绑定失败");
+        noticesStore.error(error instanceof Error ? error.message : "设备绑定失败", 5000);
       } finally {
         binding.value = false;
       }

@@ -1,8 +1,8 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
-import { addPlanDevices, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanDevice, startPlan, stopPlanRun, updatePlanDevices } from "../api/plans";
-import type { CreatePlanRequest, PlanDefinitionRecord, PlanEventRecord, PlanRunRecord } from "../types/plan";
+import { addPlanRows, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanRow, startPlan, stopPlanRun, updatePlanRows } from "../api/plans";
+import type { CreatePlanRequest, PlanDefinitionRecord, PlanEventRecord, PlanRunRecord, PlanRowBinding } from "../types/plan";
 
 export const usePlansStore = defineStore("plans", () => {
   const plans = ref<PlanDefinitionRecord[]>([]);
@@ -92,11 +92,11 @@ export const usePlansStore = defineStore("plans", () => {
     }
   }
 
-  async function triggerStartPlan(planDefID: string, deviceIDs: string[]) {
+  async function triggerStartPlan(planDefID: string) {
     startingPlanID.value = planDefID;
     errorMessage.value = "";
     try {
-      const run = await startPlan(planDefID, deviceIDs);
+      const run = await startPlan(planDefID);
       await loadRuns();
       return run;
     } catch (error) {
@@ -125,18 +125,16 @@ export const usePlansStore = defineStore("plans", () => {
     }
   }
 
-  async function updateDefinitionDevices(planDefID: string, deviceIDs: string[]) {
+  async function updateDefinitionRows(planDefID: string, rows: PlanRowBinding[]) {
     mutatingDevices.value = true;
     errorMessage.value = "";
     try {
-      const result = await updatePlanDevices(planDefID, {
-        device_ids: deviceIDs
-      });
+      const result = await updatePlanRows(planDefID, { rows });
       await loadPlans();
       await loadRuns();
       return result;
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : "update_plan_devices_failed";
+      errorMessage.value = error instanceof Error ? error.message : "update_plan_rows_failed";
       throw error;
     } finally {
       mutatingDevices.value = false;
@@ -158,15 +156,15 @@ export const usePlansStore = defineStore("plans", () => {
     }
   }
 
-  async function appendPlanDevices(planDefID: string, planRunID: string, deviceIDs: string[]) {
+  async function appendPlanRows(planDefID: string, planRunID: string, rows: PlanRowBinding[]) {
     mutatingDevices.value = true;
     errorMessage.value = "";
     try {
-      const run = await addPlanDevices(planDefID, planRunID, deviceIDs);
+      const run = await addPlanRows(planDefID, planRunID, rows);
       await loadRuns();
       return run;
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : "add_plan_devices_failed";
+      errorMessage.value = error instanceof Error ? error.message : "add_plan_rows_failed";
       throw error;
     } finally {
       mutatingDevices.value = false;
@@ -187,15 +185,15 @@ export const usePlansStore = defineStore("plans", () => {
     }
   }
 
-  async function removeDeviceFromPlan(planDefID: string, planRunID: string, deviceID: string) {
+  async function removeRowFromPlan(planDefID: string, planRunID: string, zoneID: string, rowID: string) {
     mutatingDevices.value = true;
     errorMessage.value = "";
     try {
-      const run = await removePlanDevice(planDefID, planRunID, deviceID);
+      const run = await removePlanRow(planDefID, planRunID, zoneID, rowID);
       await loadRuns();
       return run;
     } catch (error) {
-      errorMessage.value = error instanceof Error ? error.message : "remove_plan_device_failed";
+      errorMessage.value = error instanceof Error ? error.message : "remove_plan_row_failed";
       throw error;
     } finally {
       mutatingDevices.value = false;
@@ -249,12 +247,12 @@ export const usePlansStore = defineStore("plans", () => {
     loadPlanEvents,
     submitPlan,
     removePlan,
-    updateDefinitionDevices,
+    updateDefinitionRows,
     triggerStartPlan,
     triggerStopPlanRun,
     removePlanRun,
-    appendPlanDevices,
-    removeDeviceFromPlan,
+    appendPlanRows,
+    removeRowFromPlan,
     changePage,
     changePageSize,
     changeRunsPage,

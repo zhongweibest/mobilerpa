@@ -7,7 +7,6 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
-  ElMessage,
   ElMessageBox,
   ElOption,
   ElSelect,
@@ -19,6 +18,7 @@ import {
 import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
 
 import { bindLocationNode, createLocationNode, deleteLocationNode, fetchDevices, fetchLocationNodes, unbindLocationNode, updateLocationNode } from "../../api/devices";
+import { useNoticesStore } from "../../stores/notices";
 
 function normalizeText(value: string) {
   return (value || "").trim().toLowerCase();
@@ -84,6 +84,7 @@ function buildNodeCode(node) {
 export const BindingsPage = defineComponent({
   name: "BindingsPage",
   setup() {
+    const noticesStore = useNoticesStore();
     const loading = ref(false);
     const saving = ref(false);
     const nodes = ref([]);
@@ -235,11 +236,11 @@ export const BindingsPage = defineComponent({
 
     async function handleCreateChild() {
       if (nextNodeType.value === "") {
-        ElMessage.warning("槽位节点下不能继续新增下级");
+        noticesStore.warning("槽位节点下不能继续新增下级", 5000);
         return;
       }
       if (createForm.node_name.trim() === "") {
-        ElMessage.warning(`请先填写${resolveNodeTypeLabel(nextNodeType.value)}名称`);
+        noticesStore.warning(`请先填写${resolveNodeTypeLabel(nextNodeType.value)}名称`, 5000);
         return;
       }
 
@@ -253,10 +254,10 @@ export const BindingsPage = defineComponent({
         });
         createForm.node_name = "";
         createForm.sort_order = "";
-        ElMessage.success(`${resolveNodeTypeLabel(nextNodeType.value)}已创建`);
+        noticesStore.success(`${resolveNodeTypeLabel(nextNodeType.value)}已创建`, 3000);
         await loadData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "创建节点失败");
+        noticesStore.error(error instanceof Error ? error.message : "创建节点失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -276,7 +277,7 @@ export const BindingsPage = defineComponent({
 
     async function handleCreateRow() {
       if (!currentNode.value || currentNode.value.node_type !== "zone") {
-        ElMessage.warning("请先选择分区节点");
+        noticesStore.warning("请先选择分区节点", 5000);
         return;
       }
       await handleCreateChild();
@@ -285,7 +286,7 @@ export const BindingsPage = defineComponent({
 
     async function handleCreateSlot() {
       if (!currentNode.value || currentNode.value.node_type !== "row") {
-        ElMessage.warning("请先选择排号节点");
+        noticesStore.warning("请先选择排号节点", 5000);
         return;
       }
       await handleCreateChild();
@@ -294,7 +295,7 @@ export const BindingsPage = defineComponent({
 
     async function handleCreateZone() {
       if (createForm.node_name.trim() === "") {
-        ElMessage.warning("请先填写分区名称");
+        noticesStore.warning("请先填写分区名称", 5000);
         return;
       }
 
@@ -309,11 +310,11 @@ export const BindingsPage = defineComponent({
         createForm.node_name = "";
         createForm.sort_order = "";
         zoneDialogVisible.value = false;
-        ElMessage.success("分区已创建");
+        noticesStore.success("分区已创建", 3000);
         await loadData();
         handleSelectNode(result);
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "创建分区失败");
+        noticesStore.error(error instanceof Error ? error.message : "创建分区失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -321,15 +322,15 @@ export const BindingsPage = defineComponent({
 
     async function handleUpdateNode() {
       if (!currentNode.value) {
-        ElMessage.warning("请先选择要编辑的节点");
+        noticesStore.warning("请先选择要编辑的节点", 5000);
         return;
       }
       if (editForm.node_name.trim() === "") {
-        ElMessage.warning("请先填写节点名称");
+        noticesStore.warning("请先填写节点名称", 5000);
         return;
       }
       if (currentNode.value.node_type !== "zone" && editForm.parent_id.trim() === "") {
-        ElMessage.warning("请先选择父节点");
+        noticesStore.warning("请先选择父节点", 5000);
         return;
       }
 
@@ -356,11 +357,11 @@ export const BindingsPage = defineComponent({
           node_name: editForm.node_name.trim(),
           sort_order: editForm.sort_order.trim() === "" ? 0 : Number(editForm.sort_order)
         });
-        ElMessage.success("节点已更新");
+        noticesStore.success("节点已更新", 3000);
         await loadData();
         handleSelectNode(result);
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "更新节点失败");
+        noticesStore.error(error instanceof Error ? error.message : "更新节点失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -368,7 +369,7 @@ export const BindingsPage = defineComponent({
 
     async function handleDeleteNode(targetNode = currentNode.value) {
       if (!targetNode) {
-        ElMessage.warning("请先选择要删除的节点");
+        noticesStore.warning("请先选择要删除的节点", 5000);
         return;
       }
 
@@ -394,7 +395,7 @@ export const BindingsPage = defineComponent({
         const fallbackNodeID =
           currentNode.value?.node_id === targetNode.node_id ? currentParentNode.value?.node_id || "" : currentNodeID.value;
         await deleteLocationNode(deletingNodeID);
-        ElMessage.success("节点已删除");
+        noticesStore.success("节点已删除", 3000);
         currentNodeID.value = fallbackNodeID;
         bindForm.device_id = "";
         createForm.node_name = "";
@@ -404,7 +405,7 @@ export const BindingsPage = defineComponent({
         editForm.sort_order = "";
         await loadData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "删除节点失败");
+        noticesStore.error(error instanceof Error ? error.message : "删除节点失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -412,11 +413,11 @@ export const BindingsPage = defineComponent({
 
     async function handleBind() {
       if (!currentNode.value || currentNode.value.node_type !== "slot") {
-        ElMessage.warning("请先选择槽位节点");
+        noticesStore.warning("请先选择槽位节点", 5000);
         return;
       }
       if (bindForm.device_id.trim() === "") {
-        ElMessage.warning("请先选择设备");
+        noticesStore.warning("请先选择设备", 5000);
         return;
       }
 
@@ -425,10 +426,10 @@ export const BindingsPage = defineComponent({
         await bindLocationNode(currentNode.value.node_id, {
           device_id: bindForm.device_id.trim()
         });
-        ElMessage.success("设备绑定成功");
+        noticesStore.success("设备绑定成功", 3000);
         await loadData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "绑定设备失败");
+        noticesStore.error(error instanceof Error ? error.message : "绑定设备失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -436,7 +437,7 @@ export const BindingsPage = defineComponent({
 
     async function handleUnbind() {
       if (!currentNode.value || currentNode.value.node_type !== "slot" || !currentNode.value.device_id) {
-        ElMessage.warning("当前槽位没有已绑定设备");
+        noticesStore.warning("当前槽位没有已绑定设备", 5000);
         return;
       }
 
@@ -444,10 +445,10 @@ export const BindingsPage = defineComponent({
       try {
         await unbindLocationNode(currentNode.value.node_id);
         bindForm.device_id = "";
-        ElMessage.success("槽位解绑成功");
+        noticesStore.success("槽位解绑成功", 3000);
         await loadData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "解绑失败");
+        noticesStore.error(error instanceof Error ? error.message : "解绑失败", 5000);
       } finally {
         saving.value = false;
       }
@@ -823,7 +824,7 @@ export const BindingsPage = defineComponent({
                                       )
                                     )
                                   )
-                                : h("div", { class: "bindings-page__hint" }, "当前节点下还没有子节点。")
+                                : null
                             ])
                           : h(ElEmpty, { description: "请选择左侧节点查看详情" })
                       ])

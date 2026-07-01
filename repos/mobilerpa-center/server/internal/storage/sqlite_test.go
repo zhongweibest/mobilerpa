@@ -43,7 +43,7 @@ func TestOpenCreatesCurrentSchema(t *testing.T) {
 	}
 }
 
-func TestOpenMigratesPlanDeviceRunsCurrentNodeID(t *testing.T) {
+func TestOpenMigratesPlanDeviceRunsColumns(t *testing.T) {
 	t.Parallel()
 
 	dbPath := filepath.Join(t.TempDir(), "legacy.db")
@@ -81,11 +81,13 @@ CREATE TABLE plan_device_runs (
 	}
 	defer db.Close()
 
-	exists, err := columnExists(context.Background(), db, "plan_device_runs", "current_node_id")
-	if err != nil {
-		t.Fatalf("check migrated column: %v", err)
-	}
-	if !exists {
-		t.Fatalf("column not found after migration: plan_device_runs.current_node_id")
+	for _, column := range []string{"zone_id", "row_id", "slot_id", "current_node_id", "next_retry_at"} {
+		exists, err := columnExists(context.Background(), db, "plan_device_runs", column)
+		if err != nil {
+			t.Fatalf("check migrated column %s: %v", column, err)
+		}
+		if !exists {
+			t.Fatalf("column not found after migration: plan_device_runs.%s", column)
+		}
 	}
 }

@@ -1,5 +1,6 @@
 // @ts-nocheck
 import {
+  ElAlert,
   ElButton,
   ElCard,
   ElDescriptions,
@@ -12,7 +13,6 @@ import {
   ElForm,
   ElFormItem,
   ElInput,
-  ElMessage,
   ElMessageBox,
   ElOption,
   ElPagination,
@@ -23,20 +23,39 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
+import { computed, defineComponent, h, nextTick, onMounted, reactive, ref, watch } from "vue";
 
-import { fetchDevices } from "../../api/devices";
 import { useNoticesStore } from "../../stores/notices";
 import { usePlansStore } from "../../stores/plans";
 import { useScriptsStore } from "../../stores/scripts";
 import { useWorkflowsStore } from "../../stores/workflows";
-import type { DeviceRecord } from "../../types/device";
-import type { PlanDefinitionRecord } from "../../types/plan";
+import type { LocationNodeRecord } from "../../types/device";
+import type { PlanDefinitionRecord, PlanRowBinding } from "../../types/plan";
 import type { WorkflowDefinitionRecord } from "../../types/workflow";
 import { formatDateTime } from "../../utils/device";
+import { fetchLocationNodes } from "../../api/devices";
 
 const PAGE_SIZES = [10, 20, 30, 50, 100];
-const DEVICE_SELECTOR_PAGE_SIZE = 100;
+type LocationRowGroup = {
+  zone_id: string;
+  zone_name: string;
+  row_id: string;
+  row_name: string;
+  slot_count: number;
+  device_count: number;
+};
+
+type LocationRowTreeNode = {
+  node_key: string;
+  node_type: "zone" | "row";
+  zone_id: string;
+  zone_name: string;
+  row_id: string;
+  row_name: string;
+  slot_count: number;
+  device_count: number;
+  children?: LocationRowTreeNode[];
+};
 
 function renderPlanStatus(status: string) {
   const normalized = (status || "").trim();
@@ -115,6 +134,97 @@ function resolvePlanTargetLabel(item: PlanDefinitionRecord, workflows: WorkflowD
   return scriptVersion === "" ? scriptName : `${scriptName}@${scriptVersion}`;
 }
 
+function buildRowLabel(binding: PlanRowBinding) {
+  const zoneName = (binding.zone_name || binding.zone_id || "").trim();
+  const rowName = (binding.row_name || binding.row_id || "").trim();
+  return `${zoneName}-${rowName}`;
+}
+
+function normalizeNodeName(value: string) {
+  return (value || "").trim();
+}
+
+function buildLocationRowGroups(nodes: LocationNodeRecord[]): LocationRowGroup[] {
+  const zoneMap = new Map<string, LocationNodeRecord>();
+  const rowMap = new Map<string, LocationNodeRecord>();
+  const slotMap = new Map<string, LocationNodeRecord[]>();
+
+  for (const node of nodes) {
+    if (node.node_type === "zone") {
+      zoneMap.set(node.node_id, node);
+    } else if (node.node_type === "row") {
+      rowMap.set(node.node_id, node);
+    } else if (node.node_type === "slot") {
+      const list = slotMap.get(node.parent_id) || [];
+      list.push(node);
+      slotMap.set(node.parent_id, list);
+    }
+  }
+
+  const sortNodes = (list: LocationNodeRecord[]) =>
+    [...list].sort((left, right) => {
+      const sortDelta = Number(left.sort_order || 0) - Number(right.sort_order || 0);
+      if (sortDelta !== 0) {
+        return sortDelta;
+      }
+      return normalizeNodeName(left.node_name).localeCompare(normalizeNodeName(right.node_name), "zh-CN");
+    });
+
+  const groups: LocationRowGroup[] = [];
+  for (const zone of sortNodes(Array.from(zoneMap.values()))) {
+    const rows = sortNodes(Array.from(rowMap.values()).filter((row) => row.parent_id === zone.node_id));
+    for (const row of rows) {
+      groups.push({
+        zone_id: zone.node_id,
+        zone_name: zone.node_name || zone.node_id,
+        row_id: row.node_id,
+        row_name: row.node_name || row.node_id,
+        slot_count: sortNodes(slotMap.get(row.node_id) || []).length,
+        device_count: sortNodes(slotMap.get(row.node_id) || []).filter((slot) => (slot.device_id || "").trim() !== "").length
+      });
+    }
+  }
+
+  return groups;
+}
+
+function buildLocationRowTree(nodes: LocationNodeRecord[]): LocationRowTreeNode[] {
+  const groups = buildLocationRowGroups(nodes);
+  const zoneMap = new Map<string, LocationRowTreeNode>();
+
+  for (const item of groups) {
+    const zoneNode =
+      zoneMap.get(item.zone_id) ||
+      {
+        node_key: `zone:${item.zone_id}`,
+        node_type: "zone" as const,
+        zone_id: item.zone_id,
+        zone_name: item.zone_name,
+        row_id: "",
+        row_name: "",
+        slot_count: 0,
+        device_count: 0,
+        children: []
+      };
+
+    zoneNode.children?.push({
+      node_key: `row:${item.zone_id}:${item.row_id}`,
+      node_type: "row",
+      zone_id: item.zone_id,
+      zone_name: item.zone_name,
+      row_id: item.row_id,
+      row_name: item.row_name,
+      slot_count: item.slot_count,
+      device_count: item.device_count
+    });
+    zoneNode.slot_count += item.slot_count;
+    zoneNode.device_count += item.device_count;
+    zoneMap.set(item.zone_id, zoneNode);
+  }
+
+  return Array.from(zoneMap.values());
+}
+
 export const PlansPage = defineComponent({
   name: "PlansPage",
   setup() {
@@ -129,11 +239,13 @@ export const PlansPage = defineComponent({
 
     const createDialogVisible = ref(false);
     const startDialogVisible = ref(false);
+    const updateRowsDialogVisible = ref(false);
     const detailDialogVisible = ref(false);
-    const devicesDialogVisible = ref(false);
     const supportingDataWarning = ref("");
-    const selectableDevices = ref<DeviceRecord[]>([]);
     const selectedPlan = ref<PlanDefinitionRecord | null>(null);
+    const locationNodes = ref<LocationNodeRecord[]>([]);
+    const createRowsTableRef = ref();
+    const updateRowsTableRef = ref();
 
     const createForm = reactive({
       plan_name: "",
@@ -146,55 +258,61 @@ export const PlansPage = defineComponent({
       daily_start_time: "",
       daily_deadline_time: "",
       status: "enabled",
-      device_ids: [] as string[]
+      rows: [] as PlanRowBinding[]
     });
 
     const startForm = reactive({
       plan_def_id: "",
       plan_name: "",
       schedule_type: "once",
-      device_ids: [] as string[]
+      rows: [] as PlanRowBinding[]
     });
 
-    const devicesForm = reactive({
+    const updateRowsForm = reactive({
       plan_def_id: "",
       plan_name: "",
-      device_ids: [] as string[]
+      rows: [] as PlanRowBinding[]
     });
 
+    const availableRowTree = computed(() => buildLocationRowTree(locationNodes.value));
+    const startRowTree = computed(() => {
+      const selectedKeys = new Set(startForm.rows.map((item) => `${item.zone_id}:${item.row_id}`));
+      return availableRowTree.value
+        .map((zone) => {
+          const children = (zone.children || []).filter((item) => selectedKeys.has(`${item.zone_id}:${item.row_id}`));
+          if (children.length === 0) {
+            return null;
+          }
+          return {
+            ...zone,
+            slot_count: children.reduce((total, item) => total + Number(item.slot_count || 0), 0),
+            device_count: children.reduce((total, item) => total + Number(item.device_count || 0), 0),
+            children
+          };
+        })
+        .filter(Boolean) as LocationRowTreeNode[];
+    });
+    const detailRowTree = computed(() => {
+      const selectedKeys = new Set((selectedPlan.value?.rows || []).map((item) => `${item.zone_id}:${item.row_id}`));
+      return availableRowTree.value
+        .map((zone) => {
+          const children = (zone.children || []).filter((item) => selectedKeys.has(`${item.zone_id}:${item.row_id}`));
+          if (children.length === 0) {
+            return null;
+          }
+          return {
+            ...zone,
+            slot_count: children.reduce((total, item) => total + Number(item.slot_count || 0), 0),
+            device_count: children.reduce((total, item) => total + Number(item.device_count || 0), 0),
+            children
+          };
+        })
+        .filter(Boolean) as LocationRowTreeNode[];
+    });
     const availableScriptVersions = computed(() => {
       const selectedScript = scripts.value.find((item) => item.script_name === createForm.target_script_name);
       return selectedScript?.versions || [];
     });
-
-    const onlineDevices = computed(() => selectableDevices.value.filter((item) => item.status === "online"));
-
-    function getDeviceLabel(deviceID: string) {
-      const matched = selectableDevices.value.find((item) => item.device_id === deviceID);
-      if (!matched) {
-        return deviceID;
-      }
-      return `${matched.device_name || matched.device_id} (${matched.device_id})`;
-    }
-
-    async function loadSelectableDevices() {
-      const allItems: DeviceRecord[] = [];
-      let nextPage = 1;
-      let totalCount = 0;
-
-      do {
-        const result = await fetchDevices({
-          page: nextPage,
-          page_size: DEVICE_SELECTOR_PAGE_SIZE
-        });
-        totalCount = result.total;
-        allItems.push(...result.items);
-        nextPage += 1;
-      } while (allItems.length < totalCount);
-
-      selectableDevices.value = allItems;
-      return selectableDevices.value;
-    }
 
     async function loadSupportingData() {
       const warnings: string[] = [];
@@ -212,9 +330,9 @@ export const PlansPage = defineComponent({
       }
 
       try {
-        await loadSelectableDevices();
+        locationNodes.value = await fetchLocationNodes();
       } catch (_error) {
-        warnings.push("设备列表加载失败");
+        warnings.push("位置树加载失败");
       }
 
       supportingDataWarning.value = warnings.join("；");
@@ -250,7 +368,9 @@ export const PlansPage = defineComponent({
       errorMessage,
       (value, previousValue) => {
         if (value && value !== previousValue) {
-          noticesStore.error(`计划任务加载失败：${value}`, 5000);
+          if (loading.value) {
+            noticesStore.error(`计划任务加载失败：${value}`, 5000);
+          }
         }
       }
     );
@@ -266,24 +386,59 @@ export const PlansPage = defineComponent({
       createForm.daily_start_time = "";
       createForm.daily_deadline_time = "";
       createForm.status = "enabled";
-      createForm.device_ids = [];
+      createForm.rows = [];
     }
 
     function openCreateDialog() {
       resetCreateForm();
       createDialogVisible.value = true;
+      void nextTick(() => {
+        syncSelectedRows(createRowsTableRef.value, createForm.rows);
+      });
     }
 
     function openStartDialog(planItem: PlanDefinitionRecord) {
       if (!isManualStartEnabled(planItem)) {
-        ElMessage.warning(resolveStartDisabledReason(planItem));
+        noticesStore.warning(resolveStartDisabledReason(planItem), 5000);
         return;
       }
       startForm.plan_def_id = planItem.plan_def_id;
       startForm.plan_name = planItem.plan_name;
       startForm.schedule_type = planItem.schedule_type;
-      startForm.device_ids = [...(planItem.device_ids || [])];
+      startForm.rows = [...(planItem.rows || [])];
       startDialogVisible.value = true;
+    }
+
+    function handleCreateRowSelectionChange(items: LocationRowTreeNode[]) {
+      createForm.rows = items
+        .filter((item) => item.node_type === "row")
+        .map((item) => ({
+          zone_id: item.zone_id,
+          row_id: item.row_id,
+          zone_name: item.zone_name,
+          row_name: item.row_name
+        }));
+    }
+
+    function openUpdateRowsDialog(planItem: PlanDefinitionRecord) {
+      updateRowsForm.plan_def_id = planItem.plan_def_id;
+      updateRowsForm.plan_name = planItem.plan_name;
+      updateRowsForm.rows = [...(planItem.rows || [])];
+      updateRowsDialogVisible.value = true;
+      void nextTick(() => {
+        syncSelectedRows(updateRowsTableRef.value, updateRowsForm.rows);
+      });
+    }
+
+    function handleUpdateRowSelectionChange(items: LocationRowTreeNode[]) {
+      updateRowsForm.rows = items
+        .filter((item) => item.node_type === "row")
+        .map((item) => ({
+          zone_id: item.zone_id,
+          row_id: item.row_id,
+          zone_name: item.zone_name,
+          row_name: item.row_name
+        }));
     }
 
     function openDetailDialog(planItem: PlanDefinitionRecord) {
@@ -291,15 +446,26 @@ export const PlansPage = defineComponent({
       detailDialogVisible.value = true;
     }
 
-    function openDevicesDialog(planItem: PlanDefinitionRecord) {
-      selectedPlan.value = planItem;
-      devicesForm.plan_def_id = planItem.plan_def_id;
-      devicesForm.plan_name = planItem.plan_name;
-      devicesForm.device_ids = [...(planItem.device_ids || [])];
-      devicesDialogVisible.value = true;
+    function syncSelectedRows(tableInstance: any, rows: PlanRowBinding[]) {
+      if (!tableInstance) {
+        return;
+      }
+      const selectedKeys = new Set(rows.map((item) => `${item.zone_id}:${item.row_id}`));
+      tableInstance.clearSelection();
+      for (const zone of availableRowTree.value) {
+        for (const child of zone.children || []) {
+          if (selectedKeys.has(`${child.zone_id}:${child.row_id}`)) {
+            tableInstance.toggleRowSelection(child, true);
+          }
+        }
+      }
     }
 
     async function submitCreatePlan() {
+      if (createForm.rows.length === 0) {
+        noticesStore.warning("请至少选择一个分区-排", 5000);
+        return;
+      }
       try {
         await plansStore.submitPlan({
           plan_name: createForm.plan_name.trim(),
@@ -312,34 +478,38 @@ export const PlansPage = defineComponent({
           daily_start_time: createForm.schedule_type === "daily" ? createForm.daily_start_time.trim() : "",
           daily_deadline_time: createForm.schedule_type === "daily" ? createForm.daily_deadline_time.trim() : "",
           status: createForm.status,
-          device_ids: createForm.device_ids
+          rows: createForm.rows
         });
         createDialogVisible.value = false;
-        ElMessage.success("计划任务已创建");
+        noticesStore.success("计划任务已创建", 3000);
         await loadPageData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "计划任务创建失败");
+        noticesStore.error(error instanceof Error ? error.message : "计划任务创建失败", 5000);
       }
     }
 
     async function submitStartPlan() {
       try {
-        await plansStore.triggerStartPlan(startForm.plan_def_id, startForm.device_ids);
+        await plansStore.triggerStartPlan(startForm.plan_def_id);
         startDialogVisible.value = false;
-        ElMessage.success("计划任务已启动");
+        noticesStore.success("计划任务已启动", 3000);
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "计划任务启动失败");
+        noticesStore.error(error instanceof Error ? error.message : "计划任务启动失败", 5000);
       }
     }
 
-    async function submitDefinitionDevices() {
+    async function submitUpdateRows() {
+      if (updateRowsForm.rows.length === 0) {
+        noticesStore.warning("请至少保留一个分区-排", 5000);
+        return;
+      }
       try {
-        await plansStore.updateDefinitionDevices(devicesForm.plan_def_id, devicesForm.device_ids);
-        devicesDialogVisible.value = false;
-        ElMessage.success("计划任务默认设备已更新");
+        await plansStore.updateDefinitionRows(updateRowsForm.plan_def_id, updateRowsForm.rows);
+        updateRowsDialogVisible.value = false;
+        noticesStore.success("计划任务绑定排号已更新", 3000);
         await loadPageData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "计划任务默认设备更新失败");
+        noticesStore.error(error instanceof Error ? error.message : "计划任务绑定排号更新失败", 5000);
       }
     }
 
@@ -360,10 +530,10 @@ export const PlansPage = defineComponent({
 
       try {
         await plansStore.removePlan(planItem.plan_def_id);
-        ElMessage.success("计划任务已删除");
+        noticesStore.success("计划任务已删除", 3000);
         await loadPageData();
       } catch (error) {
-        ElMessage.error(error instanceof Error ? error.message : "计划任务删除失败");
+        noticesStore.error(error instanceof Error ? error.message : "计划任务删除失败", 5000);
       }
     }
 
@@ -406,10 +576,9 @@ export const PlansPage = defineComponent({
                               formatter: (_row: unknown, _column: unknown, value: string) => resolveScheduleLabel(value)
                             }),
                             h(ElTableColumn, {
-                              prop: "device_ids",
-                              label: "默认设备数",
+                              label: "绑定排数",
                               width: 120,
-                              formatter: (row: PlanDefinitionRecord) => String((row.device_ids || []).length)
+                              formatter: (row: PlanDefinitionRecord) => String((row.rows || []).length)
                             }),
                             h(
                               ElTableColumn,
@@ -432,12 +601,12 @@ export const PlansPage = defineComponent({
                               ElTableColumn,
                               {
                                 label: "操作",
-                                minWidth: 320,
+                                minWidth: 220,
                                 fixed: "right"
                               },
                               {
                                 default: (scope: { row: PlanDefinitionRecord }) =>
-                                  h("div", { class: "table-actions" }, [
+                                  h("div", { class: "table-actions table-actions--nowrap" }, [
                                     h(
                                       ElButton,
                                       {
@@ -451,33 +620,48 @@ export const PlansPage = defineComponent({
                                       () => resolveStartButtonLabel(scope.row)
                                     ),
                                     h(
-                                      ElButton,
+                                      ElDropdown,
                                       {
-                                        link: true,
-                                        type: "success",
-                                        onClick: () => openDetailDialog(scope.row)
+                                        trigger: "click"
                                       },
-                                      () => "查看"
-                                    ),
-                                    h(
-                                      ElButton,
                                       {
-                                        link: true,
-                                        type: "warning",
-                                        loading: mutatingDevices.value && devicesForm.plan_def_id === scope.row.plan_def_id,
-                                        onClick: () => openDevicesDialog(scope.row)
-                                      },
-                                      () => "修改设备"
-                                    ),
-                                    h(
-                                      ElButton,
-                                      {
-                                        link: true,
-                                        type: "danger",
-                                        loading: deletingPlanID.value === scope.row.plan_def_id,
-                                        onClick: () => void handleDeletePlan(scope.row)
-                                      },
-                                      () => "删除"
+                                        default: () => h(ElButton, { link: true, type: "primary" }, () => "更多"),
+                                        dropdown: () =>
+                                          h(
+                                            ElDropdownMenu,
+                                            null,
+                                            {
+                                              default: () => [
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "change_rows",
+                                                    onClick: () => openUpdateRowsDialog(scope.row)
+                                                  },
+                                                  () => "变更选择"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "view",
+                                                    onClick: () => openDetailDialog(scope.row)
+                                                  },
+                                                  () => "查看"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "delete",
+                                                    onClick: () => {
+                                                      void handleDeletePlan(scope.row);
+                                                    }
+                                                  },
+                                                  () => (deletingPlanID.value === scope.row.plan_def_id ? "删除中..." : "删除")
+                                                )
+                                              ]
+                                            }
+                                          )
+                                      }
                                     )
                                   ])
                               }
@@ -628,23 +812,45 @@ export const PlansPage = defineComponent({
                     () => [h(ElOption, { label: "启用", value: "enabled" }), h(ElOption, { label: "停用", value: "disabled" })]
                   )
                 ),
-                h(ElFormItem, { label: "默认设备" }, () =>
+                h(ElFormItem, { label: "绑定排号" }, () =>
                   h(
-                    ElSelect,
+                    ElTable,
                     {
-                      modelValue: createForm.device_ids,
-                      "onUpdate:modelValue": (value: string[]) => (createForm.device_ids = value),
-                      multiple: true,
-                      collapseTags: true
+                      data: availableRowTree.value,
+                      ref: createRowsTableRef,
+                      stripe: true,
+                      border: true,
+                      height: "260px",
+                      rowKey: "node_key",
+                      defaultExpandAll: true,
+                      treeProps: {
+                        children: "children",
+                        checkStrictly: false
+                      },
+                      onSelectionChange: handleCreateRowSelectionChange
                     },
-                    () =>
-                      onlineDevices.value.map((item) =>
-                        h(ElOption, {
-                          key: item.device_id,
-                          label: `${item.device_name || item.device_id} (${item.device_id})`,
-                          value: item.device_id
+                    {
+                      default: () => [
+                        h(ElTableColumn, { type: "selection", width: 60, reserveSelection: true }),
+                        h(ElTableColumn, {
+                          label: "分区 / 排号",
+                          minWidth: 240,
+                          formatter: (row: LocationRowTreeNode) => (row.node_type === "zone" ? row.zone_name : row.row_name)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "slot_count",
+                          label: "槽位数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "device_count",
+                          label: "设备数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
                         })
-                      )
+                      ]
+                    }
                   )
                 )
               ]),
@@ -666,46 +872,111 @@ export const PlansPage = defineComponent({
           },
           {
             default: () => [
-              h(ElAlert, {
-                type: "info",
-                showIcon: true,
-                closable: false,
-                class: "dialog-alert",
-                title: "启动后会创建新的计划任务实例，并立即对选中设备触发脚本或工作流执行。"
-              }),
-              h(ElAlert, {
-                type: "warning",
-                showIcon: true,
-                closable: false,
-                class: "dialog-alert",
-                title:
-                  startForm.schedule_type === "daily"
-                    ? "当前计划任务定义为按天循环。只有在当天开始时间之前允许手工立即启动；一旦到了开始时间，当天启动将由自动调度接管。"
-                    : "当前计划任务定义为一次性（手工启动）。点击启动后会立刻创建并执行一个实例。"
-              }),
-              h(
-                ElSelect,
-                {
-                  modelValue: startForm.device_ids,
-                  "onUpdate:modelValue": (value: string[]) => (startForm.device_ids = value),
-                  multiple: true,
-                  collapseTags: true,
-                  style: "width: 100%; margin-top: 16px;"
-                },
-                () =>
-                  onlineDevices.value.map((item) =>
-                    h(ElOption, {
-                      key: item.device_id,
-                      label: `${item.device_name || item.device_id} (${item.device_id})`,
-                      value: item.device_id
-                    })
+              h(ElForm, { labelPosition: "top", class: "dialog-form" }, () => [
+                h(ElFormItem, { label: "分区-排" }, () =>
+                  h(
+                    ElTable,
+                    {
+                      data: startRowTree.value,
+                      stripe: true,
+                      border: true,
+                      height: "260px",
+                      rowKey: "node_key",
+                      defaultExpandAll: true,
+                      treeProps: {
+                        children: "children"
+                      }
+                    },
+                    {
+                      default: () => [
+                        h(ElTableColumn, {
+                          label: "分区 / 排号",
+                          minWidth: 240,
+                          formatter: (row: LocationRowTreeNode) => (row.node_type === "zone" ? row.zone_name : row.row_name)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "slot_count",
+                          label: "槽位数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "device_count",
+                          label: "设备数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                        })
+                      ]
+                    }
                   )
-              )
+                )
+              ])
             ],
             footer: () =>
               h("div", { class: "dialog-footer" }, [
                 h(ElButton, { onClick: () => (startDialogVisible.value = false) }, () => "取消"),
                 h(ElButton, { type: "primary", loading: startingPlanID.value === startForm.plan_def_id, onClick: () => void submitStartPlan() }, () => "启动")
+              ])
+          }
+        ),
+        h(
+          ElDialog,
+          {
+            modelValue: updateRowsDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => (updateRowsDialogVisible.value = value),
+            title: updateRowsForm.plan_name ? `变更选择：${updateRowsForm.plan_name}` : "变更选择",
+            width: "720px",
+            closeOnClickModal: false
+          },
+          {
+            default: () =>
+              h(ElForm, { labelPosition: "top", class: "dialog-form" }, () => [
+                h(ElFormItem, { label: "分区-排" }, () =>
+                  h(
+                    ElTable,
+                    {
+                      data: availableRowTree.value,
+                      ref: updateRowsTableRef,
+                      stripe: true,
+                      border: true,
+                      height: "260px",
+                      rowKey: "node_key",
+                      defaultExpandAll: true,
+                      treeProps: {
+                        children: "children",
+                        checkStrictly: false
+                      },
+                      onSelectionChange: handleUpdateRowSelectionChange
+                    },
+                    {
+                      default: () => [
+                        h(ElTableColumn, { type: "selection", width: 60, reserveSelection: true }),
+                        h(ElTableColumn, {
+                          label: "分区 / 排号",
+                          minWidth: 240,
+                          formatter: (row: LocationRowTreeNode) => (row.node_type === "zone" ? row.zone_name : row.row_name)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "slot_count",
+                          label: "槽位数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                        }),
+                        h(ElTableColumn, {
+                          prop: "device_count",
+                          label: "设备数",
+                          width: 100,
+                          formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                        })
+                      ]
+                    }
+                  )
+                )
+              ]),
+            footer: () =>
+              h("div", { class: "dialog-footer" }, [
+                h(ElButton, { onClick: () => (updateRowsDialogVisible.value = false) }, () => "取消"),
+                h(ElButton, { type: "primary", loading: mutatingDevices.value, onClick: () => void submitUpdateRows() }, () => "保存")
               ])
           }
         ),
@@ -737,12 +1008,42 @@ export const PlansPage = defineComponent({
                     h(ElDescriptionsItem, { label: "创建时间" }, () => formatDateTime(selectedPlan.value?.created_at || "")),
                     h(ElDescriptionsItem, { label: "更新时间" }, () => formatDateTime(selectedPlan.value?.updated_at || "")),
                     h(ElDescriptionsItem, { label: "说明", span: 2 }, () => selectedPlan.value?.description || "暂无"),
-                    h(ElDescriptionsItem, { label: "默认设备", span: 2 }, () =>
-                      (selectedPlan.value?.device_ids || []).length > 0
+                    h(ElDescriptionsItem, { label: "绑定排号", span: 2 }, () =>
+                      (selectedPlan.value?.rows || []).length > 0
                         ? h(
-                            "div",
-                            { class: "stack-tags" },
-                            (selectedPlan.value?.device_ids || []).map((deviceID) => h(ElTag, { key: deviceID }, () => getDeviceLabel(deviceID)))
+                            ElTable,
+                            {
+                              data: detailRowTree.value,
+                              stripe: true,
+                              border: true,
+                              height: "260px",
+                              rowKey: "node_key",
+                              defaultExpandAll: true,
+                              treeProps: {
+                                children: "children"
+                              }
+                            },
+                            {
+                              default: () => [
+                                h(ElTableColumn, {
+                                  label: "分区 / 排号",
+                                  minWidth: 240,
+                                  formatter: (row: LocationRowTreeNode) => (row.node_type === "zone" ? row.zone_name : row.row_name)
+                                }),
+                                h(ElTableColumn, {
+                                  prop: "slot_count",
+                                  label: "槽位数",
+                                  width: 100,
+                                  formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                                }),
+                                h(ElTableColumn, {
+                                  prop: "device_count",
+                                  label: "设备数",
+                                  width: 100,
+                                  formatter: (_row: unknown, _column: unknown, value: number) => String(value || 0)
+                                })
+                              ]
+                            }
                           )
                         : "暂无"
                     )
@@ -751,54 +1052,7 @@ export const PlansPage = defineComponent({
             footer: () => h(ElButton, { onClick: () => (detailDialogVisible.value = false) }, () => "关闭")
           }
         ),
-        h(
-          ElDialog,
-          {
-            modelValue: devicesDialogVisible.value,
-            "onUpdate:modelValue": (value: boolean) => (devicesDialogVisible.value = value),
-            title: devicesForm.plan_name ? `修改默认设备：${devicesForm.plan_name}` : "修改默认设备",
-            width: "720px",
-            closeOnClickModal: false
-          },
-          {
-            default: () => [
-              h(ElAlert, {
-                type: "info",
-                showIcon: true,
-                closable: false,
-                class: "dialog-alert",
-                title: "保存后会同步更新该计划任务的默认设备。如果当天实例已经启动且还未到截止时间，新追加设备会立即执行；否则在最近一次启动时生效。"
-              }),
-              h(ElForm, { labelPosition: "top", style: "margin-top: 16px;" }, () => [
-                h(ElFormItem, { label: "默认设备" }, () =>
-                  h(
-                    ElSelect,
-                    {
-                      modelValue: devicesForm.device_ids,
-                      "onUpdate:modelValue": (value: string[]) => (devicesForm.device_ids = value),
-                      multiple: true,
-                      collapseTags: true,
-                      style: "width: 100%;"
-                    },
-                    () =>
-                      onlineDevices.value.map((item) =>
-                        h(ElOption, {
-                          key: item.device_id,
-                          label: `${item.device_name || item.device_id} (${item.device_id})`,
-                          value: item.device_id
-                        })
-                      )
-                  )
-                )
-              ])
-            ],
-            footer: () =>
-              h("div", { class: "dialog-footer" }, [
-                h(ElButton, { onClick: () => (devicesDialogVisible.value = false) }, () => "取消"),
-                h(ElButton, { type: "primary", loading: mutatingDevices.value, onClick: () => void submitDefinitionDevices() }, () => "保存")
-              ])
-          }
-        )
+        null
       ]);
   }
 });

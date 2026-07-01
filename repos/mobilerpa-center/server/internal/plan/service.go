@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -90,8 +91,8 @@ var (
 	ErrPlanTargetScriptNameRequired = errors.New("plan target script_name is required")
 	// ErrPlanTargetWorkflowDefIDRequired 表示工作流目标缺少工作流定义标识。
 	ErrPlanTargetWorkflowDefIDRequired = errors.New("plan target workflow_def_id is required")
-	// ErrPlanDeviceIDsRequired 表示缺少设备集合。
-	ErrPlanDeviceIDsRequired = errors.New("plan device_ids are required")
+	// ErrPlanRowsRequired 表示缺少分区-排绑定。
+	ErrPlanRowsRequired = errors.New("plan rows are required")
 	// ErrPlanDailyStartTimeInvalid 表示每日开始时间格式不合法。
 	ErrPlanDailyStartTimeInvalid = errors.New("plan daily_start_time is invalid")
 	// ErrPlanDailyDeadlineTimeInvalid 表示每日截止时间格式不合法。
@@ -132,9 +133,21 @@ type Definition struct {
 	DailyStartTime      string   `json:"daily_start_time"`
 	DailyDeadlineTime   string   `json:"daily_deadline_time"`
 	Status              string   `json:"status"`
-	DeviceIDs           []string `json:"device_ids"`
+	Rows                []PlanRowBinding `json:"rows"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
+}
+
+// PlanRowBinding 表示计划任务绑定的分区-排。
+type PlanRowBinding struct {
+	PlanDefinitionRowID string `json:"plan_definition_row_id"`
+	PlanDefID           string `json:"plan_def_id"`
+	ZoneID              string `json:"zone_id"`
+	RowID               string `json:"row_id"`
+	ZoneName            string `json:"zone_name"`
+	RowName             string `json:"row_name"`
+	CreatedAt           string `json:"created_at"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 // Run 表示计划任务实例。
@@ -158,11 +171,15 @@ type DeviceRun struct {
 	PlanDeviceRunID string `json:"plan_device_run_id"`
 	PlanRunID       string `json:"plan_run_id"`
 	PlanDefID       string `json:"plan_def_id"`
+	ZoneID          string `json:"zone_id"`
+	RowID           string `json:"row_id"`
+	SlotID          string `json:"slot_id"`
 	DeviceID        string `json:"device_id"`
 	TargetType      string `json:"target_type"`
 	TargetRefID     string `json:"target_ref_id"`
 	CurrentNodeID   string `json:"current_node_id"`
 	Status          string `json:"status"`
+	NextRetryAt     string `json:"next_retry_at"`
 	StartedAt       string `json:"started_at"`
 	FinishedAt      string `json:"finished_at"`
 	LastError       string `json:"last_error"`
@@ -194,22 +211,21 @@ type CreateDefinitionRequest struct {
 	DailyStartTime      string   `json:"daily_start_time"`
 	DailyDeadlineTime   string   `json:"daily_deadline_time"`
 	Status              string   `json:"status"`
-	DeviceIDs           []string `json:"device_ids"`
+	Rows                []PlanRowBinding `json:"rows"`
 }
 
-type UpdateDefinitionDevicesRequest struct {
-	DeviceIDs []string `json:"device_ids"`
+type UpdateDefinitionRowsRequest struct {
+	Rows []PlanRowBinding `json:"rows"`
 }
 
 // StartRequest 描述启动计划任务时的请求。
 type StartRequest struct {
-	DeviceIDs []string `json:"device_ids"`
-	Manual    bool     `json:"-"`
+	Manual bool `json:"-"`
 }
 
-// AddDevicesRequest 描述追加设备时的请求。
-type AddDevicesRequest struct {
-	DeviceIDs []string `json:"device_ids"`
+// AddRowsRequest 描述追加分区-排时的请求。
+type AddRowsRequest struct {
+	Rows []PlanRowBinding `json:"rows"`
 }
 
 // TaskCreator 定义计划任务调度单脚本时需要的最小任务创建能力。
@@ -261,6 +277,167 @@ func (s *Service) SetStartFanout(value int) {
 	s.startFanout = value
 }
 
+func uniquePlanRows(rows []PlanRowBinding) []PlanRowBinding {
+	result := make([]PlanRowBinding, 0, len(rows))
+	seen := make(map[string]struct{}, len(rows))
+	for _, item := range rows {
+		item.ZoneID = strings.TrimSpace(item.ZoneID)
+		item.RowID = strings.TrimSpace(item.RowID)
+		item.ZoneName = strings.TrimSpace(item.ZoneName)
+		item.RowName = strings.TrimSpace(item.RowName)
+		if item.ZoneID == "" || item.RowID == "" {
+			continue
+		}
+		key := item.ZoneID + ":" + item.RowID
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, item)
+	}
+	return result
+}
+
+func normalizePlanRows(rows []PlanRowBinding) []PlanRowBinding {
+	cleaned := make([]PlanRowBinding, 0, len(rows))
+	for _, item := range rows {
+		item.ZoneID = strings.TrimSpace(item.ZoneID)
+		item.RowID = strings.TrimSpace(item.RowID)
+		item.ZoneName = strings.TrimSpace(item.ZoneName)
+		item.RowName = strings.TrimSpace(item.RowName)
+		if item.ZoneID == "" || item.RowID == "" {
+			continue
+		}
+		cleaned = append(cleaned, item)
+	}
+	return uniquePlanRows(cleaned)
+}
+
+type locationNodeInfo struct {
+	NodeID    string
+	ParentID  string
+	NodeType  string
+	NodeName  string
+	DeviceID  string
+	SortOrder int
+}
+
+func (s *Service) listLocationNodes(ctx context.Context) ([]locationNodeInfo, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, parent_id, node_type, node_name, device_id, sort_order
+FROM location_nodes
+ORDER BY parent_id ASC, sort_order ASC, node_name ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query location nodes: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]locationNodeInfo, 0)
+	for rows.Next() {
+		var item locationNodeInfo
+		var nodeID int64
+		var parentID int64
+		var deviceID int64
+		if err := rows.Scan(&nodeID, &parentID, &item.NodeType, &item.NodeName, &deviceID, &item.SortOrder); err != nil {
+			return nil, fmt.Errorf("scan location node: %w", err)
+		}
+		item.NodeID = strconv.FormatInt(nodeID, 10)
+		item.ParentID = strconv.FormatInt(parentID, 10)
+		item.DeviceID = strconv.FormatInt(deviceID, 10)
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate location nodes: %w", err)
+	}
+	return items, nil
+}
+
+type planDeviceTarget struct {
+	ZoneID     string
+	RowID      string
+	SlotID     string
+	DeviceID   string
+	DeviceName string
+}
+
+func (s *Service) expandRowsToTargets(ctx context.Context, rows []PlanRowBinding) ([]planDeviceTarget, error) {
+	nodes, err := s.listLocationNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	children := make(map[string][]locationNodeInfo)
+	byID := make(map[string]locationNodeInfo)
+	for _, node := range nodes {
+		byID[node.NodeID] = node
+		children[node.ParentID] = append(children[node.ParentID], node)
+	}
+
+	sortedChildren := func(parentID string) []locationNodeInfo {
+		items := append([]locationNodeInfo(nil), children[parentID]...)
+		sort.Slice(items, func(i, j int) bool {
+			if items[i].SortOrder != items[j].SortOrder {
+				return items[i].SortOrder < items[j].SortOrder
+			}
+			if items[i].NodeName != items[j].NodeName {
+				return items[i].NodeName < items[j].NodeName
+			}
+			return items[i].NodeID < items[j].NodeID
+		})
+		return items
+	}
+
+	targets := make([]planDeviceTarget, 0)
+	for _, binding := range rows {
+		for _, rowNode := range sortedChildren(binding.ZoneID) {
+			if rowNode.NodeType != "row" || rowNode.NodeID != binding.RowID {
+				continue
+			}
+			for _, slotNode := range sortedChildren(rowNode.NodeID) {
+				if slotNode.NodeType != "slot" {
+					continue
+				}
+				if strings.TrimSpace(slotNode.DeviceID) == "" || slotNode.DeviceID == "0" {
+					continue
+				}
+				targets = append(targets, planDeviceTarget{
+					ZoneID:   binding.ZoneID,
+					RowID:    binding.RowID,
+					SlotID:   slotNode.NodeID,
+					DeviceID: slotNode.DeviceID,
+				})
+			}
+		}
+	}
+	return targets, nil
+}
+
+func (s *Service) listPlanRowsByPlan(ctx context.Context) (map[string][]PlanRowBinding, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id, plan_def_id, zone_id, row_id, created_at, updated_at
+FROM plan_definition_rows
+ORDER BY plan_def_id ASC, id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query plan definition rows: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string][]PlanRowBinding)
+	for rows.Next() {
+		var item PlanRowBinding
+		var planDefID string
+		if err := rows.Scan(&item.PlanDefinitionRowID, &planDefID, &item.ZoneID, &item.RowID, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan plan definition row: %w", err)
+		}
+		item.PlanDefID = planDefID
+		result[planDefID] = append(result[planDefID], item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate plan definition rows: %w", err)
+	}
+	return result, nil
+}
+
 // CreateDefinition 创建计划任务定义。
 func (s *Service) CreateDefinition(ctx context.Context, req CreateDefinitionRequest) (Definition, error) {
 	req = normalizeCreateDefinitionRequest(req)
@@ -268,9 +445,9 @@ func (s *Service) CreateDefinition(ctx context.Context, req CreateDefinitionRequ
 		return Definition{}, err
 	}
 
-	cleanDeviceIDs := uniqueDeviceIDs(req.DeviceIDs)
-	if len(cleanDeviceIDs) == 0 {
-		return Definition{}, ErrPlanDeviceIDsRequired
+	cleanRows := uniquePlanRows(req.Rows)
+	if len(cleanRows) == 0 {
+		return Definition{}, ErrPlanRowsRequired
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -312,18 +489,18 @@ INSERT INTO plan_defs (
 	}
 	planDefID := strconv.FormatInt(insertedID, 10)
 
-	for position, deviceID := range cleanDeviceIDs {
+	for _, rowBinding := range cleanRows {
 		if _, err := tx.ExecContext(ctx, `
-INSERT INTO plan_devices (
-    plan_def_id, device_id, position, created_at, updated_at
+INSERT INTO plan_definition_rows (
+    plan_def_id, zone_id, row_id, created_at, updated_at
 ) VALUES (?, ?, ?, ?, ?)`,
 			planDefID,
-			deviceID,
-			position+1,
+			rowBinding.ZoneID,
+			rowBinding.RowID,
 			now,
 			now,
 		); err != nil {
-			return Definition{}, fmt.Errorf("insert plan device %s: %w", deviceID, err)
+			return Definition{}, fmt.Errorf("insert plan row binding %s-%s: %w", rowBinding.ZoneID, rowBinding.RowID, err)
 		}
 	}
 
@@ -374,12 +551,12 @@ ORDER BY id DESC`)
 		return nil, fmt.Errorf("iterate plan definitions: %w", err)
 	}
 
-	deviceIDsByPlan, err := s.listDeviceIDsByPlan(ctx)
+	rowsByPlan, err := s.listPlanRowsByPlan(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for index := range items {
-		items[index].DeviceIDs = deviceIDsByPlan[items[index].PlanDefID]
+		items[index].Rows = rowsByPlan[items[index].PlanDefID]
 	}
 	return items, nil
 }
@@ -419,11 +596,11 @@ WHERE id = ?
 		return Definition{}, fmt.Errorf("get plan definition: %w", err)
 	}
 
-	deviceIDsByPlan, err := s.listDeviceIDsByPlan(ctx)
+	rowsByPlan, err := s.listPlanRowsByPlan(ctx)
 	if err != nil {
 		return Definition{}, err
 	}
-	item.DeviceIDs = deviceIDsByPlan[item.PlanDefID]
+	item.Rows = rowsByPlan[item.PlanDefID]
 	return item, nil
 }
 
@@ -439,26 +616,117 @@ func (s *Service) Start(ctx context.Context, planDefID string, req StartRequest)
 		return Run{}, ErrPlanTodayAlreadyStarted
 	}
 
-	deviceIDs := uniqueDeviceIDs(req.DeviceIDs)
-	if len(deviceIDs) == 0 {
-		deviceIDs = append(deviceIDs, definition.DeviceIDs...)
-	}
-	if len(deviceIDs) == 0 {
-		return Run{}, ErrPlanDeviceIDsRequired
+	rowBindings := definition.Rows
+	if len(rowBindings) == 0 {
+		return Run{}, ErrPlanRowsRequired
 	}
 
-	busyDetails, err := s.ensureDevicesAvailable(ctx, definition.TargetType, "", deviceIDs)
+	return s.startPlanRunWithRows(ctx, definition, rowBindings)
+}
+
+func (s *Service) startPlanRunWithRows(ctx context.Context, definition Definition, rowBindings []PlanRowBinding) (Run, error) {
+	targets, err := s.expandRowsToTargets(ctx, rowBindings)
 	if err != nil {
 		return Run{}, err
 	}
-	if len(busyDetails) > 0 {
-		return Run{}, &DeviceBusyError{Details: busyDetails}
+	if len(targets) == 0 {
+		return Run{}, ErrPlanRowsRequired
 	}
 
-	if definition.TargetType == TargetTypeWorkflow {
-		return s.startWorkflowPlanRun(ctx, definition, deviceIDs)
+	now := time.Now().UTC()
+	nowText := now.Format(time.RFC3339)
+	runDate := now.In(time.Local).Format("2006-01-02")
+	targetRef := ""
+	switch definition.TargetType {
+	case TargetTypeScript:
+		targetRef = scriptTargetRef(definition)
+	case TargetTypeWorkflow:
+		targetRef = definition.TargetWorkflowDefID
+	default:
+		return Run{}, ErrPlanTargetTypeUnsupported
 	}
-	return s.startScriptPlanRun(ctx, definition, deviceIDs)
+
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Run{}, fmt.Errorf("begin plan run tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	result, err := tx.ExecContext(ctx, `
+INSERT INTO plan_runs (
+    plan_def_id, target_ref_id, run_date, target_type, status, started_at, finished_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
+		definition.PlanDefID,
+		targetRef,
+		runDate,
+		definition.TargetType,
+		RunStatusRunning,
+		nowText,
+		nowText,
+		nowText,
+	)
+	if err != nil {
+		return Run{}, fmt.Errorf("insert plan run: %w", err)
+	}
+	insertedPlanRunID, err := result.LastInsertId()
+	if err != nil {
+		return Run{}, fmt.Errorf("read inserted plan run id: %w", err)
+	}
+	planRunID := strconv.FormatInt(insertedPlanRunID, 10)
+
+	for _, target := range targets {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO plan_device_runs (
+    plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id,
+    status, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', ?, ?)`,
+			planRunID,
+			definition.PlanDefID,
+			target.ZoneID,
+			target.RowID,
+			target.SlotID,
+			target.DeviceID,
+			definition.TargetType,
+			targetRef,
+			DeviceRunStatusPending,
+			nowText,
+			nowText,
+		); err != nil {
+			return Run{}, fmt.Errorf("insert plan device run: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Run{}, fmt.Errorf("commit plan run tx: %w", err)
+	}
+	tx = nil
+
+	if err := s.appendEvent(ctx, planRunID, definition.PlanDefID, "", EventTypePlanRunStarted, "计划任务实例已启动", map[string]any{
+		"source":      "center",
+		"target_type": definition.TargetType,
+		"target_ref":  targetRef,
+	}); err != nil {
+		return Run{}, err
+	}
+
+	switch definition.TargetType {
+	case TargetTypeScript:
+		if err := s.startScriptPlanTargets(ctx, definition, Run{PlanRunID: planRunID, PlanDefID: definition.PlanDefID}, targets); err != nil {
+			return Run{}, err
+		}
+	case TargetTypeWorkflow:
+		if err := s.startWorkflowPlanTargets(ctx, definition, Run{PlanRunID: planRunID, PlanDefID: definition.PlanDefID}, targets); err != nil {
+			return Run{}, err
+		}
+	default:
+		return Run{}, ErrPlanTargetTypeUnsupported
+	}
+
+	return s.GetRun(ctx, planRunID)
 }
 
 // StartDueDefinitions 按计划任务定义扫描并自动启动当日应执行但尚未启动的 daily 计划任务。
@@ -525,9 +793,6 @@ ORDER BY id ASC`,
 		run, err := s.Start(ctx, planDefID, StartRequest{})
 		s.releaseStarting(planDefID)
 		if err != nil {
-			if errors.Is(err, ErrPlanDeviceIDsRequired) {
-				continue
-			}
 			var busyErr *DeviceBusyError
 			if errors.As(err, &busyErr) {
 				continue
@@ -683,9 +948,6 @@ func (s *Service) AutoStartDefinition(ctx context.Context, planDefID string, now
 
 	run, err := s.Start(ctx, planDefID, StartRequest{})
 	if err != nil {
-		if errors.Is(err, ErrPlanDeviceIDsRequired) {
-			return "", nil
-		}
 		var busyErr *DeviceBusyError
 		if errors.As(err, &busyErr) {
 			return "", nil
@@ -742,6 +1004,164 @@ func (s *Service) AutoStopRun(ctx context.Context, planRunID string) (string, er
 		return "", fmt.Errorf("stop expired plan run %s: %w", planRunID, err)
 	}
 	return run.PlanRunID, nil
+}
+
+// RetryDueTargets 重新尝试已到重试时间的计划任务设备。
+func (s *Service) RetryDueTargets(ctx context.Context, now time.Time, retryInterval time.Duration) ([]string, error) {
+	targets, err := s.listRetryableTargets(ctx, now)
+	if err != nil {
+		return nil, err
+	}
+	if len(targets) == 0 {
+		return nil, nil
+	}
+	if retryInterval <= 0 {
+		retryInterval = 5 * time.Minute
+	}
+
+	nowText := now.UTC().Format(time.RFC3339)
+	affectedRuns := make(map[string]struct{})
+	processedRuns := make([]string, 0)
+
+	for _, target := range targets {
+		run, err := s.GetRun(ctx, target.PlanRunID)
+		if err != nil {
+			return nil, err
+		}
+		definition, err := s.GetDefinition(ctx, run.PlanDefID)
+		if err != nil {
+			return nil, err
+		}
+		if definition.Status != StatusEnabled {
+			continue
+		}
+		if definition.ScheduleType != ScheduleTypeDaily {
+			if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = '', updated_at = ? WHERE id = ?`, nowText, target.PlanDeviceRunID); err != nil {
+				return nil, fmt.Errorf("clear non-daily retry target: %w", err)
+			}
+			continue
+		}
+		if !isRetryWindowOpen(definition.DailyDeadlineTime, now) {
+			if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = '', updated_at = ? WHERE id = ?`, nowText, target.PlanDeviceRunID); err != nil {
+				return nil, fmt.Errorf("clear expired retry target: %w", err)
+			}
+			continue
+		}
+
+		deviceRun := target
+		if err := s.retryPlanDeviceTarget(ctx, definition, run, deviceRun, nowText, retryInterval); err != nil {
+			return nil, err
+		}
+		affectedRuns[run.PlanRunID] = struct{}{}
+	}
+
+	for planRunID := range affectedRuns {
+		if err := s.refreshRunStatus(ctx, planRunID); err != nil {
+			return nil, err
+		}
+		processedRuns = append(processedRuns, planRunID)
+	}
+
+	return processedRuns, nil
+}
+
+func isRetryWindowOpen(deadlineTime string, now time.Time) bool {
+	deadlineTime = strings.TrimSpace(deadlineTime)
+	if deadlineTime == "" {
+		return true
+	}
+	parsed, err := time.Parse("15:04:05", deadlineTime)
+	if err != nil {
+		return false
+	}
+	localNow := now.In(time.Local)
+	deadlineAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.Local)
+	return localNow.Before(deadlineAt.Add(-30 * time.Minute))
+}
+
+func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, retryInterval time.Duration) error {
+	if s.devices == nil {
+		return fmt.Errorf("device service is not configured")
+	}
+
+	if err := s.devices.EnsureExecutionReady(ctx, deviceRun.DeviceID); err != nil {
+		nextRetryAt := time.Time{}
+		if parsed, parseErr := time.Parse(time.RFC3339, nowText); parseErr == nil {
+			nextRetryAt = parsed.Add(retryInterval)
+		}
+		nextRetryText := ""
+		if !nextRetryAt.IsZero() {
+			nextRetryText = nextRetryAt.UTC().Format(time.RFC3339)
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, nextRetryText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+			return fmt.Errorf("update plan device next retry: %w", err)
+		}
+		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, nowText+" 设备离线未启动", map[string]any{
+			"source":             "center",
+			"plan_device_run_id": deviceRun.PlanDeviceRunID,
+			"retry_at":           nextRetryText,
+		}); err != nil {
+			return err
+		}
+		return nil
+	}
+
+	if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, next_retry_at = '', updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, nowText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+		return fmt.Errorf("update plan device run retry start: %w", err)
+	}
+
+	switch definition.TargetType {
+	case TargetTypeScript:
+		createdTask, err := s.tasks.Create(ctx, task.CreateRequest{DeviceID: deviceRun.DeviceID, ScriptName: definition.TargetScriptName, ScriptVersion: definition.TargetScriptVersion})
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET plan_run_id = ?, plan_device_run_id = ?, task_source_type = 'plan_script' WHERE id = ?`, run.PlanRunID, deviceRun.PlanDeviceRunID, createdTask.TaskID); err != nil {
+			return err
+		}
+		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
+			"source":             "center",
+			"plan_device_run_id": deviceRun.PlanDeviceRunID,
+			"task_id":            createdTask.TaskID,
+			"script_name":        definition.TargetScriptName,
+			"script_version":     definition.TargetScriptVersion,
+		}); err != nil {
+			return err
+		}
+		return s.dispatcherAssign(ctx, createdTask.TaskID)
+	case TargetTypeWorkflow:
+		workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
+		if err != nil {
+			return err
+		}
+		entryNodeID, err := findWorkflowEntryNodeID(workflowDefinition)
+		if err != nil {
+			return err
+		}
+		sessionPayload, err := buildWorkflowSessionPayloadTemplate(workflowDefinition, entryNodeID)
+		if err != nil {
+			return err
+		}
+		sessionPayload.WorkflowSessionID = deviceRun.PlanDeviceRunID
+		sessionPayload.PlanRunID = run.PlanRunID
+		sessionPayload.PlanDeviceRunID = deviceRun.PlanDeviceRunID
+		sessionPayload.DeviceID = deviceRun.DeviceID
+		sessionPayload.WorkflowDefID = definition.TargetWorkflowDefID
+		if err := s.dispatcher.StartWorkflowSession(ctx, sessionPayload); err != nil {
+			return err
+		}
+		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
+			"source":             "center",
+			"plan_device_run_id": deviceRun.PlanDeviceRunID,
+			"workflow_def_id":    definition.TargetWorkflowDefID,
+			"workflow_node_id":   entryNodeID,
+		}); err != nil {
+			return err
+		}
+		return nil
+	default:
+		return ErrPlanTargetTypeUnsupported
+	}
 }
 
 // ListRuns 返回计划任务实例列表。
@@ -816,8 +1236,8 @@ WHERE r.id = ?`, planRunID)
 	return item, nil
 }
 
-// AddDevices 为运行中的计划任务实例追加设备。
-func (s *Service) AddDevices(ctx context.Context, planRunID string, req AddDevicesRequest) (Run, error) {
+// AddRows 为运行中的计划任务实例追加分区-排。
+func (s *Service) AddRows(ctx context.Context, planRunID string, req AddRowsRequest) (Run, error) {
 	run, err := s.GetRun(ctx, planRunID)
 	if err != nil {
 		return Run{}, err
@@ -831,60 +1251,22 @@ func (s *Service) AddDevices(ctx context.Context, planRunID string, req AddDevic
 		return Run{}, err
 	}
 
-	deviceIDs := uniqueDeviceIDs(req.DeviceIDs)
-	if len(deviceIDs) == 0 {
-		return Run{}, ErrPlanDeviceIDsRequired
+	nextRows := normalizePlanRows(req.Rows)
+	if len(nextRows) == 0 {
+		return Run{}, ErrPlanRowsRequired
 	}
-
-	exists := make(map[string]struct{}, len(run.DeviceRuns))
-	for _, item := range run.DeviceRuns {
-		exists[item.DeviceID] = struct{}{}
-	}
-
-	filtered := make([]string, 0, len(deviceIDs))
-	for _, deviceID := range deviceIDs {
-		if _, ok := exists[deviceID]; ok {
-			continue
-		}
-		filtered = append(filtered, deviceID)
-	}
-	if len(filtered) == 0 {
-		return run, nil
-	}
-
-	busyDetails, err := s.ensureDevicesAvailable(ctx, definition.TargetType, planRunID, filtered)
-	if err != nil {
+	if err := s.appendRunRows(ctx, run.PlanRunID, definition, nextRows); err != nil {
 		return Run{}, err
 	}
-	if len(busyDetails) > 0 {
-		return Run{}, &DeviceBusyError{Details: busyDetails}
-	}
-
-	switch definition.TargetType {
-	case TargetTypeScript:
-		if err := s.addScriptPlanDevices(ctx, definition, run, filtered); err != nil {
-			return Run{}, err
-		}
-	case TargetTypeWorkflow:
-		if err := s.addWorkflowPlanDevices(ctx, definition, run, filtered); err != nil {
-			return Run{}, err
-		}
-	default:
-		return Run{}, ErrPlanTargetTypeUnsupported
-	}
-
-	if err := s.syncDefinitionDevices(ctx, run.PlanDefID, filtered, nil); err != nil {
-		return Run{}, err
-	}
-
 	return s.GetRun(ctx, planRunID)
 }
 
-// RemoveDevice 把某设备从运行中的计划任务实例中移除。
-func (s *Service) RemoveDevice(ctx context.Context, planRunID string, deviceID string) (Run, error) {
-	deviceID = strings.TrimSpace(deviceID)
-	if deviceID == "" {
-		return Run{}, ErrPlanDeviceRunNotFound
+// RemoveRow 把某个分区-排从运行中的计划任务实例中移除。
+func (s *Service) RemoveRow(ctx context.Context, planRunID string, zoneID string, rowID string) (Run, error) {
+	zoneID = strings.TrimSpace(zoneID)
+	rowID = strings.TrimSpace(rowID)
+	if zoneID == "" || rowID == "" {
+		return Run{}, ErrPlanRowsRequired
 	}
 
 	run, err := s.GetRun(ctx, planRunID)
@@ -895,9 +1277,14 @@ func (s *Service) RemoveDevice(ctx context.Context, planRunID string, deviceID s
 		return Run{}, ErrPlanRunNotActive
 	}
 
-	deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, planRunID, deviceID)
-	if err != nil {
-		return Run{}, err
+	targets := make([]DeviceRun, 0)
+	for _, item := range run.DeviceRuns {
+		if item.ZoneID == zoneID && item.RowID == rowID {
+			targets = append(targets, item)
+		}
+	}
+	if len(targets) == 0 {
+		return s.GetRun(ctx, planRunID)
 	}
 
 	definition, err := s.GetDefinition(ctx, run.PlanDefID)
@@ -905,60 +1292,40 @@ func (s *Service) RemoveDevice(ctx context.Context, planRunID string, deviceID s
 		return Run{}, err
 	}
 
-	if deviceRun.Status == DeviceRunStatusSuccess || deviceRun.Status == DeviceRunStatusFailed || deviceRun.Status == DeviceRunStatusStopped {
-		now := time.Now().UTC().Format(time.RFC3339)
-		if _, err := s.db.ExecContext(ctx, `
-DELETE FROM plan_device_runs
-WHERE id = ?`,
-			deviceRun.PlanDeviceRunID,
-		); err != nil {
-			return Run{}, fmt.Errorf("delete completed plan device run: %w", err)
+	for _, deviceRun := range targets {
+		switch definition.TargetType {
+		case TargetTypeScript:
+			if deviceRun.Status == DeviceRunStatusPending || deviceRun.Status == DeviceRunStatusRunning {
+				if err := s.stopScriptPlanDevice(ctx, definition, run, deviceRun, "row_remove"); err != nil {
+					return Run{}, err
+				}
+			}
+		case TargetTypeWorkflow:
+			if deviceRun.Status == DeviceRunStatusPending || deviceRun.Status == DeviceRunStatusRunning {
+				if err := s.stopWorkflowPlanDevice(ctx, definition, run, deviceRun, "row_remove"); err != nil {
+					return Run{}, err
+				}
+			}
+		default:
+			return Run{}, ErrPlanTargetTypeUnsupported
 		}
-		if err := s.appendEvent(ctx, planRunID, run.PlanDefID, deviceID, EventTypePlanDeviceRemoved, "设备已从计划任务实例中移除", map[string]any{
+		if _, err := s.db.ExecContext(ctx, `DELETE FROM plan_device_runs WHERE id = ?`, deviceRun.PlanDeviceRunID); err != nil {
+			return Run{}, fmt.Errorf("delete plan device run by row: %w", err)
+		}
+		if err := s.appendEvent(ctx, planRunID, run.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceRemoved, "整排已从计划任务实例中移除", map[string]any{
 			"source":             "center",
 			"plan_device_run_id": deviceRun.PlanDeviceRunID,
-			"reason":             "manual_remove",
-			"removed_after_done": true,
-			"removed_at":         now,
+			"reason":             "row_remove",
+			"zone_id":            zoneID,
+			"row_id":             rowID,
 		}); err != nil {
 			return Run{}, err
 		}
-		if err := s.refreshRunStatus(ctx, planRunID); err != nil {
-			return Run{}, err
-		}
-		if err := s.syncDefinitionDevices(ctx, run.PlanDefID, nil, []string{deviceID}); err != nil {
-			return Run{}, err
-		}
-		return s.GetRun(ctx, planRunID)
 	}
 
-	switch definition.TargetType {
-	case TargetTypeScript:
-		if err := s.stopScriptPlanDevice(ctx, definition, run, deviceRun, "manual_remove"); err != nil {
-			return Run{}, err
-		}
-	case TargetTypeWorkflow:
-		if err := s.stopWorkflowPlanDevice(ctx, definition, run, deviceRun, "manual_remove"); err != nil {
-			return Run{}, err
-		}
-	default:
-		return Run{}, ErrPlanTargetTypeUnsupported
-	}
-
-	if err := s.appendEvent(ctx, planRunID, run.PlanDefID, deviceID, EventTypePlanDeviceRemoved, "设备已从计划任务实例中移除", map[string]any{
-		"source":             "center",
-		"plan_device_run_id": deviceRun.PlanDeviceRunID,
-		"reason":             "manual_remove",
-	}); err != nil {
-		return Run{}, err
-	}
 	if err := s.refreshRunStatus(ctx, planRunID); err != nil {
 		return Run{}, err
 	}
-	if err := s.syncDefinitionDevices(ctx, run.PlanDefID, nil, []string{deviceID}); err != nil {
-		return Run{}, err
-	}
-
 	return s.GetRun(ctx, planRunID)
 }
 
@@ -1113,85 +1480,55 @@ WHERE id = ?`, planRunID); err != nil {
 	return nil
 }
 
-func (s *Service) UpdateDefinitionDevices(ctx context.Context, planDefID string, req UpdateDefinitionDevicesRequest) (Definition, error) {
-	definition, err := s.GetDefinition(ctx, planDefID)
+func (s *Service) UpdateDefinitionRows(ctx context.Context, planDefID string, req UpdateDefinitionRowsRequest) (Definition, error) {
+	_, err := s.GetDefinition(ctx, planDefID)
 	if err != nil {
 		return Definition{}, err
 	}
 
-	nextDeviceIDs := uniqueDeviceIDs(req.DeviceIDs)
-	if len(nextDeviceIDs) == 0 {
-		return Definition{}, ErrPlanDeviceIDsRequired
+	nextRows := normalizePlanRows(req.Rows)
+	if len(nextRows) == 0 {
+		return Definition{}, ErrPlanRowsRequired
 	}
 
-	currentSet := make(map[string]struct{}, len(definition.DeviceIDs))
-	nextSet := make(map[string]struct{}, len(nextDeviceIDs))
-	for _, deviceID := range definition.DeviceIDs {
-		currentSet[deviceID] = struct{}{}
-	}
-	for _, deviceID := range nextDeviceIDs {
-		nextSet[deviceID] = struct{}{}
-	}
-
-	additions := make([]string, 0)
-	removals := make([]string, 0)
-	for _, deviceID := range nextDeviceIDs {
-		if _, exists := currentSet[deviceID]; !exists {
-			additions = append(additions, deviceID)
-		}
-	}
-	for _, deviceID := range definition.DeviceIDs {
-		if _, exists := nextSet[deviceID]; !exists {
-			removals = append(removals, deviceID)
-		}
-	}
-
-	if err := s.syncDefinitionDevices(ctx, planDefID, additions, removals); err != nil {
+	if err := s.replaceDefinitionRows(ctx, planDefID, nextRows); err != nil {
 		return Definition{}, err
-	}
-
-	activeRuns, err := s.ListRuns(ctx, planDefID)
-	if err != nil {
-		return Definition{}, err
-	}
-	now := time.Now()
-	for _, run := range activeRuns {
-		if run.Status != RunStatusPending && run.Status != RunStatusRunning {
-			continue
-		}
-
-		runCurrent := make(map[string]struct{}, len(run.DeviceRuns))
-		for _, deviceRun := range run.DeviceRuns {
-			runCurrent[deviceRun.DeviceID] = struct{}{}
-		}
-
-		runAdditions := make([]string, 0)
-		for _, deviceID := range nextDeviceIDs {
-			if _, exists := runCurrent[deviceID]; !exists {
-				runAdditions = append(runAdditions, deviceID)
-			}
-		}
-
-		runRemovals := make([]string, 0)
-		for _, deviceRun := range run.DeviceRuns {
-			if _, exists := nextSet[deviceRun.DeviceID]; !exists {
-				runRemovals = append(runRemovals, deviceRun.DeviceID)
-			}
-		}
-
-		if len(runAdditions) > 0 && shouldApplyDailyAdditionsImmediately(definition, run, now) {
-			if _, err := s.AddDevices(ctx, run.PlanRunID, AddDevicesRequest{DeviceIDs: runAdditions}); err != nil {
-				return Definition{}, err
-			}
-		}
-		for _, deviceID := range runRemovals {
-			if _, err := s.RemoveDevice(ctx, run.PlanRunID, deviceID); err != nil {
-				return Definition{}, err
-			}
-		}
 	}
 
 	return s.GetDefinition(ctx, planDefID)
+}
+
+func (s *Service) replaceDefinitionRows(ctx context.Context, planDefID string, rows []PlanRowBinding) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin replace definition rows tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM plan_definition_rows WHERE plan_def_id = ?`, planDefID); err != nil {
+		return fmt.Errorf("clear plan definition rows: %w", err)
+	}
+	for _, row := range rows {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO plan_definition_rows (plan_def_id, zone_id, row_id, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?)`,
+			planDefID, row.ZoneID, row.RowID, now, now); err != nil {
+			return fmt.Errorf("insert plan definition row: %w", err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE plan_defs SET updated_at = ? WHERE id = ?`, now, planDefID); err != nil {
+		return fmt.Errorf("touch plan definition: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit replace definition rows tx: %w", err)
+	}
+	tx = nil
+	return nil
 }
 
 // ListEvents 返回指定计划任务实例的事件列表。
@@ -1228,236 +1565,111 @@ ORDER BY id ASC`, planRunID)
 	return items, nil
 }
 
-func (s *Service) startScriptPlanRun(ctx context.Context, definition Definition, deviceIDs []string) (Run, error) {
-	now := time.Now().UTC()
-	nowText := now.Format(time.RFC3339)
-	runDate := now.In(time.Local).Format("2006-01-02")
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Run{}, fmt.Errorf("begin plan run tx: %w", err)
+func (s *Service) appendRunRows(ctx context.Context, planRunID string, definition Definition, rows []PlanRowBinding) error {
+	rows = normalizePlanRows(rows)
+	if len(rows) == 0 {
+		return nil
 	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
+	existing, err := s.listDeviceRunsByPlanRun(ctx, planRunID)
+	if err != nil {
+		return err
+	}
+	existsBySlot := make(map[string]struct{}, len(existing))
+	existsByRow := make(map[string]struct{})
+	for _, item := range existing {
+		if strings.TrimSpace(item.SlotID) != "" {
+			existsBySlot[item.SlotID] = struct{}{}
 		}
-	}()
-
-	result, err := tx.ExecContext(ctx, `
-INSERT INTO plan_runs (
-    plan_def_id, target_ref_id, run_date, target_type, status, started_at, finished_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
-		definition.PlanDefID,
-		scriptTargetRef(definition),
-		runDate,
-		definition.TargetType,
-		RunStatusRunning,
-		nowText,
-		nowText,
-		nowText,
-	)
-	if err != nil {
-		return Run{}, fmt.Errorf("insert plan run: %w", err)
+		existsByRow[item.ZoneID+":"+item.RowID] = struct{}{}
 	}
-	insertedPlanRunID, err := result.LastInsertId()
+	targets, err := s.expandRowsToTargets(ctx, rows)
 	if err != nil {
-		return Run{}, fmt.Errorf("read inserted plan run id: %w", err)
+		return err
 	}
-	planRunID := strconv.FormatInt(insertedPlanRunID, 10)
-
-	for _, deviceID := range deviceIDs {
-		if _, err := tx.ExecContext(ctx, `
+	if len(targets) == 0 {
+		return ErrPlanRowsRequired
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, target := range targets {
+		if _, ok := existsBySlot[target.SlotID]; ok {
+			continue
+		}
+		if _, err := s.db.ExecContext(ctx, `
 INSERT INTO plan_device_runs (
-    plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, started_at, finished_at, last_error, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?)`,
+    plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id,
+    status, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', '', ?, ?)`,
 			planRunID,
 			definition.PlanDefID,
-			deviceID,
+			target.ZoneID,
+			target.RowID,
+			target.SlotID,
+			target.DeviceID,
 			definition.TargetType,
-			scriptTargetRef(definition),
-			DeviceRunStatusRunning,
-			nowText,
-			nowText,
-			nowText,
-		); err != nil {
-			return Run{}, fmt.Errorf("insert plan device run: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return Run{}, fmt.Errorf("commit plan run tx: %w", err)
-	}
-	tx = nil
-
-	if err := s.appendEvent(ctx, planRunID, definition.PlanDefID, "", EventTypePlanRunStarted, "计划任务实例已启动", map[string]any{
-		"source":      "center",
-		"target_type": definition.TargetType,
-		"target_ref":  scriptTargetRef(definition),
-	}); err != nil {
-		return Run{}, err
-	}
-
-	if err := s.addScriptPlanDevices(ctx, definition, Run{PlanRunID: planRunID, PlanDefID: definition.PlanDefID}, deviceIDs); err != nil {
-		return Run{}, err
-	}
-	return s.GetRun(ctx, planRunID)
-}
-
-func (s *Service) startWorkflowPlanRun(ctx context.Context, definition Definition, deviceIDs []string) (Run, error) {
-	if s.workflows == nil || s.dispatcher == nil {
-		return Run{}, fmt.Errorf("workflow runner or dispatcher is not configured")
-	}
-
-	workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
-	if err != nil {
-		return Run{}, fmt.Errorf("load workflow definition for plan run: %w", err)
-	}
-	entryNodeID, err := findWorkflowEntryNodeID(workflowDefinition)
-	if err != nil {
-		return Run{}, err
-	}
-
-	now := time.Now().UTC()
-	nowText := now.Format(time.RFC3339)
-	runDate := now.In(time.Local).Format("2006-01-02")
-
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Run{}, fmt.Errorf("begin workflow plan run tx: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	result, err := tx.ExecContext(ctx, `
-INSERT INTO plan_runs (
-    plan_def_id, target_ref_id, run_date, target_type, status, started_at, finished_at, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, '', ?, ?)`,
-		definition.PlanDefID,
-		definition.TargetWorkflowDefID,
-		runDate,
-		definition.TargetType,
-		RunStatusPending,
-		nowText,
-		nowText,
-		nowText,
-	)
-	if err != nil {
-		return Run{}, fmt.Errorf("insert workflow plan run: %w", err)
-	}
-	insertedPlanRunID, err := result.LastInsertId()
-	if err != nil {
-		return Run{}, fmt.Errorf("read inserted workflow plan run id: %w", err)
-	}
-	planRunID := strconv.FormatInt(insertedPlanRunID, 10)
-
-	for _, deviceID := range deviceIDs {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO plan_device_runs (
-    plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status, current_node_id, started_at, finished_at, last_error, created_at, updated_at
-) VALUES (?, ?, ?, ?, '', ?, ?, '', '', '', ?, ?)`,
-			planRunID,
-			definition.PlanDefID,
-			deviceID,
-			definition.TargetType,
+			func() string {
+				if definition.TargetType == TargetTypeScript {
+					return scriptTargetRef(definition)
+				}
+				return definition.TargetWorkflowDefID
+			}(),
 			DeviceRunStatusPending,
-			entryNodeID,
-			nowText,
-			nowText,
+			now,
+			now,
 		); err != nil {
-			return Run{}, fmt.Errorf("insert workflow plan device run: %w", err)
+			return fmt.Errorf("insert plan run target: %w", err)
 		}
 	}
-
-	if err := tx.Commit(); err != nil {
-		return Run{}, fmt.Errorf("commit workflow plan run tx: %w", err)
-	}
-	tx = nil
-
-	if err := s.appendEvent(ctx, planRunID, definition.PlanDefID, "", EventTypePlanRunStarted, "计划任务实例已启动", map[string]any{
-		"source":          "center",
-		"target_type":     definition.TargetType,
-		"workflow_def_id": definition.TargetWorkflowDefID,
-	}); err != nil {
-		return Run{}, err
-	}
-
-	if err := s.addWorkflowPlanDevices(ctx, definition, Run{PlanRunID: planRunID, PlanDefID: definition.PlanDefID}, deviceIDs); err != nil {
-		return Run{}, err
-	}
-	return s.GetRun(ctx, planRunID)
+	return nil
 }
 
-func (s *Service) addScriptPlanDevices(ctx context.Context, definition Definition, run Run, deviceIDs []string) error {
+func (s *Service) startScriptPlanTargets(ctx context.Context, definition Definition, run Run, targets []planDeviceTarget) error {
 	if s.tasks == nil || s.dispatcher == nil {
 		return fmt.Errorf("task creator or dispatcher is not configured")
 	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	dispatchItems := make([]scriptPlanDispatchItem, 0, len(deviceIDs))
-	for _, deviceID := range deviceIDs {
-		deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, run.PlanRunID, deviceID)
+	dispatchItems := make([]scriptPlanDispatchItem, 0, len(targets))
+	for _, target := range targets {
+		deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, run.PlanRunID, target.DeviceID)
 		if err != nil {
 			return err
 		}
-
-		if _, err := s.db.ExecContext(ctx, `
-UPDATE plan_device_runs
-SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ?
-WHERE id = ?`,
-			DeviceRunStatusRunning,
-			now,
-			now,
-			deviceRun.PlanDeviceRunID,
-		); err != nil {
-			return fmt.Errorf("update script plan device run started: %w", err)
-		}
-
-		createdTask, err := s.tasks.Create(ctx, task.CreateRequest{
-			DeviceID:      deviceID,
-			ScriptName:    definition.TargetScriptName,
-			ScriptVersion: definition.TargetScriptVersion,
-		})
-		if err != nil {
-			return fmt.Errorf("create plan script task: %w", err)
-		}
-
-		if _, err := s.db.ExecContext(ctx, `
-UPDATE tasks
-SET plan_run_id = ?, plan_device_run_id = ?, task_source_type = 'plan_script'
-WHERE id = ?`,
-			run.PlanRunID,
-			deviceRun.PlanDeviceRunID,
-			createdTask.TaskID,
-		); err != nil {
-			return fmt.Errorf("bind plan script task metadata: %w", err)
-		}
-
-		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
-			"source":             "center",
-			"plan_device_run_id": deviceRun.PlanDeviceRunID,
-			"task_id":            createdTask.TaskID,
-			"script_name":        definition.TargetScriptName,
-			"script_version":     definition.TargetScriptVersion,
-		}); err != nil {
+		if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
+			if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "unknown") {
+				if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, now, now, deviceRun.PlanDeviceRunID); err != nil {
+					return err
+				}
+				if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备不在线未启动", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID}); err != nil {
+					return err
+				}
+				continue
+			}
 			return err
 		}
-
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, now, now, deviceRun.PlanDeviceRunID); err != nil {
+			return err
+		}
+		createdTask, err := s.tasks.Create(ctx, task.CreateRequest{DeviceID: target.DeviceID, ScriptName: definition.TargetScriptName, ScriptVersion: definition.TargetScriptVersion})
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.ExecContext(ctx, `UPDATE tasks SET plan_run_id = ?, plan_device_run_id = ?, task_source_type = 'plan_script' WHERE id = ?`, run.PlanRunID, deviceRun.PlanDeviceRunID, createdTask.TaskID); err != nil {
+			return err
+		}
+		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID, "task_id": createdTask.TaskID, "script_name": definition.TargetScriptName, "script_version": definition.TargetScriptVersion}); err != nil {
+			return err
+		}
 		dispatchItems = append(dispatchItems, scriptPlanDispatchItem{taskID: createdTask.TaskID})
 	}
 	return s.dispatchScriptPlanTasks(ctx, dispatchItems)
 }
 
-func (s *Service) addWorkflowPlanDevices(ctx context.Context, definition Definition, run Run, deviceIDs []string) error {
+func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Definition, run Run, targets []planDeviceTarget) error {
 	if s.workflows == nil || s.dispatcher == nil {
 		return fmt.Errorf("workflow runner or dispatcher is not configured")
 	}
-
 	workflowDefinition, err := s.workflows.GetDefinition(ctx, definition.TargetWorkflowDefID)
 	if err != nil {
-		return fmt.Errorf("load workflow definition for add devices: %w", err)
+		return err
 	}
 	entryNodeID, err := findWorkflowEntryNodeID(workflowDefinition)
 	if err != nil {
@@ -1467,58 +1679,65 @@ func (s *Service) addWorkflowPlanDevices(ctx context.Context, definition Definit
 	if err != nil {
 		return err
 	}
-
 	now := time.Now().UTC().Format(time.RFC3339)
-	for _, deviceID := range deviceIDs {
-		deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, run.PlanRunID, deviceID)
+	for _, target := range targets {
+		deviceRun, err := s.getDeviceRunByPlanAndDevice(ctx, run.PlanRunID, target.DeviceID)
 		if err != nil {
 			return err
 		}
-
-		if _, err := s.db.ExecContext(ctx, `
-UPDATE plan_device_runs
-SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ?
-WHERE id = ?`,
-			DeviceRunStatusRunning,
-			entryNodeID,
-			now,
-			now,
-			deviceRun.PlanDeviceRunID,
-		); err != nil {
-			return fmt.Errorf("update workflow plan device run started: %w", err)
+		if s.devices != nil {
+			if err := s.devices.EnsureExecutionReady(ctx, target.DeviceID); err != nil {
+				if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "unknown") {
+					if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, now, now, deviceRun.PlanDeviceRunID); err != nil {
+						return err
+					}
+					if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备不在线未启动", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID}); err != nil {
+						return err
+					}
+					continue
+				}
+				return err
+			}
 		}
-
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET status = ?, current_node_id = ?, started_at = CASE WHEN started_at = '' THEN ? ELSE started_at END, updated_at = ? WHERE id = ?`, DeviceRunStatusRunning, entryNodeID, now, now, deviceRun.PlanDeviceRunID); err != nil {
+			return err
+		}
 		payload := sessionPayloadTemplate
 		payload.WorkflowSessionID = deviceRun.PlanDeviceRunID
 		payload.PlanRunID = run.PlanRunID
 		payload.PlanDeviceRunID = deviceRun.PlanDeviceRunID
-		payload.DeviceID = deviceID
+		payload.DeviceID = target.DeviceID
 		payload.WorkflowDefID = definition.TargetWorkflowDefID
-
 		if err := s.dispatcher.StartWorkflowSession(ctx, payload); err != nil {
-			return fmt.Errorf("dispatch plan workflow session: %w", err)
+			return err
 		}
-
-		if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, deviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{
-			"source":             "center",
-			"plan_device_run_id": deviceRun.PlanDeviceRunID,
-			"workflow_def_id":    definition.TargetWorkflowDefID,
-			"workflow_node_id":   entryNodeID,
-		}); err != nil {
+		if err := s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, target.DeviceID, EventTypePlanDeviceStarted, "设备已开始执行计划任务", map[string]any{"source": "center", "plan_device_run_id": deviceRun.PlanDeviceRunID, "workflow_def_id": definition.TargetWorkflowDefID, "workflow_node_id": entryNodeID}); err != nil {
 			return err
 		}
 	}
-	if _, err := s.db.ExecContext(ctx, `
-UPDATE plan_runs
-SET status = ?, updated_at = ?
-WHERE id = ?`,
-		RunStatusRunning,
-		now,
-		run.PlanRunID,
-	); err != nil {
-		return fmt.Errorf("update workflow plan run started: %w", err)
+	if _, err := s.db.ExecContext(ctx, `UPDATE plan_runs SET status = ?, updated_at = ? WHERE id = ?`, RunStatusRunning, now, run.PlanRunID); err != nil {
+		return err
 	}
 	return nil
+}
+
+func (s *Service) ensureDevicesAvailable(ctx context.Context, targetType string, currentPlanRunID string, deviceIDs []string) ([]DeviceBusyDetail, error) {
+	details := make([]DeviceBusyDetail, 0)
+	for _, deviceID := range deviceIDs {
+		if s.devices != nil {
+			if err := s.devices.EnsureExecutionReady(ctx, deviceID); err != nil {
+				return nil, err
+			}
+		}
+		detail, err := s.inspectDeviceBusy(ctx, targetType, currentPlanRunID, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		if detail != nil {
+			details = append(details, *detail)
+		}
+	}
+	return details, nil
 }
 
 func (s *Service) stopScriptPlanDevice(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, reason string) error {
@@ -1904,25 +2123,6 @@ func (s *Service) syncWorkflowPlanRun(ctx context.Context, planRunID string) err
 	return nil
 }
 
-func (s *Service) ensureDevicesAvailable(ctx context.Context, targetType string, currentPlanRunID string, deviceIDs []string) ([]DeviceBusyDetail, error) {
-	details := make([]DeviceBusyDetail, 0)
-	for _, deviceID := range deviceIDs {
-		if s.devices != nil {
-			if err := s.devices.EnsureExecutionReady(ctx, deviceID); err != nil {
-				return nil, err
-			}
-		}
-		detail, err := s.inspectDeviceBusy(ctx, targetType, currentPlanRunID, deviceID)
-		if err != nil {
-			return nil, err
-		}
-		if detail != nil {
-			details = append(details, *detail)
-		}
-	}
-	return details, nil
-}
-
 func (s *Service) inspectDeviceBusy(ctx context.Context, targetType string, currentPlanRunID string, deviceID string) (*DeviceBusyDetail, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT p.id AS plan_run_id, d.status
@@ -1966,35 +2166,10 @@ func (s *Service) GetDeviceBusyDetail(ctx context.Context, deviceID string) (*De
 	return s.inspectDeviceBusy(ctx, "", "", strings.TrimSpace(deviceID))
 }
 
-func (s *Service) listDeviceIDsByPlan(ctx context.Context) (map[string][]string, error) {
-	rows, err := s.db.QueryContext(ctx, `
-SELECT plan_def_id, device_id
-FROM plan_devices
-ORDER BY plan_def_id ASC, position ASC, device_id ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("query plan devices: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string][]string)
-	for rows.Next() {
-		var planDefID string
-		var deviceID string
-		if err := rows.Scan(&planDefID, &deviceID); err != nil {
-			return nil, fmt.Errorf("scan plan device: %w", err)
-		}
-		result[planDefID] = append(result[planDefID], deviceID)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate plan devices: %w", err)
-	}
-	return result, nil
-}
-
 func (s *Service) listDeviceRunsByPlanRun(ctx context.Context, planRunID string) ([]DeviceRun, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
-       current_node_id, started_at, finished_at, last_error, created_at, updated_at
+SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status,
+       current_node_id, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
 FROM plan_device_runs
 WHERE plan_run_id = ?
 ORDER BY id ASC`, planRunID)
@@ -2019,8 +2194,8 @@ ORDER BY id ASC`, planRunID)
 
 func (s *Service) getDeviceRunByPlanAndDevice(ctx context.Context, planRunID string, deviceID string) (DeviceRun, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
-       current_node_id, started_at, finished_at, last_error, created_at, updated_at
+SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status,
+       current_node_id, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
 FROM plan_device_runs
 WHERE plan_run_id = ?
   AND device_id = ?
@@ -2034,8 +2209,8 @@ LIMIT 1`,
 
 func (s *Service) getDeviceRunByID(ctx context.Context, planDeviceRunID string) (DeviceRun, error) {
 	row := s.db.QueryRowContext(ctx, `
-SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, device_id, target_type, target_ref_id, status,
-       current_node_id, started_at, finished_at, last_error, created_at, updated_at
+SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status,
+       current_node_id, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
 FROM plan_device_runs
 WHERE id = ?`,
 		planDeviceRunID,
@@ -2189,101 +2364,6 @@ WHERE plan_def_id = ?
 	return count > 0, nil
 }
 
-func (s *Service) syncDefinitionDevices(ctx context.Context, planDefID string, additions []string, removals []string) error {
-	planDefID = strings.TrimSpace(planDefID)
-	if planDefID == "" {
-		return nil
-	}
-
-	additions = uniqueDeviceIDs(additions)
-	removals = uniqueDeviceIDs(removals)
-	if len(additions) == 0 && len(removals) == 0 {
-		return nil
-	}
-
-	currentMap, err := s.listDeviceIDsByPlan(ctx)
-	if err != nil {
-		return err
-	}
-	current := append([]string(nil), currentMap[planDefID]...)
-
-	next := make([]string, 0, len(current)+len(additions))
-	seen := make(map[string]struct{}, len(current)+len(additions))
-	removeSet := make(map[string]struct{}, len(removals))
-	for _, deviceID := range removals {
-		removeSet[deviceID] = struct{}{}
-	}
-
-	for _, deviceID := range current {
-		if _, removed := removeSet[deviceID]; removed {
-			continue
-		}
-		if _, exists := seen[deviceID]; exists {
-			continue
-		}
-		seen[deviceID] = struct{}{}
-		next = append(next, deviceID)
-	}
-	for _, deviceID := range additions {
-		if _, removed := removeSet[deviceID]; removed {
-			continue
-		}
-		if _, exists := seen[deviceID]; exists {
-			continue
-		}
-		seen[deviceID] = struct{}{}
-		next = append(next, deviceID)
-	}
-
-	now := time.Now().UTC().Format(time.RFC3339)
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin sync plan devices tx: %w", err)
-	}
-	defer func() {
-		if tx != nil {
-			_ = tx.Rollback()
-		}
-	}()
-
-	if _, err := tx.ExecContext(ctx, `
-DELETE FROM plan_devices
-WHERE plan_def_id = ?`, planDefID); err != nil {
-		return fmt.Errorf("clear plan devices: %w", err)
-	}
-
-	for index, deviceID := range next {
-		if _, err := tx.ExecContext(ctx, `
-INSERT INTO plan_devices (
-    plan_def_id, device_id, position, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?)`,
-			planDefID,
-			deviceID,
-			index+1,
-			now,
-			now,
-		); err != nil {
-			return fmt.Errorf("reinsert plan device %s: %w", deviceID, err)
-		}
-	}
-
-	if _, err := tx.ExecContext(ctx, `
-UPDATE plan_defs
-SET updated_at = ?
-WHERE id = ?`,
-		now,
-		planDefID,
-	); err != nil {
-		return fmt.Errorf("touch plan definition updated_at: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit sync plan devices tx: %w", err)
-	}
-	tx = nil
-	return nil
-}
-
 func (s *Service) dispatcherAssign(ctx context.Context, taskID string) error {
 	if s.dispatcher == nil {
 		return fmt.Errorf("task dispatcher is not configured")
@@ -2415,9 +2495,6 @@ func validateDefinitionRequest(req CreateDefinitionRequest) error {
 	default:
 		return ErrPlanScheduleTypeUnsupported
 	}
-	if len(req.DeviceIDs) == 0 {
-		return ErrPlanDeviceIDsRequired
-	}
 	if !isDailyTimeValid(req.DailyStartTime) {
 		return ErrPlanDailyStartTimeInvalid
 	}
@@ -2425,23 +2502,6 @@ func validateDefinitionRequest(req CreateDefinitionRequest) error {
 		return ErrPlanDailyDeadlineTimeInvalid
 	}
 	return nil
-}
-
-func uniqueDeviceIDs(deviceIDs []string) []string {
-	result := make([]string, 0, len(deviceIDs))
-	seen := make(map[string]struct{}, len(deviceIDs))
-	for _, item := range deviceIDs {
-		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		if _, exists := seen[item]; exists {
-			continue
-		}
-		seen[item] = struct{}{}
-		result = append(result, item)
-	}
-	return result
 }
 
 func scriptTargetRef(definition Definition) string {
@@ -2531,16 +2591,23 @@ func scanDeviceRun(scanner deviceRunScanner) (DeviceRun, error) {
 	var planDeviceRunID int64
 	var planRunID int64
 	var planDefID int64
+	var zoneID int64
+	var rowID int64
+	var slotID int64
 	var deviceID int64
 	if err := scanner.Scan(
 		&planDeviceRunID,
 		&planRunID,
 		&planDefID,
+		&zoneID,
+		&rowID,
+		&slotID,
 		&deviceID,
 		&item.TargetType,
 		&item.TargetRefID,
 		&item.Status,
 		&item.CurrentNodeID,
+		&item.NextRetryAt,
 		&item.StartedAt,
 		&item.FinishedAt,
 		&item.LastError,
@@ -2555,6 +2622,9 @@ func scanDeviceRun(scanner deviceRunScanner) (DeviceRun, error) {
 	item.PlanDeviceRunID = strconv.FormatInt(planDeviceRunID, 10)
 	item.PlanRunID = strconv.FormatInt(planRunID, 10)
 	item.PlanDefID = strconv.FormatInt(planDefID, 10)
+	item.ZoneID = strconv.FormatInt(zoneID, 10)
+	item.RowID = strconv.FormatInt(rowID, 10)
+	item.SlotID = strconv.FormatInt(slotID, 10)
 	item.DeviceID = strconv.FormatInt(deviceID, 10)
 	return item, nil
 }
@@ -2599,6 +2669,37 @@ func scanEvent(scanner eventScanner) (Event, error) {
 	deviceID, _ := strconv.ParseInt(strings.TrimSpace(deviceIDStr), 10, 64)
 	item.DeviceID = strconv.FormatInt(deviceID, 10)
 	return item, nil
+}
+
+func (s *Service) listRetryableTargets(ctx context.Context, now time.Time) ([]DeviceRun, error) {
+	rows, err := s.db.QueryContext(ctx, `
+SELECT id AS plan_device_run_id, plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status,
+       current_node_id, next_retry_at, started_at, finished_at, last_error, created_at, updated_at
+FROM plan_device_runs
+WHERE status = ?
+  AND next_retry_at <> ''
+  AND next_retry_at <= ?
+ORDER BY id ASC`,
+		DeviceRunStatusPending,
+		now.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("query retryable plan targets: %w", err)
+	}
+	defer rows.Close()
+
+	items := make([]DeviceRun, 0)
+	for rows.Next() {
+		item, err := scanDeviceRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate retryable plan targets: %w", err)
+	}
+	return items, nil
 }
 
 func isDailyTimeValid(value string) bool {

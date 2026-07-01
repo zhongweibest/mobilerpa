@@ -1,4 +1,4 @@
-import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElMessage, ElTag } from "element-plus";
+import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElTag } from "element-plus";
 import { defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
 import { fetchDiscoverySettings, saveDiscoverySettings } from "../../api/settings";
@@ -39,10 +39,8 @@ export const SettingsPage = defineComponent({
         });
         form.center_base_url = result.center_base_url || "";
         savedMessage.value = "系统配置已保存";
-        ElMessage.success("系统配置已保存");
       } catch (error) {
         errorMessage.value = error instanceof Error ? error.message : "save_settings_failed";
-        ElMessage.error("系统配置保存失败，请稍后重试");
       } finally {
         saving.value = false;
       }
