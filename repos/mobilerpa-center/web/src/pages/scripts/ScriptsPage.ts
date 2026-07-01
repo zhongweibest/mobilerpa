@@ -1,6 +1,4 @@
-// @ts-nocheck
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElCheckbox,
@@ -13,28 +11,19 @@ import {
   ElInput,
   ElMessage,
   ElMessageBox,
-  ElPagination,
   ElScrollbar,
   ElTable,
-  ElTableColumn,
-  ElTag
+  ElTableColumn
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
-import { useDevicesStore } from "../../stores/devices";
+import { useNoticesStore } from "../../stores/notices";
 import { useScriptsStore } from "../../stores/scripts";
-import type { DeviceRecord } from "../../types/device";
-import type { ScriptRecord, ScriptVersionRecord, WorkflowReferenceRecord } from "../../types/script";
+import type { ScriptVersionRecord, WorkflowReferenceRecord } from "../../types/script";
 import { formatDateTime } from "../../utils/device";
 
-const PAGE_SIZES = [10, 20, 30, 50, 100];
-
-type DeployLogItem = {
-  device_id: string;
-  success: boolean;
-  message: string;
-};
+const SCRIPT_NAME_PATTERN = /^[A-Za-z0-9_]+$/;
 
 function formatWorkflowReferences(references: WorkflowReferenceRecord[]): string {
   if (!references || references.length === 0) {
@@ -43,64 +32,110 @@ function formatWorkflowReferences(references: WorkflowReferenceRecord[]): string
   return references.map((item) => `${item.workflow_name || item.workflow_def_id} / ${item.node_name || item.node_id}`).join("；");
 }
 
-function getDeviceLabel(device: DeviceRecord): string {
-  return `${device.device_id} / ${device.device_name || device.model || "未知设备"}`;
-}
-
 export const ScriptsPage = defineComponent({
   name: "ScriptsPage",
   setup() {
     const scriptsStore = useScriptsStore();
-    const devicesStore = useDevicesStore();
-    const { scripts, total, page, pageSize, selectedManifest, loading, uploading, deploying, errorMessage } = storeToRefs(scriptsStore);
-    const { devices } = storeToRefs(devicesStore);
+    const noticesStore = useNoticesStore();
+    const { scriptNames, selectedManifest, uploading, errorMessage } = storeToRefs(scriptsStore);
 
+    const createDialogVisible = ref(false);
     const uploadDialogVisible = ref(false);
+    const detailDialogVisible = ref(false);
+    const referencesDialogVisible = ref(false);
     const uploadFile = ref<File | null>(null);
     const uploadInputKey = ref(0);
     const uploadInputRef = ref<HTMLInputElement | null>(null);
-    const detailDialogVisible = ref(false);
-    const deployDialogVisible = ref(false);
-    const referencesDialogVisible = ref(false);
-    const selectedReferenceVersion = ref<{ scriptName: string; scriptVersion: string; references: WorkflowReferenceRecord[] } | null>(null);
+    const selectedScriptName = ref("");
+    const searchKeyword = ref("");
+    const selectedReferenceVersion = ref<{
+      scriptName: string;
+      scriptVersion: string;
+      references: WorkflowReferenceRecord[];
+    } | null>(null);
 
-    const uploadForm = reactive({
-      script_name: "shoppe_sync",
-      script_version: "v0.1.1",
-      force: false
+    const createForm = reactive({
+      script_name: ""
     });
 
-    const deployForm = reactive({
+    const uploadForm = reactive({
       script_name: "",
       script_version: "",
       force: false
     });
 
-    const deployDeviceIDs = ref<string[]>([]);
-    const deployLogs = ref<DeployLogItem[]>([]);
+    const filteredScriptNames = computed(() => {
+      const keyword = searchKeyword.value.trim().toLowerCase();
+      if (keyword === "") {
+        return scriptNames.value;
+      }
+      return scriptNames.value.filter((item) => item.script_name.toLowerCase().includes(keyword));
+    });
 
-    const onlineDevices = computed(() => devices.value.filter((item) => item.status === "online"));
-    const scriptCount = computed(() => scripts.value.length);
-    const versionCount = computed(() => scripts.value.reduce((count, item) => count + item.versions.length, 0));
+    const selectedScript = computed(
+      () => scriptNames.value.find((item) => item.script_name === selectedScriptName.value) || null
+    );
+
+    const selectedVersions = computed<ScriptVersionRecord[]>(() =>
+      scriptsStore.flattenedVersions.filter((item) => item.script_name === selectedScriptName.value)
+    );
 
     async function loadPageData() {
-      await Promise.all([scriptsStore.loadScripts(), devicesStore.loadDevices()]);
+      await Promise.all([scriptsStore.loadScriptNames(), scriptsStore.loadScripts()]);
+      if (!selectedScriptName.value && scriptNames.value.length > 0) {
+        selectedScriptName.value = scriptNames.value[0].script_name;
+      }
+      if (selectedScriptName.value && !scriptNames.value.some((item) => item.script_name === selectedScriptName.value)) {
+        selectedScriptName.value = scriptNames.value[0]?.script_name || "";
+      }
     }
 
     onMounted(() => {
       void loadPageData();
     });
 
-    function resetUploadDialog() {
-      uploadForm.script_name = "shoppe_sync";
-      uploadForm.script_version = "v0.1.1";
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(value, 5000);
+        }
+      }
+    );
+
+    async function handleCreateScriptName() {
+      const scriptName = createForm.script_name.trim();
+      if (scriptName === "") {
+        ElMessage.warning("请先填写脚本名称");
+        return;
+      }
+      if (!SCRIPT_NAME_PATTERN.test(scriptName)) {
+        ElMessage.warning("脚本名称只能包含英文、数字和下划线");
+        return;
+      }
+      if (scriptNames.value.some((item) => item.script_name === scriptName)) {
+        ElMessage.warning("脚本名称已存在");
+        return;
+      }
+
+      try {
+        await scriptsStore.submitScriptName(scriptName);
+        createDialogVisible.value = false;
+        createForm.script_name = "";
+        await loadPageData();
+        selectedScriptName.value = scriptName;
+        ElMessage.success("脚本名称创建成功");
+      } catch {
+        ElMessage.error("创建脚本名称失败");
+      }
+    }
+
+    function openUploadDialog(scriptName = selectedScriptName.value) {
+      uploadForm.script_name = scriptName;
+      uploadForm.script_version = "";
       uploadForm.force = false;
       uploadFile.value = null;
       uploadInputKey.value += 1;
-    }
-
-    function openUploadDialog() {
-      resetUploadDialog();
       uploadDialogVisible.value = true;
     }
 
@@ -109,11 +144,21 @@ export const ScriptsPage = defineComponent({
     }
 
     async function handleUploadConfirm() {
-      if (uploadForm.script_name.trim() === "" || uploadForm.script_version.trim() === "") {
-        ElMessage.warning("请先填写脚本名称和脚本版本");
+      const scriptName = uploadForm.script_name.trim();
+      const scriptVersion = uploadForm.script_version.trim();
+
+      if (scriptName === "") {
+        ElMessage.warning("请先选择脚本名称");
         return;
       }
-
+      if (!SCRIPT_NAME_PATTERN.test(scriptName)) {
+        ElMessage.warning("脚本名称只能包含英文、数字和下划线");
+        return;
+      }
+      if (scriptVersion === "") {
+        ElMessage.warning("请先填写脚本版本");
+        return;
+      }
       if (!uploadFile.value) {
         ElMessage.warning("请先选择 zip 脚本包");
         return;
@@ -121,37 +166,30 @@ export const ScriptsPage = defineComponent({
 
       try {
         await scriptsStore.submitScriptUpload({
-          script_name: uploadForm.script_name.trim(),
-          script_version: uploadForm.script_version.trim(),
+          script_name: scriptName,
+          script_version: scriptVersion,
           source_type: "zip",
           force: uploadForm.force,
           file: uploadFile.value
         });
         uploadDialogVisible.value = false;
-        resetUploadDialog();
-        ElMessage.success("脚本上传成功");
-      } catch (_error) {
+        await loadPageData();
+        selectedScriptName.value = scriptName;
+        ElMessage.success("脚本版本上传成功");
+      } catch {
         ElMessage.error("上传脚本失败，请检查 zip 解压后的根目录下是否存在 index.js");
-      }
-    }
-
-    async function handleView(scriptName: string, scriptVersion: string) {
-      try {
-        await scriptsStore.loadScriptVersion(scriptName, scriptVersion);
-        detailDialogVisible.value = true;
-      } catch (_error) {
-        ElMessage.error("加载脚本详情失败，请稍后重试");
       }
     }
 
     async function handleDeleteVersion(scriptName: string, scriptVersion: string) {
       try {
-        await ElMessageBox.confirm(`确认删除脚本版本 ${scriptName}@${scriptVersion} 吗？删除后该版本的中心库存与文件目录都会一起清理。`, "删除脚本版本", {
+        await ElMessageBox.confirm(`确认删除脚本版本 ${scriptName}@${scriptVersion} 吗？`, "删除脚本版本", {
           type: "warning",
           confirmButtonText: "确认删除",
           cancelButtonText: "取消"
         });
         await scriptsStore.removeScriptVersion(scriptName, scriptVersion);
+        await loadPageData();
         ElMessage.success(`已删除脚本版本 ${scriptName}@${scriptVersion}`);
       } catch (error) {
         if (error === "cancel" || error === "close") {
@@ -175,6 +213,8 @@ export const ScriptsPage = defineComponent({
           cancelButtonText: "取消"
         });
         await scriptsStore.removeScript(scriptName);
+        await loadPageData();
+        selectedScriptName.value = scriptNames.value[0]?.script_name || "";
         ElMessage.success(`已删除脚本 ${scriptName}`);
       } catch (error) {
         if (error === "cancel" || error === "close") {
@@ -199,357 +239,239 @@ export const ScriptsPage = defineComponent({
       referencesDialogVisible.value = true;
     }
 
-    function openDeployDialog(scriptName: string, scriptVersion: string) {
-      deployForm.script_name = scriptName;
-      deployForm.script_version = scriptVersion;
-      deployForm.force = false;
-      deployDeviceIDs.value = [];
-      deployLogs.value = [];
-      deployDialogVisible.value = true;
-    }
-
-    function toggleDeployDevice(deviceID: string) {
-      if (deployDeviceIDs.value.includes(deviceID)) {
-        deployDeviceIDs.value = deployDeviceIDs.value.filter((item) => item !== deviceID);
-        return;
-      }
-      deployDeviceIDs.value = [...deployDeviceIDs.value, deviceID];
-    }
-
-    function selectAllDeployDevices() {
-      deployDeviceIDs.value = onlineDevices.value.map((item) => item.device_id);
-    }
-
-    function clearDeployDevices() {
-      deployDeviceIDs.value = [];
-    }
-
-    async function executeDeployForDevices(deviceIDs: string[]) {
-      if (deviceIDs.length === 0) {
-        ElMessage.warning("当前没有可下发的在线设备");
-        return;
-      }
-
-      const results: DeployLogItem[] = [];
-      for (const deviceID of deviceIDs) {
-        try {
-          await scriptsStore.triggerScriptDeploy(deviceID, deployForm.script_name, deployForm.script_version, deployForm.force);
-          results.push({
-            device_id: deviceID,
-            success: true,
-            message: "已成功发送脚本同步指令"
-          });
-        } catch (error) {
-          results.push({
-            device_id: deviceID,
-            success: false,
-            message: error instanceof Error ? error.message : "deploy_script_failed"
-          });
-        }
-      }
-
-      deployLogs.value = results;
-      const successCount = results.filter((item) => item.success).length;
-      const failedCount = results.length - successCount;
-      if (failedCount === 0) {
-        ElMessage.success(`批量下发完成，共 ${successCount} 台设备已发送同步指令`);
-      } else {
-        ElMessage.warning(`批量下发已结束，成功 ${successCount} 台，失败 ${failedCount} 台`);
-      }
-    }
-
-    async function handleDeployConfirm() {
-      if (deployDeviceIDs.value.length === 0) {
-        ElMessage.warning("请至少选择一台设备");
-        return;
-      }
-      await executeDeployForDevices(deployDeviceIDs.value);
-    }
-
-    async function handleDeployToAllOnlineDevices() {
-      try {
-        await scriptsStore.triggerScriptDeployToAll(deployForm.script_name, deployForm.script_version, deployForm.force);
-        deployLogs.value = onlineDevices.value.map((item) => ({
-          device_id: item.device_id,
-          success: true,
-          message: "已通过后端批量下发接口发送同步指令"
-        }));
-        ElMessage.success(`已触发全部在线设备下发，共 ${onlineDevices.value.length} 台`);
-      } catch (_error) {
-        ElMessage.error("全部下发失败，请检查中心服务批量接口状态");
-      }
+    function openCreateDialog() {
+      createForm.script_name = "";
+      createDialogVisible.value = true;
     }
 
     return () =>
       h("section", { class: "scripts-page" }, [
-        h("div", { class: "page-toolbar" }, [
+        h("div", { class: "scripts-page__layout" }, [
           h(
-            ElButton,
+            ElCard,
+            { class: "page-card page-fill-card scripts-page__sidebar", shadow: "never" },
             {
-              type: "primary",
-              onClick: openUploadDialog
-            },
-            () => "上传脚本"
+              default: () => [
+                h("div", { class: "scripts-page__search" }, [
+                  h(
+                    ElButton,
+                    {
+                      type: "primary",
+                      onClick: openCreateDialog
+                    },
+                    () => "添加"
+                  ),
+                  h(ElInput, {
+                    modelValue: searchKeyword.value,
+                    "onUpdate:modelValue": (value: string) => {
+                      searchKeyword.value = value;
+                    },
+                    placeholder: "搜索脚本名称",
+                    clearable: true
+                  })
+                ]),
+                h(
+                  ElScrollbar,
+                  { class: "scripts-page__sidebar-list" },
+                  () =>
+                    filteredScriptNames.value.length === 0
+                      ? h(ElEmpty, { description: scriptNames.value.length === 0 ? "当前还没有脚本名称" : "没有匹配的脚本名称" })
+                      : filteredScriptNames.value.map((item) =>
+                          h(
+                            "button",
+                            {
+                              key: item.script_name,
+                              class: [
+                                "scripts-page__name-item",
+                                selectedScriptName.value === item.script_name ? "scripts-page__name-item--active" : ""
+                              ],
+                              type: "button",
+                              onClick: () => {
+                                selectedScriptName.value = item.script_name;
+                              }
+                            },
+                            [
+                              h("span", { class: "scripts-page__name-title" }, item.script_name),
+                              h(
+                                ElButton,
+                                {
+                                  link: true,
+                                  type: "danger",
+                                  onClick: (event: MouseEvent) => {
+                                    event.stopPropagation();
+                                    void handleDeleteScript(item.script_name);
+                                  }
+                                },
+                                () => "删除"
+                              )
+                            ]
+                          )
+                        )
+                )
+              ]
+            }
           ),
           h(
-            ElButton,
+            ElCard,
+            { class: "page-card page-fill-card scripts-page__content", shadow: "never" },
             {
-              onClick: () => {
-                void loadPageData();
-              },
-              loading: loading.value
-            },
-            () => "刷新"
+              default: () => [
+                h("div", { class: "scripts-page__panel-header scripts-page__panel-header--row" }, [
+                  h("div", null, [
+                    h("div", { class: "card-header__title" }, "版本管理"),
+                    h(
+                      "div",
+                      { class: "card-header__subtitle" },
+                      selectedScript.value ? `${selectedScript.value.script_name} 的全部版本` : "请选择左侧脚本名称"
+                    )
+                  ]),
+                  h(
+                    ElButton,
+                    {
+                      type: "primary",
+                      disabled: !selectedScript.value,
+                      onClick: () => openUploadDialog(selectedScript.value?.script_name || "")
+                    },
+                    () => "添加版本"
+                  )
+                ]),
+                !selectedScript.value
+                  ? h(ElEmpty, { description: "请先在左侧选择一个脚本名称" })
+                  : h("div", { class: "scripts-page__content-body" }, [
+                      h(ElDescriptions, { border: true, column: 1 }, () => [
+                        h(ElDescriptionsItem, { label: "脚本名称" }, () => selectedScript.value?.script_name || "暂无")
+                      ]),
+                      h("div", { class: "table-scroll-region" }, [
+                        h(
+                          ElTable,
+                          {
+                            data: selectedVersions.value,
+                            stripe: true,
+                            class: "tasks-table",
+                            tableLayout: "auto",
+                            height: "100%"
+                          },
+                          {
+                            default: () => [
+                              h(
+                                ElTableColumn,
+                                {
+                                  label: "版本号",
+                                  minWidth: 140
+                                },
+                                {
+                                  default: ({ row }: { row: ScriptVersionRecord }) => row.script_version || "暂无"
+                                }
+                              ),
+                              h(
+                                ElTableColumn,
+                                {
+                                  label: "创建时间",
+                                  minWidth: 180
+                                },
+                                {
+                                  default: ({ row }: { row: ScriptVersionRecord }) => formatDateTime(row.created_at)
+                                }
+                              ),
+                              h(
+                                ElTableColumn,
+                                {
+                                  label: "入口文件",
+                                  minWidth: 160
+                                },
+                                {
+                                  default: ({ row }: { row: ScriptVersionRecord }) => row.entry_file || "暂无"
+                                }
+                              ),
+                              h(
+                                ElTableColumn,
+                                {
+                                  label: "状态",
+                                  width: 100
+                                },
+                                {
+                                  default: ({ row }: { row: ScriptVersionRecord }) => row.status || "暂无"
+                                }
+                              ),
+                              h(
+                                ElTableColumn,
+                                { label: "操作", minWidth: 220, fixed: "right" },
+                                {
+                                  default: ({ row }: { row: ScriptVersionRecord }) =>
+                                    h("div", { class: "table-actions table-actions--nowrap" }, [
+                                      h(
+                                        ElButton,
+                                        {
+                                          link: true,
+                                          type: "primary",
+                                          onClick: async () => {
+                                            await scriptsStore.loadScriptVersion(row.script_name, row.script_version);
+                                            detailDialogVisible.value = true;
+                                          }
+                                        },
+                                        () => "查看"
+                                      ),
+                                      h(
+                                        ElButton,
+                                        {
+                                          link: true,
+                                          disabled: !row.workflow_references || row.workflow_references.length === 0,
+                                          onClick: () =>
+                                            openReferencesDialog(row.script_name, row.script_version, row.workflow_references || [])
+                                        },
+                                        () => "引用"
+                                      ),
+                                      h(
+                                        ElButton,
+                                        {
+                                          link: true,
+                                          type: "danger",
+                                          onClick: () => {
+                                            void handleDeleteVersion(row.script_name, row.script_version);
+                                          }
+                                        },
+                                        () => "删除"
+                                      )
+                                    ])
+                                }
+                              )
+                            ]
+                          }
+                        )
+                      ])
+                    ])
+              ]
+            }
           )
         ]),
-        errorMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "error",
-              title: `脚本操作失败：${errorMessage.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
         h(
-          ElCard,
+          ElDialog,
           {
-            class: "page-card page-fill-card",
-            shadow: "never"
+            modelValue: createDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => {
+              createDialogVisible.value = value;
+            },
+            title: "添加脚本名称",
+            width: "520px"
           },
           {
             default: () =>
-              scripts.value.length === 0
-                ? h(ElEmpty, {
-                    description: "当前还没有已上传的脚本版本，请先上传 zip 脚本包。"
+              h(ElForm, { labelPosition: "top", class: "dialog-form" }, () => [
+                h(ElFormItem, { label: "脚本名称" }, () =>
+                  h(ElInput, {
+                    modelValue: createForm.script_name,
+                    "onUpdate:modelValue": (value: string) => {
+                      createForm.script_name = value;
+                    },
+                    placeholder: "只能包含英文、数字和下划线"
                   })
-                : h("div", { class: "page-scroll-body" }, [
-                    h("div", { class: "table-scroll-region table-scroll-region--soft" }, [
-                      h(
-                        ElTable,
-                        {
-                          data: scripts.value,
-                          stripe: true,
-                          class: "tasks-table",
-                          tableLayout: "auto",
-                          height: "100%",
-                          rowKey: "script_name"
-                        },
-                        {
-                          default: () => [
-                            h(ElTableColumn, { type: "expand", width: 56 }, {
-                              default: ({ row }: { row: ScriptRecord }) =>
-                                h("div", { class: "script-versions-panel" }, [
-                                  h(
-                                    ElTable,
-                                    {
-                                      data: row.versions,
-                                      class: "script-version-subtable",
-                                      stripe: true,
-                                      tableLayout: "auto"
-                                    },
-                                    {
-                                      default: () => [
-                                        h(ElTableColumn, {
-                                          label: "版本号",
-                                          minWidth: 120,
-                                          formatter: (version: ScriptVersionRecord) => version.script_version || "暂无"
-                                        }),
-                                        h(ElTableColumn, {
-                                          label: "创建时间",
-                                          minWidth: 180,
-                                          formatter: (version: ScriptVersionRecord) => formatDateTime(version.created_at)
-                                        }),
-                                        h(
-                                          ElTableColumn,
-                                          {
-                                            label: "操作",
-                                            minWidth: 320
-                                          },
-                                          {
-                                            default: ({ row: version }: { row: ScriptVersionRecord }) =>
-                                              h("div", { class: "table-actions" }, [
-                                                h(
-                                                  ElButton,
-                                                  {
-                                                    link: true,
-                                                    type: "primary",
-                                                    onClick: () => {
-                                                      void handleView(version.script_name, version.script_version);
-                                                    }
-                                                  },
-                                                  () => "查看详情"
-                                                ),
-                                                h(
-                                                  ElButton,
-                                                  {
-                                                    link: true,
-                                                    type: "warning",
-                                                    disabled: !version.workflow_references || version.workflow_references.length === 0,
-                                                    onClick: () => {
-                                                      openReferencesDialog(version.script_name, version.script_version, version.workflow_references || []);
-                                                    }
-                                                  },
-                                                  () => "查看引用"
-                                                ),
-                                                h(
-                                                  ElButton,
-                                                  {
-                                                    link: true,
-                                                    type: "success",
-                                                    onClick: () => {
-                                                      openDeployDialog(version.script_name, version.script_version);
-                                                    }
-                                                  },
-                                                  () => "下发设备"
-                                                ),
-                                                h(
-                                                  ElButton,
-                                                  {
-                                                    link: true,
-                                                    type: "danger",
-                                                    onClick: () => {
-                                                      void handleDeleteVersion(version.script_name, version.script_version);
-                                                    }
-                                                  },
-                                                  () => "删除"
-                                                )
-                                              ])
-                                          }
-                                        )
-                                      ]
-                                    }
-                                  )
-                                ])
-                            }),
-                            h(
-                              ElTableColumn,
-                              {
-                                label: "脚本名称",
-                                minWidth: 180
-                              },
-                              {
-                                default: ({ row }: { row: ScriptRecord }) => h("div", { class: "devices-table__name" }, row.script_name)
-                              }
-                            ),
-                            h(ElTableColumn, {
-                              label: "版本数量",
-                              width: 110,
-                              formatter: (row: ScriptRecord) => String(row.versions.length)
-                            }),
-                            h(ElTableColumn, {
-                              label: "最新版本",
-                              minWidth: 120,
-                              formatter: (row: ScriptRecord) => row.versions[0]?.script_version || "暂无"
-                            }),
-                            h(ElTableColumn, {
-                              label: "入口文件",
-                              minWidth: 140,
-                              formatter: (row: ScriptRecord) => row.versions[0]?.entry_file || "暂无"
-                            }),
-                            h(
-                              ElTableColumn,
-                              {
-                                label: "来源 / 存储",
-                                minWidth: 180
-                              },
-                              {
-                                default: ({ row }: { row: ScriptRecord }) =>
-                                  row.versions[0]
-                                    ? h("div", { class: "stack-tags" }, [
-                                        h(
-                                          ElTag,
-                                          {
-                                            type: "warning",
-                                            effect: "plain"
-                                          },
-                                          () => row.versions[0].source_type || "未知来源"
-                                        ),
-                                        h(
-                                          ElTag,
-                                          {
-                                            type: "info",
-                                            effect: "plain"
-                                          },
-                                          () => row.versions[0].storage_type
-                                        )
-                                      ])
-                                    : "暂无"
-                              }
-                            ),
-                            h(
-                              ElTableColumn,
-                              {
-                                label: "状态",
-                                width: 100
-                              },
-                              {
-                                default: ({ row }: { row: ScriptRecord }) =>
-                                  row.versions[0]
-                                    ? h(
-                                        ElTag,
-                                        {
-                                          type: row.versions[0].status === "ready" ? "success" : "info",
-                                          effect: "light"
-                                        },
-                                        () => row.versions[0].status || "未知"
-                                      )
-                                    : "暂无"
-                              }
-                            ),
-                            h(ElTableColumn, {
-                              label: "创建时间",
-                              minWidth: 160,
-                              formatter: (row: ScriptRecord) => (row.versions[0] ? formatDateTime(row.versions[0].created_at) : "暂无")
-                            }),
-                            h(
-                              ElTableColumn,
-                              {
-                                label: "操作",
-                                width: 100,
-                                fixed: "right"
-                              },
-                              {
-                                default: ({ row }: { row: ScriptRecord }) =>
-                                  h("div", { class: "table-actions" }, [
-                                    h(
-                                      ElButton,
-                                      {
-                                        size: "small",
-                                        type: "danger",
-                                        plain: true,
-                                        onClick: () => {
-                                          void handleDeleteScript(row.script_name);
-                                        }
-                                      },
-                                      () => "删除"
-                                    )
-                                  ])
-                              }
-                            )
-                          ]
-                        }
-                      )
-                    ]),
-                    h(
-                      "div",
-                      { class: "page-pagination" },
-                      h(ElPagination, {
-                        background: true,
-                        currentPage: page.value,
-                        pageSize: pageSize.value,
-                        pageSizes: PAGE_SIZES,
-                        total: total.value,
-                        layout: "total, sizes, prev, pager, next, jumper",
-                        "onUpdate:currentPage": (value: number) => {
-                          void scriptsStore.changePage(value);
-                        },
-                        "onUpdate:pageSize": (value: number) => {
-                          void scriptsStore.changePageSize(value);
-                        }
-                      })
-                    )
-                  ])
+                )
+              ]),
+            footer: () =>
+              h("div", { class: "dialog-footer" }, [
+                h(ElButton, { onClick: () => (createDialogVisible.value = false) }, () => "取消"),
+                h(ElButton, { type: "primary", onClick: () => void handleCreateScriptName() }, () => "确认")
+              ])
           }
         ),
         h(
@@ -559,92 +481,65 @@ export const ScriptsPage = defineComponent({
             "onUpdate:modelValue": (value: boolean) => {
               uploadDialogVisible.value = value;
             },
-            title: "上传脚本版本",
+            title: "添加脚本版本",
             width: "560px",
             closeOnClickModal: false
           },
           {
             default: () =>
-              h(
-                ElForm,
-                {
-                  labelPosition: "top",
-                  class: "dialog-form"
-                },
-                () => [
-                  h(ElFormItem, { label: "脚本名称" }, () =>
-                    h(ElInput, {
-                      modelValue: uploadForm.script_name,
-                      "onUpdate:modelValue": (value: string) => {
-                        uploadForm.script_name = value;
-                      },
-                      placeholder: "例如 shoppe_sync"
-                    })
-                  ),
-                  h(ElFormItem, { label: "脚本版本" }, () =>
-                    h(ElInput, {
-                      modelValue: uploadForm.script_version,
-                      "onUpdate:modelValue": (value: string) => {
-                        uploadForm.script_version = value;
-                      },
-                      placeholder: "例如 v0.1.1"
-                    })
-                  ),
-                  h(ElFormItem, { label: "zip 文件" }, () =>
-                    h("div", { class: "upload-field" }, [
-                      h("input", {
-                        key: `upload-${uploadInputKey.value}`,
-                        ref: uploadInputRef,
-                        class: "upload-field__input",
-                        type: "file",
-                        accept: ".zip",
-                        onChange: (event: Event) => {
-                          const target = event.target as HTMLInputElement;
-                          uploadFile.value = target.files?.[0] || null;
+              h(ElForm, { labelPosition: "top", class: "dialog-form" }, () => [
+                h(ElFormItem, { label: "脚本名称" }, () =>
+                  h(ElInput, {
+                    modelValue: uploadForm.script_name,
+                    readonly: true
+                  })
+                ),
+                h(ElFormItem, { label: "脚本版本" }, () =>
+                  h(ElInput, {
+                    modelValue: uploadForm.script_version,
+                    "onUpdate:modelValue": (value: string) => {
+                      uploadForm.script_version = value;
+                    },
+                    placeholder: "例如 v0.1.1"
+                  })
+                ),
+                h(ElFormItem, { label: "zip 文件" }, () =>
+                  h("div", { class: "upload-field" }, [
+                    h("input", {
+                      key: `upload-${uploadInputKey.value}`,
+                      ref: uploadInputRef,
+                      class: "upload-field__input",
+                      type: "file",
+                      accept: ".zip",
+                      onChange: (event: Event) => {
+                        const target = event.target as HTMLInputElement;
+                        uploadFile.value = target.files?.[0] || null;
+                      }
+                    }),
+                    h(ElButton, { onClick: openUploadFilePicker }, () => "选择 zip 文件"),
+                    h("div", { class: "upload-field__filename" }, uploadFile.value ? uploadFile.value.name : "尚未选择文件"),
+                    h(
+                      ElCheckbox,
+                      {
+                        modelValue: uploadForm.force,
+                        "onUpdate:modelValue": (value: string | number | boolean) => {
+                          uploadForm.force = Boolean(value);
                         }
-                      }),
-                      h(
-                        ElButton,
-                        {
-                          onClick: openUploadFilePicker
-                        },
-                        () => "选择 zip 文件"
-                      ),
-                      h("div", { class: "upload-field__filename" }, uploadFile.value ? uploadFile.value.name : "尚未选择文件"),
-                      h(
-                        ElCheckbox,
-                        {
-                          modelValue: uploadForm.force,
-                          "onUpdate:modelValue": (value: boolean) => {
-                            uploadForm.force = value;
-                          }
-                        },
-                        () => "强制覆盖同名同版本脚本"
-                      ),
-                      h("div", { class: "upload-field__tip" }, "约束：zip 解压后的脚本版本根目录必须存在 index.js，否则上传失败。")
-                    ])
-                  )
-                ]
-              ),
+                      },
+                      () => "强制覆盖同名同版本脚本"
+                    )
+                  ])
+                )
+              ]),
             footer: () =>
               h("div", { class: "dialog-footer" }, [
-                h(
-                  ElButton,
-                  {
-                    onClick: () => {
-                      uploadDialogVisible.value = false;
-                    }
-                  },
-                  () => "取消"
-                ),
+                h(ElButton, { onClick: () => (uploadDialogVisible.value = false) }, () => "取消"),
                 h(
                   ElButton,
                   {
                     type: "primary",
                     loading: uploading.value,
-                    onClick: () => {
-                      void handleUploadConfirm();
-                    }
+                    onClick: () => void handleUploadConfirm()
                   },
                   () => "确认上传"
                 )
@@ -659,73 +554,19 @@ export const ScriptsPage = defineComponent({
               detailDialogVisible.value = value;
             },
             title: selectedManifest.value ? `脚本详情：${selectedManifest.value.script_name}@${selectedManifest.value.script_version}` : "脚本详情",
-            width: "820px",
-            closeOnClickModal: true
+            width: "820px"
           },
           {
             default: () =>
               selectedManifest.value
-                ? [
-                    h(
-                      ElDescriptions,
-                      {
-                        class: "script-descriptions",
-                        border: true,
-                        column: 2
-                      },
-                      () => [
-                        h(ElDescriptionsItem, { label: "脚本名称" }, () => selectedManifest.value?.script_name || "暂无"),
-                        h(ElDescriptionsItem, { label: "脚本版本" }, () => selectedManifest.value?.script_version || "暂无"),
-                        h(ElDescriptionsItem, { label: "入口文件" }, () => selectedManifest.value?.entry_file || "暂无"),
-                        h(ElDescriptionsItem, { label: "下载地址" }, () => selectedManifest.value?.download_url || "暂无"),
-                        h(ElDescriptionsItem, { label: "来源类型" }, () => selectedManifest.value?.source_type || "未知"),
-                        h(ElDescriptionsItem, { label: "存储类型" }, () => selectedManifest.value?.storage_type || "未知"),
-                        h(ElDescriptionsItem, { label: "校验值", span: 2 }, () => selectedManifest.value?.checksum_sha256 || "暂无")
-                      ]
-                    ),
-                    h(ElAlert, {
-                      class: "detail-card__notice",
-                      type: "info",
-                      title: "真机直接调试建议使用 index_debug.js；任务下发时 Agent 会按 manifest 和 download 接口自行拉取脚本。",
-                      showIcon: true,
-                      closable: false
-                    }),
-                    h("div", { class: "file-list" }, [
-                      h("div", { class: "file-list__title" }, "文件清单"),
-                      h(
-                        ElScrollbar,
-                        {
-                          maxHeight: 320
-                        },
-                        () =>
-                          h(
-                            "div",
-                            { class: "file-list__items" },
-                            (selectedManifest.value?.files || []).map((item) =>
-                              h("div", { key: item.relative_path, class: "file-list__item" }, [
-                                h("div", { class: "file-list__path" }, item.relative_path),
-                                h("div", { class: "file-list__hash" }, item.checksum_sha256)
-                              ])
-                            )
-                          )
-                      )
-                    ])
-                  ]
-                : h(ElEmpty, {
-                    description: "暂无可展示的脚本详情"
-                  }),
-            footer: () =>
-              h("div", { class: "dialog-footer" }, [
-                h(
-                  ElButton,
-                  {
-                    onClick: () => {
-                      detailDialogVisible.value = false;
-                    }
-                  },
-                  () => "关闭"
-                )
-              ])
+                ? h(ElDescriptions, { border: true, column: 2 }, () => [
+                    h(ElDescriptionsItem, { label: "脚本名称" }, () => selectedManifest.value?.script_name || "暂无"),
+                    h(ElDescriptionsItem, { label: "脚本版本" }, () => selectedManifest.value?.script_version || "暂无"),
+                    h(ElDescriptionsItem, { label: "入口文件" }, () => selectedManifest.value?.entry_file || "暂无"),
+                    h(ElDescriptionsItem, { label: "下载地址" }, () => selectedManifest.value?.download_url || "暂无")
+                  ])
+                : h(ElEmpty, { description: "暂无可展示的脚本详情" }),
+            footer: () => h("div", { class: "dialog-footer" }, [h(ElButton, { onClick: () => (detailDialogVisible.value = false) }, () => "关闭")])
           }
         ),
         h(
@@ -738,208 +579,23 @@ export const ScriptsPage = defineComponent({
             title: selectedReferenceVersion.value
               ? `工作流引用：${selectedReferenceVersion.value.scriptName}@${selectedReferenceVersion.value.scriptVersion}`
               : "工作流引用",
-            width: "760px",
-            closeOnClickModal: true
+            width: "760px"
           },
           {
             default: () =>
               selectedReferenceVersion.value && selectedReferenceVersion.value.references.length > 0
                 ? h(
-                    ElScrollbar,
-                    {
-                      maxHeight: 420
-                    },
-                    () =>
-                      h(
-                        "div",
-                        { class: "script-references-dialog" },
-                        selectedReferenceVersion.value.references.map((item) =>
-                          h("div", { key: `${item.workflow_def_id}-${item.node_id}`, class: "script-references-dialog__item" }, [
-                            h("div", { class: "script-references-dialog__title" }, item.workflow_name || item.workflow_def_id),
-                            h("div", { class: "script-references-dialog__meta" }, `工作流ID：${item.workflow_def_id}`),
-                            h("div", { class: "script-references-dialog__meta" }, `节点：${item.node_name || item.node_id}`),
-                            h("div", { class: "script-references-dialog__meta" }, `节点ID：${item.node_id}`)
-                          ])
-                        )
-                      )
-                  )
-                : h(ElEmpty, {
-                    description: "当前没有工作流引用该脚本版本"
-                  }),
-            footer: () =>
-              h("div", { class: "dialog-footer" }, [
-                h(
-                  ElButton,
-                  {
-                    onClick: () => {
-                      referencesDialogVisible.value = false;
-                    }
-                  },
-                  () => "关闭"
-                )
-              ])
-          }
-        ),
-        h(
-          ElDialog,
-          {
-            modelValue: deployDialogVisible.value,
-            "onUpdate:modelValue": (value: boolean) => {
-              deployDialogVisible.value = value;
-            },
-            title: `批量下发脚本：${deployForm.script_name}@${deployForm.script_version}`,
-            width: "760px",
-            closeOnClickModal: false
-          },
-          {
-            default: () => [
-              h(ElAlert, {
-                class: "dialog-alert",
-                type: "info",
-                title: "脚本下发会向所选在线设备逐台发送 sync_script 指令，Agent 再通过中心服务的 HTTP 接口拉取脚本文件。",
-                showIcon: true,
-                closable: false
-              }),
-              h(
-                ElForm,
-                {
-                  labelPosition: "top",
-                  class: "dialog-form"
-                },
-                () => [
-                  h(ElFormItem, { label: "下发选项" }, () =>
-                    h(
-                      ElCheckbox,
-                      {
-                        modelValue: deployForm.force,
-                        "onUpdate:modelValue": (value: boolean) => {
-                          deployForm.force = value;
-                        }
-                      },
-                      () => "强制同步已存在版本"
+                    "div",
+                    { class: "script-references-dialog" },
+                    selectedReferenceVersion.value.references.map((item) =>
+                      h("div", { key: `${item.workflow_def_id}-${item.node_id}`, class: "script-references-dialog__item" }, [
+                        h("div", { class: "script-references-dialog__title" }, item.workflow_name || item.workflow_def_id),
+                        h("div", { class: "script-references-dialog__meta" }, `节点：${item.node_name || item.node_id}`)
+                      ])
                     )
-                  ),
-                  h(ElFormItem, { label: `选择设备（当前在线 ${onlineDevices.value.length} 台）` }, () =>
-                    onlineDevices.value.length === 0
-                      ? h(ElEmpty, {
-                          description: "当前没有在线设备，暂时无法批量下发脚本。"
-                        })
-                      : h("div", { class: "device-selector" }, [
-                          h("div", { class: "device-selector__actions" }, [
-                            h(
-                              ElButton,
-                              {
-                                size: "small",
-                                type: "primary",
-                                plain: true,
-                                onClick: selectAllDeployDevices
-                              },
-                              () => "全部选择"
-                            ),
-                            h(
-                              ElButton,
-                              {
-                                size: "small",
-                                onClick: clearDeployDevices
-                              },
-                              () => "清空选择"
-                            )
-                          ]),
-                          h(
-                            "div",
-                            { class: "device-checkbox-group" },
-                            onlineDevices.value.map((item) => {
-                              const checked = deployDeviceIDs.value.includes(item.device_id);
-                              return h(
-                                "button",
-                                {
-                                  key: item.device_id,
-                                  type: "button",
-                                  class: ["device-checkbox-card", checked ? "device-checkbox-card--checked" : ""],
-                                  onClick: () => {
-                                    toggleDeployDevice(item.device_id);
-                                  }
-                                },
-                                [
-                                  h("div", { class: "device-checkbox-card__indicator" }, [
-                                    checked
-                                      ? h(
-                                          ElTag,
-                                          {
-                                            size: "small",
-                                            type: "success",
-                                            effect: "dark",
-                                            round: true
-                                          },
-                                          () => "已选"
-                                        )
-                                      : h("span", { class: "device-checkbox-card__dot" })
-                                  ]),
-                                  h("div", { class: "device-checkbox-card__content" }, [
-                                    h("div", { class: "device-checkbox-card__title" }, getDeviceLabel(item)),
-                                    h("div", { class: "device-checkbox-card__meta" }, `${item.brand || "未知品牌"} / ${item.model || "未知型号"} / ${item.agent_uuid || "无 agent_uuid"}`)
-                                  ])
-                                ]
-                              );
-                            })
-                          )
-                        ])
                   )
-                ]
-              ),
-              deployLogs.value.length > 0
-                ? h("div", { class: "deploy-results" }, [
-                    h("div", { class: "deploy-results__title" }, "下发结果"),
-                    ...deployLogs.value.map((item) =>
-                      h(ElAlert, {
-                        key: `${item.device_id}-${item.message}`,
-                        class: "deploy-results__item",
-                        type: item.success ? "success" : "error",
-                        title: `${item.device_id}：${item.message}`,
-                        showIcon: true,
-                        closable: false
-                      })
-                    )
-                  ])
-                : null
-            ],
-            footer: () =>
-              h("div", { class: "dialog-footer" }, [
-                h(
-                  ElButton,
-                  {
-                    type: "success",
-                    plain: true,
-                    disabled: onlineDevices.value.length === 0,
-                    loading: deploying.value,
-                    onClick: () => {
-                      void handleDeployToAllOnlineDevices();
-                    }
-                  },
-                  () => "全部下发"
-                ),
-                h(
-                  ElButton,
-                  {
-                    onClick: () => {
-                      deployDialogVisible.value = false;
-                    }
-                  },
-                  () => "取消"
-                ),
-                h(
-                  ElButton,
-                  {
-                    type: "primary",
-                    loading: deploying.value,
-                    disabled: onlineDevices.value.length === 0,
-                    onClick: () => {
-                      void handleDeployConfirm();
-                    }
-                  },
-                  () => "开始下发"
-                )
-              ])
+                : h(ElEmpty, { description: "当前没有工作流引用该脚本版本" }),
+            footer: () => h("div", { class: "dialog-footer" }, [h(ElButton, { onClick: () => (referencesDialogVisible.value = false) }, () => "关闭")])
           }
         )
       ]);

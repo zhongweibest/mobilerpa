@@ -89,6 +89,13 @@ CREATE TABLE IF NOT EXISTS script_versions (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS script_names (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    script_name TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS uploaded_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     device_id INTEGER NOT NULL,
@@ -281,6 +288,13 @@ func initSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func ensureSchemaMigrations(ctx context.Context, db *sql.DB) error {
+    if _, err := db.ExecContext(ctx, `
+INSERT OR IGNORE INTO script_names (script_name, created_at, updated_at)
+SELECT script_name, MIN(created_at), MAX(created_at)
+FROM script_versions
+GROUP BY script_name`); err != nil {
+        return fmt.Errorf("backfill script names: %w", err)
+    }
 	if err := ensureColumn(ctx, db, "plan_device_runs", "current_node_id", "ALTER TABLE plan_device_runs ADD COLUMN current_node_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}

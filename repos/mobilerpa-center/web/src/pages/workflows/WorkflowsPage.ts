@@ -1,6 +1,5 @@
 // @ts-nocheck
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElDialog,
@@ -22,8 +21,9 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
+import { useNoticesStore } from "../../stores/notices";
 import { useScriptsStore } from "../../stores/scripts";
 import { useWorkflowsStore } from "../../stores/workflows";
 import type { WorkflowDefinitionRecord, WorkflowEdgeRecord, WorkflowNodeRecord } from "../../types/workflow";
@@ -261,6 +261,7 @@ export const WorkflowsPage = defineComponent({
   setup() {
     const workflowsStore = useWorkflowsStore();
     const scriptsStore = useScriptsStore();
+    const noticesStore = useNoticesStore();
 
     const { workflows, total, page, pageSize, loading, creating, deletingWorkflowID, errorMessage } = storeToRefs(workflowsStore);
     const { scripts } = storeToRefs(scriptsStore);
@@ -310,6 +311,15 @@ export const WorkflowsPage = defineComponent({
     onMounted(() => {
       void loadPageData();
     });
+
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`工作流定义加载失败：${value}`, 5000);
+        }
+      }
+    );
 
     function openCreateDialog() {
       dialogMode.value = "create";
@@ -832,9 +842,6 @@ export const WorkflowsPage = defineComponent({
             () => "刷新"
           )
         ]),
-        errorMessage.value
-          ? h(ElAlert, { class: "page-alert", type: "error", title: `工作流定义加载失败：${errorMessage.value}`, showIcon: true, closable: false })
-          : null,
         h(
           ElCard,
           { class: "page-card page-fill-card", shadow: "never" },

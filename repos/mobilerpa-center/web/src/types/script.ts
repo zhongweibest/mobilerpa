@@ -30,6 +30,12 @@ export interface ScriptRecord {
   versions: ScriptVersionRecord[];
 }
 
+export interface ScriptNameRecord {
+  script_name: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface WorkflowReferenceRecord {
   workflow_def_id: string;
   workflow_name: string;
@@ -56,4 +62,8 @@ export interface UploadScriptRequest {
   source_type: "zip";
   force: boolean;
   file: File;
+}
+
+export interface CreateScriptNameRequest {
+  script_name: string;
 }

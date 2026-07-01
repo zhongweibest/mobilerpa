@@ -1,6 +1,5 @@
 // @ts-nocheck
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElDescriptions,
@@ -19,10 +18,11 @@ import {
   ElMessageBox
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
 import { bindLocationNode, fetchDeviceOccupancy, fetchLocationNodes } from "../../api/devices";
 import { useDevicesStore } from "../../stores/devices";
+import { useNoticesStore } from "../../stores/notices";
 import type { DeviceOccupancyDetail, DeviceRecord, LocationNodeRecord } from "../../types/device";
 import { formatDateTime, getDeviceDisplayName, normalizeBindStatus, normalizeDeviceStatus } from "../../utils/device";
 
@@ -71,6 +71,7 @@ export const DevicesPage = defineComponent({
   name: "DevicesPage",
   setup() {
     const devicesStore = useDevicesStore();
+    const noticesStore = useNoticesStore();
     const { devices, total, page, pageSize, loading, deletingDeviceID, errorMessage } = storeToRefs(devicesStore);
     const occupancyDialogVisible = ref(false);
     const loadingOccupancy = ref(false);
@@ -99,6 +100,15 @@ export const DevicesPage = defineComponent({
     onMounted(() => {
       void devicesStore.loadDevices();
     });
+
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`设备列表加载失败：${value}`, 5000);
+        }
+      }
+    );
 
     async function handleDelete(deviceID: string) {
       try {
@@ -192,15 +202,6 @@ export const DevicesPage = defineComponent({
             () => "刷新"
           )
         ]),
-        errorMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "error",
-              title: `设备列表加载失败：${errorMessage.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
         h(
           ElCard,
           { class: "page-card page-fill-card", shadow: "never" },

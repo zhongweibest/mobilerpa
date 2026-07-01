@@ -1,5 +1,5 @@
 import { requestJSON } from "./http";
-import type { DeployAllScriptsRequest, DeployScriptRequest, ScriptManifestRecord, ScriptRecord, UploadScriptRequest } from "../types/script";
+import type { CreateScriptNameRequest, DeployAllScriptsRequest, DeployScriptRequest, ScriptManifestRecord, ScriptNameRecord, ScriptRecord, UploadScriptRequest } from "../types/script";
 import type { PaginatedResult, PaginationQuery } from "../types/pagination";
 
 export async function fetchScripts(query: PaginationQuery): Promise<PaginatedResult<ScriptRecord>> {
@@ -8,6 +8,23 @@ export async function fetchScripts(query: PaginationQuery): Promise<PaginatedRes
     page_size: String(query.page_size)
   });
   return requestJSON<PaginatedResult<ScriptRecord>>(`/api/v1/scripts?${searchParams.toString()}`);
+}
+
+export async function fetchScriptNames(): Promise<ScriptNameRecord[]> {
+  try {
+    return await requestJSON<ScriptNameRecord[]>("/api/v1/script-names");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    if (!message.includes("request_failed:404")) {
+      throw error;
+    }
+    const fallback = await fetchScripts({ page: 1, page_size: 100 });
+    return fallback.items.map((item) => ({
+      script_name: item.script_name,
+      created_at: "",
+      updated_at: ""
+    }));
+  }
 }
 
 export async function fetchScriptVersion(scriptName: string, scriptVersion: string): Promise<ScriptManifestRecord> {
@@ -25,6 +42,16 @@ export async function uploadScript(payload: UploadScriptRequest): Promise<void> 
   await requestJSON("/api/v1/scripts/upload", {
     method: "POST",
     body: formData
+  });
+}
+
+export async function createScriptName(payload: CreateScriptNameRequest): Promise<ScriptNameRecord> {
+  return requestJSON<ScriptNameRecord>("/api/v1/script-names", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
   });
 }
 

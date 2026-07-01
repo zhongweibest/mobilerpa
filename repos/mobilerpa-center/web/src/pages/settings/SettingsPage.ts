@@ -1,11 +1,13 @@
-import { ElAlert, ElButton, ElCard, ElForm, ElFormItem, ElInput, ElMessage, ElTag } from "element-plus";
-import { defineComponent, h, onMounted, reactive, ref } from "vue";
+import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElMessage, ElTag } from "element-plus";
+import { defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
 import { fetchDiscoverySettings, saveDiscoverySettings } from "../../api/settings";
+import { useNoticesStore } from "../../stores/notices";
 
 export const SettingsPage = defineComponent({
   name: "SettingsPage",
   setup() {
+    const noticesStore = useNoticesStore();
     const loading = ref(false);
     const saving = ref(false);
     const errorMessage = ref("");
@@ -50,6 +52,24 @@ export const SettingsPage = defineComponent({
       void loadSettings();
     });
 
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`系统配置加载或保存失败：${value}`, 5000);
+        }
+      }
+    );
+
+    watch(
+      savedMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.success(value, 3000);
+        }
+      }
+    );
+
     return () =>
       h("section", { class: "settings-page" }, [
         h("div", { class: "page-toolbar" }, [
@@ -75,24 +95,6 @@ export const SettingsPage = defineComponent({
             () => "保存配置"
           )
         ]),
-        errorMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "error",
-              title: `系统配置加载或保存失败：${errorMessage.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
-        savedMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "success",
-              title: savedMessage.value,
-              showIcon: true,
-              closable: false
-            })
-          : null,
         h("div", { class: "settings-grid" }, [
           h(
             ElCard,

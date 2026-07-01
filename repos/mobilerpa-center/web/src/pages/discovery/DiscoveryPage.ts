@@ -16,9 +16,10 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 
+import { useNoticesStore } from "../../stores/notices";
 import { useDiscoveryStore } from "../../stores/discovery";
 import type { DiscoveredDevice } from "../../types/discovery";
 
@@ -52,6 +53,7 @@ export const DiscoveryPage = defineComponent({
   setup() {
     const router = useRouter();
     const discoveryStore = useDiscoveryStore();
+    const noticesStore = useNoticesStore();
     const {
       devices,
       total,
@@ -81,6 +83,40 @@ export const DiscoveryPage = defineComponent({
       void discoveryStore.loadDevices();
       void discoveryStore.loadDiscoverySettings();
     });
+
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`设备发现或操作失败：${value}`, 5000);
+        }
+      }
+    );
+
+    watch(
+      latestActionResult,
+      (value, previousValue) => {
+        if (!value) {
+          return;
+        }
+        if (
+          previousValue &&
+          previousValue.adb_endpoint === value.adb_endpoint &&
+          previousValue.action === value.action &&
+          previousValue.message === value.message &&
+          previousValue.status === value.status
+        ) {
+          return;
+        }
+        const label = value.action === "start" ? "启动" : value.action === "stop" ? "停止" : "断开连接";
+        const suffix = value.action === "disconnect" ? "" : " Agent";
+        if (value.status === "ok") {
+          noticesStore.success(`设备 ${value.adb_endpoint} ${label}${suffix}：${value.message}`, 3000);
+        } else {
+          noticesStore.error(`设备 ${value.adb_endpoint} ${label}${suffix}：${value.message}`, 5000);
+        }
+      }
+    );
 
     const allSelected = computed(() => selectableDevices.value.length > 0 && selectedEndpoints.value.length === selectableDevices.value.length);
 
@@ -217,24 +253,6 @@ export const DiscoveryPage = defineComponent({
           {
             default: () =>
               h("div", { class: "page-scroll-body" }, [
-                errorMessage.value
-                  ? h(ElAlert, {
-                      class: "page-alert",
-                      type: "error",
-                      title: `设备发现或操作失败：${errorMessage.value}`,
-                      showIcon: true,
-                      closable: false
-                    })
-                  : null,
-                latestActionResult.value
-                  ? h(ElAlert, {
-                      class: "page-alert",
-                      type: latestActionResult.value.status === "ok" ? "success" : "error",
-                      title: `设备 ${latestActionResult.value.adb_endpoint} ${latestActionResult.value.action === "start" ? "启动" : latestActionResult.value.action === "stop" ? "停止" : "断开连接"}${latestActionResult.value.action === "disconnect" ? "" : " Agent"}：${latestActionResult.value.message}`,
-                      showIcon: true,
-                      closable: false
-                    })
-                  : null,
                 devices.value.length === 0 && !loading.value
                   ? h(ElEmpty, { description: "当前没有 adb devices 可识别的设备，请先通过“连接设备”完成配对。" })
                   : h("div", { class: "table-scroll-region table-scroll-region--soft" }, [

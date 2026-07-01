@@ -13,6 +13,7 @@ import (
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -41,6 +42,8 @@ var (
 	ErrScriptRepositoryUnavailable = errors.New("script repository is unavailable")
 	ErrScriptVersionReferenced    = errors.New("script version is referenced by workflows")
 	ErrScriptReferenced           = errors.New("script is referenced by workflows")
+	ErrScriptNameInvalid          = errors.New("script_name must match ^[A-Za-z0-9_]+$")
+	ErrScriptNameAlreadyExists    = errors.New("script_name already exists")
 )
 
 const (
@@ -111,6 +114,12 @@ type ScriptSummary struct {
 	ScriptName string `json:"script_name"`
 	// Versions 是该脚本已维护的版本列表。
 	Versions []VersionSummary `json:"versions"`
+}
+
+type ScriptNameRecord struct {
+	ScriptName string `json:"script_name"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 type WorkflowReference struct {
@@ -184,6 +193,64 @@ func NewService(db *sql.DB, root string) *Service {
 		db:   db,
 		root: root,
 	}
+}
+
+func validateScriptName(scriptName string) error {
+	scriptName = strings.TrimSpace(scriptName)
+	if scriptName == "" {
+		return ErrScriptNameRequired
+	}
+	if !regexp.MustCompile(`^[A-Za-z0-9_]+$`).MatchString(scriptName) {
+		return ErrScriptNameInvalid
+	}
+	return nil
+}
+
+// ListScriptNames 返回脚本名称主表列表。
+func (s *Service) ListScriptNames(ctx context.Context) ([]ScriptNameRecord, error) {
+	if s.db == nil {
+		return nil, ErrScriptRepositoryUnavailable
+	}
+	rows, err := s.db.QueryContext(ctx, `
+SELECT script_name, created_at, updated_at
+FROM script_names
+ORDER BY script_name ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("query script names: %w", err)
+	}
+	defer rows.Close()
+
+	result := make([]ScriptNameRecord, 0)
+	for rows.Next() {
+		var item ScriptNameRecord
+		if err := rows.Scan(&item.ScriptName, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, fmt.Errorf("scan script name: %w", err)
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// CreateScriptName 创建脚本名称主记录。
+func (s *Service) CreateScriptName(ctx context.Context, scriptName string) (ScriptNameRecord, error) {
+	if s.db == nil {
+		return ScriptNameRecord{}, ErrScriptRepositoryUnavailable
+	}
+	if err := validateScriptName(scriptName); err != nil {
+		return ScriptNameRecord{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+INSERT INTO script_names (script_name, created_at, updated_at)
+VALUES (?, ?, ?)`,
+		scriptName, now, now,
+	); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique") {
+			return ScriptNameRecord{}, ErrScriptNameAlreadyExists
+		}
+		return ScriptNameRecord{}, fmt.Errorf("insert script name: %w", err)
+	}
+	return ScriptNameRecord{ScriptName: scriptName, CreatedAt: now, UpdatedAt: now}, nil
 }
 
 // ListScripts 返回当前中心脚本库中所有脚本及其版本列表。

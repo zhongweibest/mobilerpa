@@ -74,6 +74,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/settings/discovery", discoverySettings(systemSettings))
 	mux.HandleFunc("/api/v1/plans", plansCollection(plans))
 	mux.HandleFunc("/api/v1/plans/", planSubResources(plans))
+	mux.HandleFunc("/api/v1/script-names", scriptNamesCollection(scripts))
 	mux.HandleFunc("/api/v1/scripts/deploy", deployScript(scripts, dispatcher))
 	mux.HandleFunc("/api/v1/scripts/deploy-all", deployScriptToAllOnlineDevices(devices, dispatcher))
 	mux.HandleFunc("/api/v1/scripts/upload", uploadScript(scripts))
@@ -1048,6 +1049,49 @@ func scriptManifest(scripts *script.Service) http.HandlerFunc {
 			"status": "ok",
 			"data":   result,
 		})
+	}
+}
+
+func scriptNamesCollection(scripts *script.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			result, err := scripts.ListScriptNames(ctx)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		case http.MethodPost:
+			var req struct {
+				ScriptName string `json:"script_name"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+			result, err := scripts.CreateScriptName(ctx, req.ScriptName)
+			if err != nil {
+				writeScriptError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodGet, http.MethodPost},
+			})
+		}
 	}
 }
 

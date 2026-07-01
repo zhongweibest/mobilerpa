@@ -1,6 +1,5 @@
 // @ts-nocheck
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElDialog,
@@ -15,9 +14,10 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
 import { fetchDevices } from "../../api/devices";
+import { useNoticesStore } from "../../stores/notices";
 import { usePlansStore } from "../../stores/plans";
 import type { DeviceRecord } from "../../types/device";
 import type { PlanDeviceRunRecord, PlanRunRecord } from "../../types/plan";
@@ -46,6 +46,7 @@ export const PlanRunsPage = defineComponent({
   name: "PlanRunsPage",
   setup() {
     const plansStore = usePlansStore();
+    const noticesStore = useNoticesStore();
     const { runs, runsTotal, runsPage, runsPageSize, selectedEvents, loadingRuns, loadingEvents, stoppingRunID, mutatingDevices, errorMessage } =
       storeToRefs(plansStore);
 
@@ -103,6 +104,24 @@ export const PlanRunsPage = defineComponent({
     onMounted(() => {
       void loadPageData();
     });
+
+    watch(
+      supportingDataWarning,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.warning(`计划任务实例辅助数据加载不完整：${value}`, 5000);
+        }
+      }
+    );
+
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`计划任务实例加载失败：${value}`, 5000);
+        }
+      }
+    );
 
     async function openDeviceEventsDialog(deviceRun: PlanDeviceRunRecord) {
       if (!selectedRun.value) {
@@ -186,24 +205,6 @@ export const PlanRunsPage = defineComponent({
     return () =>
       h("section", { class: "app-page" }, [
         h("div", { class: "page-toolbar" }, [h(ElButton, { loading: loadingRuns.value, onClick: () => void loadPageData() }, () => "刷新")]),
-        supportingDataWarning.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "warning",
-              title: `计划任务实例辅助数据加载不完整：${supportingDataWarning.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
-        errorMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "error",
-              title: `计划任务实例加载失败：${errorMessage.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
         h("section", { class: "app-page__panel" }, [
           h(ElCard, { class: "page-card", shadow: "never" }, {
             default: () => [

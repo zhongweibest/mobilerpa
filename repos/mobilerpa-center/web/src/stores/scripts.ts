@@ -1,11 +1,12 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { deleteScript, deleteScriptVersion, deployScript, deployScriptToAll, fetchScripts, fetchScriptVersion, uploadScript } from "../api/scripts";
-import type { ScriptManifestRecord, ScriptRecord, ScriptVersionRecord, UploadScriptRequest } from "../types/script";
+import { createScriptName, deleteScript, deleteScriptVersion, deployScript, deployScriptToAll, fetchScriptNames, fetchScripts, fetchScriptVersion, uploadScript } from "../api/scripts";
+import type { ScriptManifestRecord, ScriptNameRecord, ScriptRecord, ScriptVersionRecord, UploadScriptRequest } from "../types/script";
 
 export const useScriptsStore = defineStore("scripts", () => {
   const scripts = ref<ScriptRecord[]>([]);
+  const scriptNames = ref<ScriptNameRecord[]>([]);
   const total = ref(0);
   const page = ref(1);
   const pageSize = ref(10);
@@ -37,6 +38,28 @@ export const useScriptsStore = defineStore("scripts", () => {
       errorMessage.value = error instanceof Error ? error.message : "load_scripts_failed";
     } finally {
       loading.value = false;
+    }
+  }
+
+  async function loadScriptNames() {
+    errorMessage.value = "";
+    try {
+      scriptNames.value = await fetchScriptNames();
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "load_script_names_failed";
+      throw error;
+    }
+  }
+
+  async function submitScriptName(scriptName: string) {
+    errorMessage.value = "";
+    try {
+      const result = await createScriptName({ script_name: scriptName });
+      await loadScriptNames();
+      return result;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "create_script_name_failed";
+      throw error;
     }
   }
 
@@ -144,6 +167,7 @@ export const useScriptsStore = defineStore("scripts", () => {
 
   return {
     scripts,
+    scriptNames,
     total,
     page,
     pageSize,
@@ -156,6 +180,8 @@ export const useScriptsStore = defineStore("scripts", () => {
     deploying,
     errorMessage,
     loadScripts,
+    loadScriptNames,
+    submitScriptName,
     changePage,
     changePageSize,
     loadScriptVersion,

@@ -1,6 +1,5 @@
 // @ts-nocheck
 import {
-  ElAlert,
   ElButton,
   ElCard,
   ElDescriptions,
@@ -24,9 +23,10 @@ import {
   ElTag
 } from "element-plus";
 import { storeToRefs } from "pinia";
-import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
+import { computed, defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
 import { fetchDevices } from "../../api/devices";
+import { useNoticesStore } from "../../stores/notices";
 import { usePlansStore } from "../../stores/plans";
 import { useScriptsStore } from "../../stores/scripts";
 import { useWorkflowsStore } from "../../stores/workflows";
@@ -121,6 +121,7 @@ export const PlansPage = defineComponent({
     const plansStore = usePlansStore();
     const scriptsStore = useScriptsStore();
     const workflowsStore = useWorkflowsStore();
+    const noticesStore = useNoticesStore();
 
     const { plans, total, page, pageSize, loading, creating, deletingPlanID, startingPlanID, mutatingDevices, errorMessage } = storeToRefs(plansStore);
     const { scripts } = storeToRefs(scriptsStore);
@@ -235,6 +236,24 @@ export const PlansPage = defineComponent({
     onMounted(() => {
       void loadPageData();
     });
+
+    watch(
+      supportingDataWarning,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.warning(`计划任务辅助数据加载不完整：${value}`, 5000);
+        }
+      }
+    );
+
+    watch(
+      errorMessage,
+      (value, previousValue) => {
+        if (value && value !== previousValue) {
+          noticesStore.error(`计划任务加载失败：${value}`, 5000);
+        }
+      }
+    );
 
     function resetCreateForm() {
       createForm.plan_name = "";
@@ -354,24 +373,6 @@ export const PlansPage = defineComponent({
           h(ElButton, { type: "primary", onClick: openCreateDialog }, () => "创建计划任务"),
           h(ElButton, { loading: loading.value, onClick: () => void loadPageData() }, () => "刷新")
         ]),
-        supportingDataWarning.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "warning",
-              title: `计划任务辅助数据加载不完整：${supportingDataWarning.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
-        errorMessage.value
-          ? h(ElAlert, {
-              class: "page-alert",
-              type: "error",
-              title: `计划任务加载失败：${errorMessage.value}`,
-              showIcon: true,
-              closable: false
-            })
-          : null,
         h(
           ElCard,
           { class: "page-card page-fill-card", shadow: "never" },
