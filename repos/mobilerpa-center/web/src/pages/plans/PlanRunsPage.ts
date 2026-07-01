@@ -259,7 +259,7 @@ export const PlanRunsPage = defineComponent({
 
     const displayedEvents = computed(() => {
       if (!deviceEventFilter.value) {
-        return selectedEvents.value;
+        return selectedEvents.value.filter((item) => !item.device_id || item.device_id === "0");
       }
       return selectedEvents.value.filter((item) => item.device_id === deviceEventFilter.value);
     });
@@ -306,6 +306,19 @@ export const PlanRunsPage = defineComponent({
     function openDevicesDialog(run: PlanRunRecord) {
       selectedRun.value = run;
       devicesDialogVisible.value = true;
+    }
+
+    async function stopDeviceRun(deviceRun: PlanDeviceRunRecord) {
+      if (!selectedRun.value) {
+        return;
+      }
+      try {
+        await plansStore.triggerStopPlanDeviceRun(selectedRun.value.plan_def_id, selectedRun.value.plan_run_id, deviceRun.plan_device_run_id);
+        noticesStore.success("设备已停止", 3000);
+        await loadPageData();
+      } catch (error) {
+        noticesStore.error(error instanceof Error ? error.message : "设备停止失败", 5000);
+      }
     }
 
     function syncSelectedRows(tableInstance: any, rows: PlanRowBinding[]) {
@@ -473,10 +486,10 @@ export const PlanRunsPage = defineComponent({
                             }),
                             h(
                               ElTableColumn,
-                              { label: "操作", width: 220, fixed: "right" },
+                              { label: "操作", width: 160, fixed: "right" },
                               {
                                 default: (scope: { row: PlanRunRecord }) =>
-                                  h("div", { class: "table-actions" }, [
+                                  h("div", { class: "table-actions table-actions--nowrap" }, [
                                     h(
                                       ElButton,
                                       {
@@ -499,11 +512,19 @@ export const PlanRunsPage = defineComponent({
                                             null,
                                             {
                                               default: () => [
-                                                h(
-                                                  ElDropdownItem,
-                                                  {
-                                                    key: "append_rows",
-                                                    onClick: () => openAppendDialog(scope.row)
+                                    h(
+                                      ElDropdownItem,
+                                      {
+                                        key: "view_events",
+                                        onClick: () => openEventsDialog(scope.row)
+                                      },
+                                      () => "查看事件"
+                                    ),
+                                    h(
+                                      ElDropdownItem,
+                                      {
+                                        key: "append_rows",
+                                        onClick: () => openAppendDialog(scope.row)
                                                   },
                                                   () => "追加排"
                                                 ),
@@ -516,7 +537,7 @@ export const PlanRunsPage = defineComponent({
                                                       void stopCurrentRun(scope.row);
                                                     }
                                                   },
-                                                  () => (stoppingRunID.value === scope.row.plan_run_id ? "停止中..." : "停止")
+                                                  () => (stoppingRunID.value === scope.row.plan_run_id ? "停止中..." : "停止实例")
                                                 ),
                                                 h(
                                                   ElDropdownItem,
@@ -562,9 +583,9 @@ export const PlanRunsPage = defineComponent({
             "onUpdate:modelValue": (value: boolean) => (eventsDialogVisible.value = value),
             title: selectedRun.value
               ? deviceEventFilter.value
-                ? `排 ${deviceEventFilter.value} 事件：${selectedRun.value.plan_run_id}`
-                : `计划任务事件：${selectedRun.value.plan_run_id}`
-              : "计划任务事件",
+                ? `设备 ${deviceEventFilter.value} 事件：${selectedRun.value.plan_run_id}`
+                : `计划任务实例事件：${selectedRun.value.plan_run_id}`
+              : "计划任务实例事件",
             width: "980px"
           },
           {
@@ -576,8 +597,6 @@ export const PlanRunsPage = defineComponent({
                     { data: displayedEvents.value, stripe: true, border: false, class: "app-table", height: "520px" },
                     {
                       default: () => [
-                        h(ElTableColumn, { prop: "id", label: "ID", width: 90 }),
-                        h(ElTableColumn, { prop: "device_id", label: "设备ID", minWidth: 140 }),
                         h(ElTableColumn, { prop: "event_type", label: "事件类型", minWidth: 180 }),
                         h(ElTableColumn, { prop: "message", label: "事件内容", minWidth: 260 }),
                         h(ElTableColumn, {
@@ -652,24 +671,53 @@ export const PlanRunsPage = defineComponent({
                           ElTableColumn,
                           {
                             label: "操作",
-                            width: 120,
+                            width: 180,
                             fixed: "right"
                           },
                           {
                             default: (scope: { row: RunDeviceTreeNode }) =>
                               scope.row.node_type === "device" && selectedRun.value
-                                ? h(
-                                    ElButton,
-                                    {
-                                      type: "primary",
-                                      link: true,
-                                      onClick: () =>
-                                        openEventsDialog(selectedRun.value as PlanRunRecord, {
-                                          device_id: scope.row.device_id
-                                        } as PlanDeviceRunRecord)
-                                    },
-                                    () => "查看事件"
-                                  )
+                                ? h("div", { class: "table-actions table-actions--nowrap" }, [
+                                    h(
+                                      ElButton,
+                                      {
+                                        type: "primary",
+                                        link: true,
+                                        onClick: () =>
+                                          openEventsDialog(selectedRun.value as PlanRunRecord, {
+                                            device_id: scope.row.device_id
+                                          } as PlanDeviceRunRecord)
+                                      },
+                                      () => "查看事件"
+                                    ),
+                                    h(
+                                      ElButton,
+                                      {
+                                        type: "danger",
+                                        link: true,
+                                        disabled: scope.row.status !== "pending" && scope.row.status !== "running",
+                                        onClick: () =>
+                                          void stopDeviceRun({
+                                            plan_device_run_id: scope.row.node_key.replace("device:", ""),
+                                            plan_run_id: selectedRun.value!.plan_run_id,
+                                            plan_def_id: selectedRun.value!.plan_def_id,
+                                            zone_id: scope.row.zone_id,
+                                            row_id: scope.row.row_id,
+                                            slot_id: scope.row.slot_id,
+                                            device_id: scope.row.device_id,
+                                            target_type: "",
+                                            target_ref_id: "",
+                                            status: scope.row.status,
+                                            started_at: "",
+                                            finished_at: "",
+                                            last_error: "",
+                                            created_at: "",
+                                            updated_at: ""
+                                          } as PlanDeviceRunRecord)
+                                      },
+                                      () => "停止"
+                                    )
+                                  ])
                                 : h("span", "")
                           }
                         )

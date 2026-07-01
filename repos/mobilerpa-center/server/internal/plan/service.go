@@ -1098,13 +1098,12 @@ func isRetryWindowOpen(deadlineTime string, now time.Time) bool {
 }
 
 func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, retryInterval time.Duration) error {
-	_ = retryInterval
 	reachable, err := s.isDeviceReachableForPlanStart(ctx, deviceRun.DeviceID)
 	if err != nil {
 		return err
 	}
 	if !reachable {
-		return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+		return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true, retryInterval)
 	}
 	if s.devices == nil {
 		return fmt.Errorf("device service is not configured")
@@ -1128,7 +1127,7 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 				if cleanupErr := s.deleteTaskRecord(ctx, createdTask.TaskID); cleanupErr != nil {
 					return cleanupErr
 				}
-				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true, retryInterval)
 			}
 			return err
 		}
@@ -1165,7 +1164,7 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 		sessionPayload.WorkflowDefID = definition.TargetWorkflowDefID
 		if err := s.dispatcher.StartWorkflowSession(ctx, sessionPayload); err != nil {
 			if errors.Is(err, dispatch.ErrDeviceNotConnected) {
-				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true)
+				return s.deferPlanDeviceStart(ctx, definition, run, deviceRun, nowText, true, retryInterval)
 			}
 			return err
 		}
@@ -1280,6 +1279,35 @@ func (s *Service) AddRows(ctx context.Context, planRunID string, req AddRowsRequ
 	if err := s.appendRunRows(ctx, run.PlanRunID, definition, nextRows); err != nil {
 		return Run{}, err
 	}
+	for _, item := range nextRows {
+		if err := s.appendEvent(ctx, run.PlanRunID, run.PlanDefID, "", EventTypePlanDeviceAdded, "整排已追加到计划任务实例", map[string]any{
+			"source":  "center",
+			"zone_id": item.ZoneID,
+			"row_id":  item.RowID,
+		}); err != nil {
+			return Run{}, err
+		}
+	}
+	if shouldApplyDailyAdditionsImmediately(definition, run, time.Now()) {
+		targets, err := s.expandRowsToTargets(ctx, nextRows)
+		if err != nil {
+			return Run{}, err
+		}
+		if len(targets) > 0 {
+			switch definition.TargetType {
+			case TargetTypeScript:
+				if err := s.startScriptPlanTargets(ctx, definition, run, targets); err != nil {
+					return Run{}, err
+				}
+			case TargetTypeWorkflow:
+				if err := s.startWorkflowPlanTargets(ctx, definition, run, targets); err != nil {
+					return Run{}, err
+				}
+			default:
+				return Run{}, ErrPlanTargetTypeUnsupported
+			}
+		}
+	}
 	return s.GetRun(ctx, planRunID)
 }
 
@@ -1344,6 +1372,13 @@ func (s *Service) RemoveRow(ctx context.Context, planRunID string, zoneID string
 			return Run{}, err
 		}
 	}
+	if err := s.appendEvent(ctx, planRunID, run.PlanDefID, "", EventTypePlanDeviceRemoved, "整排已从计划任务实例中移除", map[string]any{
+		"source":  "center",
+		"zone_id": zoneID,
+		"row_id":  rowID,
+	}); err != nil {
+		return Run{}, err
+	}
 
 	if err := s.refreshRunStatus(ctx, planRunID); err != nil {
 		return Run{}, err
@@ -1397,12 +1432,70 @@ WHERE id = ?`,
 		return Run{}, fmt.Errorf("stop plan run: %w", err)
 	}
 
-	if err := s.appendEvent(ctx, planRunID, run.PlanDefID, "", EventTypePlanRunStopped, "计划任务实例已停止", map[string]any{
+	if err := s.appendEvent(ctx, planRunID, run.PlanDefID, "", EventTypePlanRunStopped, "计划任务实例已停止，最终状态：stopped", map[string]any{
 		"source": "center",
+		"status": RunStatusStopped,
 	}); err != nil {
 		return Run{}, err
 	}
 
+	return s.GetRun(ctx, planRunID)
+}
+
+// StopDeviceRun 停止计划任务实例中的单个设备执行。
+func (s *Service) StopDeviceRun(ctx context.Context, planRunID string, planDeviceRunID string) (Run, error) {
+	run, err := s.GetRun(ctx, planRunID)
+	if err != nil {
+		return Run{}, err
+	}
+	if run.Status != RunStatusPending && run.Status != RunStatusRunning {
+		return Run{}, ErrPlanRunNotActive
+	}
+
+	deviceRun, err := s.getDeviceRunByID(ctx, planDeviceRunID)
+	if err != nil {
+		return Run{}, err
+	}
+	if strings.TrimSpace(deviceRun.PlanRunID) != strings.TrimSpace(planRunID) {
+		return Run{}, ErrPlanDeviceRunNotFound
+	}
+	if deviceRun.Status != DeviceRunStatusPending && deviceRun.Status != DeviceRunStatusRunning {
+		return s.GetRun(ctx, planRunID)
+	}
+
+	definition, err := s.GetDefinition(ctx, run.PlanDefID)
+	if err != nil {
+		return Run{}, err
+	}
+
+	switch definition.TargetType {
+	case TargetTypeScript:
+		if err := s.stopScriptPlanDevice(ctx, definition, run, deviceRun, "device_stop"); err != nil {
+			return Run{}, err
+		}
+	case TargetTypeWorkflow:
+		if err := s.stopWorkflowPlanDevice(ctx, definition, run, deviceRun, "device_stop"); err != nil {
+			return Run{}, err
+		}
+	default:
+		return Run{}, ErrPlanTargetTypeUnsupported
+	}
+
+	if err := s.appendEvent(ctx, planRunID, run.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceCompleted, "设备已从计划任务实例中停止", map[string]any{
+		"source":             "center",
+		"reason":             "device_stop",
+		"status":             DeviceRunStatusStopped,
+		"plan_device_run_id": deviceRun.PlanDeviceRunID,
+		"zone_id":            deviceRun.ZoneID,
+		"row_id":             deviceRun.RowID,
+		"slot_id":            deviceRun.SlotID,
+	}); err != nil {
+		return Run{}, err
+	}
+
+	if err := s.refreshRunStatus(ctx, planRunID); err != nil {
+		return Run{}, err
+	}
 	return s.GetRun(ctx, planRunID)
 }
 
@@ -1660,7 +1753,7 @@ func (s *Service) startScriptPlanTargets(ctx context.Context, definition Definit
 			return err
 		}
 		if !reachable {
-			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
+			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false, 0); err != nil {
 				return err
 			}
 			continue
@@ -1716,7 +1809,7 @@ func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Defin
 			return err
 		}
 		if !reachable {
-			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
+			if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false, 0); err != nil {
 				return err
 			}
 			continue
@@ -1734,7 +1827,7 @@ func (s *Service) startWorkflowPlanTargets(ctx context.Context, definition Defin
 		payload.WorkflowDefID = definition.TargetWorkflowDefID
 		if err := s.dispatcher.StartWorkflowSession(ctx, payload); err != nil {
 			if errors.Is(err, dispatch.ErrDeviceNotConnected) {
-				if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false); err != nil {
+				if err := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, now, false, 0); err != nil {
 					return err
 				}
 				continue
@@ -2173,7 +2266,7 @@ WHERE id = ?`,
 		if err != nil {
 			return err
 		}
-		if err := s.appendEvent(ctx, planRunID, run.PlanDefID, "", EventTypePlanRunCompleted, "计划任务实例已结束", map[string]any{
+		if err := s.appendEvent(ctx, planRunID, run.PlanDefID, "", EventTypePlanRunCompleted, "计划任务实例已结束，最终状态："+nextStatus, map[string]any{
 			"source": "center",
 			"status": nextStatus,
 		}); err != nil {
@@ -2480,7 +2573,7 @@ func (s *Service) dispatchScriptPlanTasks(ctx context.Context, definition Defini
 						}
 						continue
 					}
-					if deferErr := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, time.Now().UTC().Format(time.RFC3339), false); deferErr != nil {
+					if deferErr := s.deferPlanDeviceStart(ctx, definition, run, deviceRun, time.Now().UTC().Format(time.RFC3339), false, 0); deferErr != nil {
 						select {
 						case errCh <- deferErr:
 						default:
@@ -2560,10 +2653,17 @@ func (s *Service) isDeviceReachableForPlanStart(ctx context.Context, deviceID st
 	return true, nil
 }
 
-func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, includeRetryTimestamp bool) error {
+func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, includeRetryTimestamp bool, retryInterval time.Duration) error {
 	nextRetryText := ""
 	if definition.ScheduleType == ScheduleTypeDaily {
-		nextRetryText = nowText
+		baseTime, err := time.Parse(time.RFC3339, nowText)
+		if err != nil {
+			return fmt.Errorf("parse plan retry base time: %w", err)
+		}
+		if retryInterval <= 0 {
+			retryInterval = 5 * time.Minute
+		}
+		nextRetryText = baseTime.Add(retryInterval).UTC().Format(time.RFC3339)
 	}
 	message := "设备不在线未启动"
 	if includeRetryTimestamp {

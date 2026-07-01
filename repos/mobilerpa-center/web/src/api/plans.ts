@@ -75,6 +75,15 @@ export function stopPlanRun(planDefID: string, planRunID: string): Promise<PlanR
   });
 }
 
+export function stopPlanDeviceRun(planDefID: string, planRunID: string, planDeviceRunID: string): Promise<PlanRunRecord> {
+  return requestJSON<PlanRunRecord>(
+    `/api/v1/plans/${encodeURIComponent(planDefID)}/runs/${encodeURIComponent(planRunID)}/device-runs/${encodeURIComponent(planDeviceRunID)}/stop`,
+    {
+      method: "POST"
+    }
+  );
+}
+
 export function deletePlanRun(planDefID: string, planRunID: string): Promise<{ plan_def_id: string; plan_run_id: string; deleted: boolean }> {
   return requestJSON<{ plan_def_id: string; plan_run_id: string; deleted: boolean }>(
     `/api/v1/plans/${encodeURIComponent(planDefID)}/runs/${encodeURIComponent(planRunID)}`,

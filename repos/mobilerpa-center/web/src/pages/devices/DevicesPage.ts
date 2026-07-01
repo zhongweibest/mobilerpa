@@ -299,9 +299,8 @@ export const DevicesPage = defineComponent({
                                       h(
                                         ElButton,
                                         {
-                                          size: "small",
                                           type: "danger",
-                                          plain: true,
+                                          link: true,
                                           disabled: row.status === "online" || deletingDeviceID.value === row.device_id,
                                           onClick: () => {
                                             void handleDelete(row.device_id);
@@ -313,10 +312,10 @@ export const DevicesPage = defineComponent({
                                         ElDropdown,
                                         {
                                           trigger: "click"
-                                        },
-                                        {
-                                          default: () =>
-                                            h(ElButton, { size: "small", link: true, type: "primary" }, () => "更多"),
+                                      },
+                                      {
+                                        default: () =>
+                                            h(ElButton, { link: true, type: "primary" }, () => "更多"),
                                           dropdown: () =>
                                             h(
                                               ElDropdownMenu,

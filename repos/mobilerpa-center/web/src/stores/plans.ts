@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
-import { addPlanRows, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanRow, startPlan, stopPlanRun, updatePlanRows } from "../api/plans";
+import { addPlanRows, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanRow, startPlan, stopPlanDeviceRun, stopPlanRun, updatePlanRows } from "../api/plans";
 import type { CreatePlanRequest, PlanDefinitionRecord, PlanEventRecord, PlanRunRecord, PlanRowBinding } from "../types/plan";
 
 export const usePlansStore = defineStore("plans", () => {
@@ -156,6 +156,21 @@ export const usePlansStore = defineStore("plans", () => {
     }
   }
 
+  async function triggerStopPlanDeviceRun(planDefID: string, planRunID: string, planDeviceRunID: string) {
+    mutatingDevices.value = true;
+    errorMessage.value = "";
+    try {
+      const run = await stopPlanDeviceRun(planDefID, planRunID, planDeviceRunID);
+      await loadRuns();
+      return run;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "stop_plan_device_run_failed";
+      throw error;
+    } finally {
+      mutatingDevices.value = false;
+    }
+  }
+
   async function appendPlanRows(planDefID: string, planRunID: string, rows: PlanRowBinding[]) {
     mutatingDevices.value = true;
     errorMessage.value = "";
@@ -250,6 +265,7 @@ export const usePlansStore = defineStore("plans", () => {
     updateDefinitionRows,
     triggerStartPlan,
     triggerStopPlanRun,
+    triggerStopPlanDeviceRun,
     removePlanRun,
     appendPlanRows,
     removeRowFromPlan,

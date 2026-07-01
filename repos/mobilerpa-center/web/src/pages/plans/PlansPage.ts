@@ -601,7 +601,7 @@ export const PlansPage = defineComponent({
                               ElTableColumn,
                               {
                                 label: "操作",
-                                minWidth: 220,
+                                width: 160,
                                 fixed: "right"
                               },
                               {

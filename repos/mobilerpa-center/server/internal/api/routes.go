@@ -341,6 +341,19 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 			return
 		}
 
+		if len(parts) == 6 && parts[1] == "runs" && parts[3] == "device-runs" && parts[5] == "stop" && r.Method == http.MethodPost {
+			result, err := plans.StopDeviceRun(ctx, parts[2], parts[4])
+			if err != nil {
+				writePlanError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
 		if len(parts) == 3 && parts[1] == "runs" && r.Method == http.MethodDelete {
 			if err := plans.DeleteRun(ctx, parts[2]); err != nil {
 				writePlanError(w, err)

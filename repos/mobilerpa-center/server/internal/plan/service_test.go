@@ -839,12 +839,19 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 	if run.DeviceRuns[0].NextRetryAt == "" {
 		t.Fatalf("expected daily deferred device to keep retry timestamp")
 	}
+	retryAt, err := time.Parse(time.RFC3339, run.DeviceRuns[0].NextRetryAt)
+	if err != nil {
+		t.Fatalf("parse next_retry_at: %v", err)
+	}
+	if retryAt.Sub(time.Now().UTC()) < 4*time.Minute {
+		t.Fatalf("expected retry timestamp about 5 minutes later, got %s", run.DeviceRuns[0].NextRetryAt)
+	}
 
 	processedRuns, err := planSvc.RetryDueTargets(ctx, time.Now().Add(2*time.Minute), 5*time.Minute)
 	if err != nil {
 		t.Fatalf("retry due targets should not fail on disconnected device: %v", err)
 	}
-	if len(processedRuns) != 1 || processedRuns[0] != run.PlanRunID {
+	if len(processedRuns) != 0 {
 		t.Fatalf("unexpected processed runs: %v", processedRuns)
 	}
 
@@ -859,7 +866,31 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 		}
 	}
 	if !foundRetryEvent {
-		t.Fatalf("expected retry offline event, got %#v", events)
+		if len(events) != 2 {
+			t.Fatalf("expected only initial offline event before retry time, got %#v", events)
+		}
+	}
+
+	processedRuns, err = planSvc.RetryDueTargets(ctx, retryAt.Add(2*time.Second), 5*time.Minute)
+	if err != nil {
+		t.Fatalf("retry due targets after retry timestamp should not fail: %v", err)
+	}
+	if len(processedRuns) != 1 || processedRuns[0] != run.PlanRunID {
+		t.Fatalf("unexpected processed runs after retry timestamp: %v", processedRuns)
+	}
+
+	events, err = planSvc.ListEvents(ctx, run.PlanRunID)
+	if err != nil {
+		t.Fatalf("list events after retry: %v", err)
+	}
+	foundRetryEvent = false
+	for _, item := range events {
+		if item.DeviceID == deviceID && strings.Contains(item.Message, "设备离线未启动") && strings.Contains(item.Message, "T") {
+			foundRetryEvent = true
+		}
+	}
+	if !foundRetryEvent {
+		t.Fatalf("expected delayed retry offline event, got %#v", events)
 	}
 }
 
@@ -984,5 +1015,186 @@ func TestStartOncePlanSkippedOfflineDeviceDoesNotBlockNextStart(t *testing.T) {
 	}
 	if secondRun.Status != RunStatusSuccess {
 		t.Fatalf("expected second run success, got %q", secondRun.Status)
+	}
+}
+
+func TestAddRowsToOnceRunMarksOfflineNewTargetsFailed(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-add-rows-once-offline-failed.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	onlineDeviceID, zoneID, rowIDOnline := seedBoundRowDevice(t, ctx, db, "online")
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	offlineDeviceResult, err := db.ExecContext(ctx, `
+INSERT INTO devices (
+    agent_uuid, device_name, physical_slot, group_name, slot_zone, slot_row, slot_position, status, bind_status, ip,
+    brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+    accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
+    last_heartbeat_at, created_at, updated_at
+) VALUES (?, ?, '', '', '', '', '', 'offline', 'bound', '', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
+		"agent-"+strconv.FormatInt(time.Now().UnixNano(), 10),
+		"test-device-offline",
+		now,
+		now,
+		now,
+		now,
+	)
+	if err != nil {
+		t.Fatalf("insert offline device: %v", err)
+	}
+	offlineDeviceIDInt, err := offlineDeviceResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("offline device last insert id: %v", err)
+	}
+	offlineDeviceID := strconv.FormatInt(offlineDeviceIDInt, 10)
+
+	offlineRowResult, err := db.ExecContext(ctx, `INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at) VALUES (?, 'row', '第2排', 0, 2, ?, ?)`, zoneID, now, now)
+	if err != nil {
+		t.Fatalf("insert offline row: %v", err)
+	}
+	offlineRowIDInt, err := offlineRowResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("offline row last insert id: %v", err)
+	}
+	rowIDOffline := strconv.FormatInt(offlineRowIDInt, 10)
+
+	if _, err := db.ExecContext(ctx, `INSERT INTO location_nodes (parent_id, node_type, node_name, device_id, sort_order, created_at, updated_at) VALUES (?, 'slot', '02', ?, 2, ?, ?)`, rowIDOffline, offlineDeviceID, now, now); err != nil {
+		t.Fatalf("insert offline slot: %v", err)
+	}
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "一次性运行中追加排离线收敛",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowIDOnline}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("start once plan: %v", err)
+	}
+	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].DeviceID != onlineDeviceID {
+		t.Fatalf("expected initial online device run, got %#v", run.DeviceRuns)
+	}
+
+	run, err = planSvc.AddRows(ctx, run.PlanRunID, AddRowsRequest{
+		Rows: []PlanRowBinding{{ZoneID: zoneID, RowID: rowIDOffline}},
+	})
+	if err != nil {
+		t.Fatalf("add rows: %v", err)
+	}
+
+	foundOffline := false
+	for _, item := range run.DeviceRuns {
+		if item.DeviceID != offlineDeviceID {
+			continue
+		}
+		foundOffline = true
+		if item.Status != DeviceRunStatusFailed {
+			t.Fatalf("expected added offline device run failed, got %q", item.Status)
+		}
+		if item.NextRetryAt != "" {
+			t.Fatalf("expected added offline device run without retry, got %q", item.NextRetryAt)
+		}
+	}
+	if !foundOffline {
+		t.Fatalf("expected offline device run added, got %#v", run.DeviceRuns)
+	}
+
+	events, err := planSvc.ListEvents(ctx, run.PlanRunID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	foundOfflineEvent := false
+	foundAppendRowEvent := false
+	for _, item := range events {
+		if item.DeviceID == offlineDeviceID && item.Message == "设备不在线未启动" {
+			foundOfflineEvent = true
+		}
+		if item.DeviceID == "0" && item.EventType == EventTypePlanDeviceAdded && item.Message == "整排已追加到计划任务实例" {
+			foundAppendRowEvent = true
+		}
+	}
+	if !foundOfflineEvent {
+		t.Fatalf("expected added offline device event, got %#v", events)
+	}
+	if !foundAppendRowEvent {
+		t.Fatalf("expected instance row-added event, got %#v", events)
+	}
+}
+
+func TestRemoveRowAppendsPlanRunLevelEvent(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-remove-row-run-level-event.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "移除排实例事件",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeDaily,
+		DailyStartTime:      "09:00:00",
+		DailyDeadlineTime:   "23:00:00",
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	run, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{})
+	if err != nil {
+		t.Fatalf("start once plan: %v", err)
+	}
+
+	if _, err := planSvc.RemoveRow(ctx, run.PlanRunID, zoneID, rowID); err != nil {
+		t.Fatalf("remove row: %v", err)
+	}
+
+	events, err := planSvc.ListEvents(ctx, run.PlanRunID)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	foundRemovedRowEvent := false
+	for _, item := range events {
+		if item.DeviceID == "0" && item.EventType == EventTypePlanDeviceRemoved && item.Message == "整排已从计划任务实例中移除" {
+			foundRemovedRowEvent = true
+			break
+		}
+	}
+	if !foundRemovedRowEvent {
+		t.Fatalf("expected plan-run-level row removed event, got %#v", events)
 	}
 }
