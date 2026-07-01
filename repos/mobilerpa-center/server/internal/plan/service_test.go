@@ -661,14 +661,14 @@ func TestStartOncePlanSkipsOfflineDeviceWithoutError(t *testing.T) {
 	if dispatcherStub.assignCalls != 0 {
 		t.Fatalf("expected offline device not dispatched, got assignCalls=%d", dispatcherStub.assignCalls)
 	}
-	if run.Status != RunStatusPending {
-		t.Fatalf("expected run status pending when nothing started, got %q", run.Status)
+	if run.Status != RunStatusSuccess {
+		t.Fatalf("expected run status success when only offline targets remain, got %q", run.Status)
 	}
 	if len(run.DeviceRuns) != 1 {
 		t.Fatalf("expected one device run, got %d", len(run.DeviceRuns))
 	}
-	if run.DeviceRuns[0].Status != DeviceRunStatusPending {
-		t.Fatalf("expected device run pending, got %q", run.DeviceRuns[0].Status)
+	if run.DeviceRuns[0].Status != DeviceRunStatusFailed {
+		t.Fatalf("expected offline skipped device run failed, got %q", run.DeviceRuns[0].Status)
 	}
 	if run.DeviceRuns[0].NextRetryAt != "" {
 		t.Fatalf("expected once plan not to schedule retry, got %q", run.DeviceRuns[0].NextRetryAt)
@@ -742,8 +742,8 @@ WHERE id = ?`, deviceID); err != nil {
 	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].DeviceID != deviceID {
 		t.Fatalf("unexpected run device runs: %#v", run.DeviceRuns)
 	}
-	if run.DeviceRuns[0].Status != DeviceRunStatusPending {
-		t.Fatalf("expected pending device run, got %q", run.DeviceRuns[0].Status)
+	if run.DeviceRuns[0].Status != DeviceRunStatusFailed {
+		t.Fatalf("expected offline skipped device run failed, got %q", run.DeviceRuns[0].Status)
 	}
 }
 
@@ -785,11 +785,14 @@ func TestStartOncePlanSkipsDisconnectedOnlineDeviceWithoutError(t *testing.T) {
 	if dispatcherStub.assignCalls != 0 {
 		t.Fatalf("expected disconnected device not dispatched, got assignCalls=%d", dispatcherStub.assignCalls)
 	}
-	if run.Status != RunStatusPending {
-		t.Fatalf("expected run status pending when connection missing, got %q", run.Status)
+	if run.Status != RunStatusSuccess {
+		t.Fatalf("expected run status success when only disconnected targets remain, got %q", run.Status)
 	}
 	if len(run.DeviceRuns) != 1 || run.DeviceRuns[0].NextRetryAt != "" {
-		t.Fatalf("expected pending device run without retry, got %#v", run.DeviceRuns)
+		t.Fatalf("expected disconnected device run without retry, got %#v", run.DeviceRuns)
+	}
+	if run.DeviceRuns[0].Status != DeviceRunStatusFailed {
+		t.Fatalf("expected disconnected skipped device run failed, got %q", run.DeviceRuns[0].Status)
 	}
 }
 
@@ -857,5 +860,129 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 	}
 	if !foundRetryEvent {
 		t.Fatalf("expected retry offline event, got %#v", events)
+	}
+}
+
+func TestOnceRunBecomesSuccessWhenOnlyOfflinePendingTargetsRemain(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-once-success-with-offline-pending.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	dispatchSvc := dispatch.NewService(taskSvc)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil)
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_runs (plan_def_id, target_ref_id, run_date, target_type, status, started_at, created_at, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		"1", "demo_script@v1", "2026-07-01", TargetTypeScript, RunStatusRunning, now, now, now,
+	); err != nil {
+		t.Fatalf("seed plan run: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+INSERT INTO plan_device_runs (plan_run_id, plan_def_id, zone_id, row_id, slot_id, device_id, target_type, target_ref_id, status, next_retry_at, started_at, finished_at, last_error, created_at, updated_at)
+VALUES
+  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?),
+  (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
+		1, "1", "6", "7", "8", "2", TargetTypeScript, "demo_script@v1", DeviceRunStatusSuccess, "", now, now, now, now,
+		1, "1", "6", "7", "9", "1", TargetTypeScript, "demo_script@v1", DeviceRunStatusPending, "", now, now,
+	); err != nil {
+		t.Fatalf("seed plan device runs: %v", err)
+	}
+
+	if err := planSvc.refreshRunStatus(ctx, "1"); err != nil {
+		t.Fatalf("refreshRunStatus: %v", err)
+	}
+
+	run, err := planSvc.GetRun(ctx, "1")
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if run.Status != RunStatusSuccess {
+		t.Fatalf("expected run success, got %q", run.Status)
+	}
+	if run.FinishedAt == "" {
+		t.Fatalf("expected finished_at populated")
+	}
+
+	events, err := planSvc.ListEvents(ctx, "1")
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	foundCompleted := false
+	for _, item := range events {
+		if item.EventType == EventTypePlanRunCompleted {
+			foundCompleted = true
+			break
+		}
+	}
+	if !foundCompleted {
+		t.Fatalf("expected plan completed event, got %#v", events)
+	}
+}
+
+func TestStartOncePlanSkippedOfflineDeviceDoesNotBlockNextStart(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "plan-start-once-offline-not-busy-after-finish.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	ctx := t.Context()
+	taskSvc := task.NewService(db)
+	deviceSvc := device.NewService(db)
+	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+
+	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
+
+	definition, err := planSvc.CreateDefinition(ctx, CreateDefinitionRequest{
+		PlanName:            "一次性离线不占用后续启动",
+		TargetType:          TargetTypeScript,
+		TargetScriptName:    "demo_script",
+		TargetScriptVersion: "v1",
+		ScheduleType:        ScheduleTypeOnce,
+		Status:              StatusEnabled,
+		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
+	})
+	if err != nil {
+		t.Fatalf("create plan definition: %v", err)
+	}
+
+	firstRun, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("start first once plan: %v", err)
+	}
+	if firstRun.Status != RunStatusSuccess {
+		t.Fatalf("expected first run success, got %q", firstRun.Status)
+	}
+	if len(firstRun.DeviceRuns) != 1 || firstRun.DeviceRuns[0].Status != DeviceRunStatusFailed {
+		t.Fatalf("expected failed skipped device run, got %#v", firstRun.DeviceRuns)
+	}
+
+	busy, err := planSvc.GetDeviceBusyDetail(ctx, deviceID)
+	if err != nil {
+		t.Fatalf("get device busy detail: %v", err)
+	}
+	if busy != nil {
+		t.Fatalf("expected skipped offline device not busy after run completion, got %#v", busy)
+	}
+
+	secondRun, err := planSvc.Start(ctx, definition.PlanDefID, StartRequest{Manual: true})
+	if err != nil {
+		t.Fatalf("start second once plan should not be blocked by skipped offline device: %v", err)
+	}
+	if secondRun.Status != RunStatusSuccess {
+		t.Fatalf("expected second run success, got %q", secondRun.Status)
 	}
 }

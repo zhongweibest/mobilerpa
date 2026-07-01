@@ -2065,7 +2065,7 @@ WHERE id = ?`,
 
 func (s *Service) refreshRunStatus(ctx context.Context, planRunID string) error {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT status, finished_at
+SELECT status, next_retry_at, started_at, finished_at, last_error
 FROM plan_device_runs
 WHERE plan_run_id = ?`, planRunID)
 	if err != nil {
@@ -2075,28 +2075,42 @@ WHERE plan_run_id = ?`, planRunID)
 
 	total := 0
 	pendingCount := 0
+	retryPendingCount := 0
+	terminalPendingCount := 0
 	runningCount := 0
 	successCount := 0
 	failedCount := 0
+	skippedFailedCount := 0
 	stoppedCount := 0
 	lastFinishedAt := ""
 
 	for rows.Next() {
 		total += 1
 		var status string
+		var nextRetryAt string
+		var startedAt string
 		var finishedAt string
-		if err := rows.Scan(&status, &finishedAt); err != nil {
+		var lastError string
+		if err := rows.Scan(&status, &nextRetryAt, &startedAt, &finishedAt, &lastError); err != nil {
 			return fmt.Errorf("scan plan device run status: %w", err)
 		}
 		switch status {
 		case DeviceRunStatusPending:
 			pendingCount += 1
+			if strings.TrimSpace(nextRetryAt) == "" {
+				terminalPendingCount += 1
+			} else {
+				retryPendingCount += 1
+			}
 		case DeviceRunStatusRunning:
 			runningCount += 1
 		case DeviceRunStatusSuccess:
 			successCount += 1
 		case DeviceRunStatusFailed:
 			failedCount += 1
+			if isSkippedOfflineDeviceFailure(startedAt, lastError) {
+				skippedFailedCount += 1
+			}
 		case DeviceRunStatusStopped:
 			stoppedCount += 1
 		}
@@ -2113,14 +2127,15 @@ WHERE plan_run_id = ?`, planRunID)
 
 	nextStatus := RunStatusRunning
 	finishedAt := ""
+	hardFailedCount := failedCount - skippedFailedCount
 	switch {
-	case pendingCount > 0 || runningCount > 0:
-		if pendingCount == total {
+	case retryPendingCount > 0 || runningCount > 0:
+		if pendingCount == total && runningCount == 0 {
 			nextStatus = RunStatusPending
 		} else {
 			nextStatus = RunStatusRunning
 		}
-	case failedCount > 0:
+	case hardFailedCount > 0:
 		nextStatus = RunStatusFailed
 		finishedAt = lastFinishedAt
 	case successCount == total:
@@ -2129,12 +2144,18 @@ WHERE plan_run_id = ?`, planRunID)
 	case stoppedCount == total:
 		nextStatus = RunStatusStopped
 		finishedAt = lastFinishedAt
+	case successCount+stoppedCount+terminalPendingCount+skippedFailedCount == total:
+		nextStatus = RunStatusSuccess
+		finishedAt = lastFinishedAt
 	default:
 		nextStatus = RunStatusStopped
 		finishedAt = lastFinishedAt
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	if (nextStatus == RunStatusSuccess || nextStatus == RunStatusFailed || nextStatus == RunStatusStopped) && strings.TrimSpace(finishedAt) == "" {
+		finishedAt = now
+	}
 	if _, err := s.db.ExecContext(ctx, `
 UPDATE plan_runs
 SET status = ?, finished_at = ?, updated_at = ?
@@ -2544,12 +2565,27 @@ func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definitio
 	if definition.ScheduleType == ScheduleTypeDaily {
 		nextRetryText = nowText
 	}
-	if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, nextRetryText, nowText, deviceRun.PlanDeviceRunID); err != nil {
-		return fmt.Errorf("update plan device next retry: %w", err)
-	}
 	message := "设备不在线未启动"
 	if includeRetryTimestamp {
 		message = nowText + " 设备离线未启动"
+	}
+	if definition.ScheduleType == ScheduleTypeDaily {
+		if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = ?, updated_at = ? WHERE id = ?`, nextRetryText, nowText, deviceRun.PlanDeviceRunID); err != nil {
+			return fmt.Errorf("update plan device next retry: %w", err)
+		}
+	} else {
+		if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_device_runs
+SET status = ?, next_retry_at = '', finished_at = ?, last_error = ?, updated_at = ?
+WHERE id = ?`,
+			DeviceRunStatusFailed,
+			nowText,
+			message,
+			nowText,
+			deviceRun.PlanDeviceRunID,
+		); err != nil {
+			return fmt.Errorf("mark skipped once plan device run failed: %w", err)
+		}
 	}
 	extra := map[string]any{
 		"source":             "center",
@@ -2559,6 +2595,10 @@ func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definitio
 		extra["retry_at"] = nextRetryText
 	}
 	return s.appendEvent(ctx, run.PlanRunID, definition.PlanDefID, deviceRun.DeviceID, EventTypePlanDeviceStarted, message, extra)
+}
+
+func isSkippedOfflineDeviceFailure(startedAt string, lastError string) bool {
+	return strings.TrimSpace(startedAt) == "" && strings.TrimSpace(lastError) == "设备不在线未启动"
 }
 
 func (s *Service) deleteTaskRecord(ctx context.Context, taskID string) error {

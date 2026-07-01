@@ -3,6 +3,9 @@ import {
   ElButton,
   ElCard,
   ElDialog,
+  ElDropdown,
+  ElDropdownItem,
+  ElDropdownMenu,
   ElEmpty,
   ElMessageBox,
   ElPagination,
@@ -32,6 +35,21 @@ type LocationRowTreeNode = {
   slot_count: number;
   device_count: number;
   children?: LocationRowTreeNode[];
+};
+
+type RunDeviceTreeNode = {
+  node_key: string;
+  node_type: "zone" | "row" | "slot" | "device";
+  zone_id: string;
+  zone_name: string;
+  row_id: string;
+  row_name: string;
+  slot_id: string;
+  slot_name: string;
+  device_id: string;
+  device_name: string;
+  status: string;
+  children?: RunDeviceTreeNode[];
 };
 
 function renderStatus(status: string) {
@@ -123,6 +141,102 @@ function buildRunRowBindings(run: PlanRunRecord | null): PlanRowBinding[] {
   return Array.from(uniqueRows.values());
 }
 
+function buildRunDeviceTree(run: PlanRunRecord | null, nodes: LocationNodeRecord[]): RunDeviceTreeNode[] {
+  if (!run) {
+    return [];
+  }
+
+  const zoneMap = new Map<string, LocationNodeRecord>();
+  const rowMap = new Map<string, LocationNodeRecord>();
+  const slotMap = new Map<string, LocationNodeRecord>();
+
+  for (const node of nodes) {
+    if (node.node_type === "zone") {
+      zoneMap.set(node.node_id, node);
+    } else if (node.node_type === "row") {
+      rowMap.set(node.node_id, node);
+    } else if (node.node_type === "slot") {
+      slotMap.set(node.node_id, node);
+    }
+  }
+
+  const zoneTree = new Map<string, RunDeviceTreeNode>();
+  for (const item of run.device_runs || []) {
+    const zoneNode =
+      zoneTree.get(item.zone_id) ||
+      {
+        node_key: `zone:${item.zone_id}`,
+        node_type: "zone" as const,
+        zone_id: item.zone_id,
+        zone_name: zoneMap.get(item.zone_id)?.node_name || item.zone_id,
+        row_id: "",
+        row_name: "",
+        slot_id: "",
+        slot_name: "",
+        device_id: "",
+        device_name: "",
+        status: "",
+        children: []
+      };
+
+    let rowNode = (zoneNode.children || []).find((child) => child.node_key === `row:${item.zone_id}:${item.row_id}`);
+    if (!rowNode) {
+      rowNode = {
+        node_key: `row:${item.zone_id}:${item.row_id}`,
+        node_type: "row" as const,
+        zone_id: item.zone_id,
+        zone_name: zoneNode.zone_name,
+        row_id: item.row_id,
+        row_name: rowMap.get(item.row_id)?.node_name || item.row_id,
+        slot_id: "",
+        slot_name: "",
+        device_id: "",
+        device_name: "",
+        status: "",
+        children: []
+      };
+      zoneNode.children?.push(rowNode);
+    }
+
+    let slotNode = (rowNode.children || []).find((child) => child.node_key === `slot:${item.slot_id}`);
+    if (!slotNode) {
+      slotNode = {
+        node_key: `slot:${item.slot_id}`,
+        node_type: "slot" as const,
+        zone_id: item.zone_id,
+        zone_name: zoneNode.zone_name,
+        row_id: item.row_id,
+        row_name: rowNode.row_name,
+        slot_id: item.slot_id,
+        slot_name: slotMap.get(item.slot_id)?.node_name || item.slot_id,
+        device_id: "",
+        device_name: "",
+        status: "",
+        children: []
+      };
+      rowNode.children?.push(slotNode);
+    }
+
+    slotNode.children?.push({
+      node_key: `device:${item.plan_device_run_id}`,
+      node_type: "device",
+      zone_id: item.zone_id,
+      zone_name: zoneNode.zone_name,
+      row_id: item.row_id,
+      row_name: rowNode.row_name,
+      slot_id: item.slot_id,
+      slot_name: slotNode.slot_name,
+      device_id: item.device_id,
+      device_name: `设备 ${item.device_id}`,
+      status: item.status
+    });
+
+    zoneTree.set(item.zone_id, zoneNode);
+  }
+
+  return Array.from(zoneTree.values());
+}
+
 export const PlanRunsPage = defineComponent({
   name: "PlanRunsPage",
   setup() {
@@ -133,6 +247,7 @@ export const PlanRunsPage = defineComponent({
 
     const eventsDialogVisible = ref(false);
     const appendDialogVisible = ref(false);
+    const devicesDialogVisible = ref(false);
     const selectedRun = ref<PlanRunRecord | null>(null);
     const locationNodes = ref<LocationNodeRecord[]>([]);
     const supportingDataWarning = ref("");
@@ -150,6 +265,7 @@ export const PlanRunsPage = defineComponent({
     });
 
     const availableRowTree = computed(() => buildLocationRowTree(locationNodes.value));
+    const runDeviceTree = computed(() => buildRunDeviceTree(selectedRun.value, locationNodes.value));
 
     async function loadPageData() {
       await plansStore.loadRuns();
@@ -185,6 +301,11 @@ export const PlanRunsPage = defineComponent({
       void plansStore.loadPlanEvents(run.plan_def_id, run.plan_run_id).then(() => {
         eventsDialogVisible.value = true;
       });
+    }
+
+    function openDevicesDialog(run: PlanRunRecord) {
+      selectedRun.value = run;
+      devicesDialogVisible.value = true;
     }
 
     function syncSelectedRows(tableInstance: any, rows: PlanRowBinding[]) {
@@ -352,38 +473,65 @@ export const PlanRunsPage = defineComponent({
                             }),
                             h(
                               ElTableColumn,
-                              { label: "操作", width: 360, fixed: "right" },
+                              { label: "操作", width: 220, fixed: "right" },
                               {
                                 default: (scope: { row: PlanRunRecord }) =>
                                   h("div", { class: "table-actions" }, [
-                                    h(ElButton, { type: "primary", link: true, onClick: () => openAppendDialog(scope.row) }, () => "追加排"),
                                     h(
                                       ElButton,
                                       {
-                                        type: "success",
+                                        type: "primary",
                                         link: true,
-                                        onClick: () => openEventsDialog(scope.row)
+                                        onClick: () => openDevicesDialog(scope.row)
                                       },
-                                      () => "查看事件"
+                                      () => "查看设备"
                                     ),
                                     h(
-                                      ElButton,
+                                      ElDropdown,
                                       {
-                                        type: "danger",
-                                        link: true,
-                                        onClick: () => void deleteCurrentRun(scope.row)
+                                        trigger: "click"
                                       },
-                                      () => "删除"
-                                    ),
-                                    h(
-                                      ElButton,
                                       {
-                                        type: "danger",
-                                        link: true,
-                                        loading: stoppingRunID.value === scope.row.plan_run_id,
-                                        onClick: () => void stopCurrentRun(scope.row)
+                                        default: () => h(ElButton, { type: "primary", link: true }, () => "更多"),
+                                        dropdown: () =>
+                                          h(
+                                            ElDropdownMenu,
+                                            null,
+                                            {
+                                              default: () => [
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "append_rows",
+                                                    onClick: () => openAppendDialog(scope.row)
+                                                  },
+                                                  () => "追加排"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "stop_run",
+                                                    disabled: stoppingRunID.value === scope.row.plan_run_id,
+                                                    onClick: () => {
+                                                      void stopCurrentRun(scope.row);
+                                                    }
+                                                  },
+                                                  () => (stoppingRunID.value === scope.row.plan_run_id ? "停止中..." : "停止")
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "delete_run",
+                                                    onClick: () => {
+                                                      void deleteCurrentRun(scope.row);
+                                                    }
+                                                  },
+                                                  () => "删除"
+                                                )
+                                              ]
+                                            }
+                                          )
                                       },
-                                      () => "停止"
                                     )
                                   ])
                               }
@@ -442,6 +590,93 @@ export const PlanRunsPage = defineComponent({
                     }
                   ),
             footer: () => h(ElButton, { onClick: () => (eventsDialogVisible.value = false) }, () => "关闭")
+          }
+        ),
+        h(
+          ElDialog,
+          {
+            modelValue: devicesDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => (devicesDialogVisible.value = value),
+            title: selectedRun.value ? `运行设备：${selectedRun.value.plan_run_id}` : "运行设备",
+            width: "980px"
+          },
+          {
+            default: () =>
+              runDeviceTree.value.length === 0
+                ? h(ElEmpty, { description: "当前实例还没有设备记录" })
+                : h(
+                    ElTable,
+                    {
+                      data: runDeviceTree.value,
+                      stripe: true,
+                      border: false,
+                      class: "app-table",
+                      height: "520px",
+                      rowKey: "node_key",
+                      defaultExpandAll: true,
+                      treeProps: {
+                        children: "children"
+                      }
+                    },
+                    {
+                      default: () => [
+                        h(ElTableColumn, {
+                          label: "分区 / 排 / 槽位 / 设备",
+                          minWidth: 300,
+                          formatter: (row: RunDeviceTreeNode) => {
+                            if (row.node_type === "zone") {
+                              return row.zone_name;
+                            }
+                            if (row.node_type === "row") {
+                              return row.row_name;
+                            }
+                            if (row.node_type === "slot") {
+                              return row.slot_name;
+                            }
+                            return row.device_name;
+                          }
+                        }),
+                        h(ElTableColumn, {
+                          label: "设备ID",
+                          minWidth: 120,
+                          formatter: (row: RunDeviceTreeNode) => (row.node_type === "device" ? row.device_id : "")
+                        }),
+                        h(ElTableColumn, {
+                          label: "状态",
+                          width: 120
+                        }, {
+                          default: (scope: { row: RunDeviceTreeNode }) =>
+                            scope.row.node_type === "device" ? renderStatus(scope.row.status) : h("span", "")
+                        }),
+                        h(
+                          ElTableColumn,
+                          {
+                            label: "操作",
+                            width: 120,
+                            fixed: "right"
+                          },
+                          {
+                            default: (scope: { row: RunDeviceTreeNode }) =>
+                              scope.row.node_type === "device" && selectedRun.value
+                                ? h(
+                                    ElButton,
+                                    {
+                                      type: "primary",
+                                      link: true,
+                                      onClick: () =>
+                                        openEventsDialog(selectedRun.value as PlanRunRecord, {
+                                          device_id: scope.row.device_id
+                                        } as PlanDeviceRunRecord)
+                                    },
+                                    () => "查看事件"
+                                  )
+                                : h("span", "")
+                          }
+                        )
+                      ]
+                    }
+                  ),
+            footer: () => h(ElButton, { onClick: () => (devicesDialogVisible.value = false) }, () => "关闭")
           }
         ),
         h(
