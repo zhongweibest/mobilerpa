@@ -55,7 +55,7 @@ func New() (*App, error) {
 	scriptService := script.NewService(db, cfg.ScriptRootPath)
 	settingsService := settings.NewService(db)
 	workflowService := workflow.NewService(db, deviceService, taskService, dispatchService)
-	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService)
+	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService, settingsService)
 	planService.SetStartFanout(cfg.PlanStartFanout)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
 	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, workflowService)

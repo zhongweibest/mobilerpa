@@ -49,7 +49,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 
     taskSvc := task.NewService(db)
     dispatchSvc := dispatch.NewService(taskSvc)
-    planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil)
+    planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil, nil)
 
     items, err := planSvc.ListEvents(ctx, "1")
     if err != nil {

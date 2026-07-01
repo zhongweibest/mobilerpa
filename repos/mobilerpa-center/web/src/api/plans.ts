@@ -61,6 +61,16 @@ export function startPlan(planDefID: string): Promise<PlanRunRecord> {
   });
 }
 
+export function updatePlanStatus(planDefID: string, status: string): Promise<PlanDefinitionRecord> {
+  return requestJSON<PlanDefinitionRecord>(`/api/v1/plans/${encodeURIComponent(planDefID)}/status`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ status })
+  });
+}
+
 export function fetchPlanRun(planDefID: string, planRunID: string): Promise<PlanRunRecord> {
   return requestJSON<PlanRunRecord>(`/api/v1/plans/${encodeURIComponent(planDefID)}/runs/${encodeURIComponent(planRunID)}`);
 }

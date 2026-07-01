@@ -120,7 +120,7 @@ func TestWorkflowSessionResultKeepsStoppedDeviceNotBusy(t *testing.T) {
 	dispatchSvc := dispatch.NewService(taskSvc)
 	deviceSvc := device.NewService(db)
 	workflowSvc := workflow.NewService(db, deviceSvc, taskSvc, dispatchSvc)
-	planSvc := NewService(db, nil, taskSvc, dispatchSvc, workflowSvc)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, workflowSvc, nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 
@@ -238,7 +238,7 @@ func TestStopRunAllowsDisconnectedWorkflowDevice(t *testing.T) {
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
 	workflowSvc := workflow.NewService(db, nil, nil, nil)
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, workflowSvc)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, workflowSvc, nil)
 
 	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
 	workflowDef, err := workflowSvc.CreateDefinition(ctx, workflow.CreateDefinitionRequest{
@@ -319,7 +319,7 @@ func TestCreateAndListDefinitions(t *testing.T) {
 	}
 	defer db.Close()
 
-	service := NewService(db, nil, nil, nil, nil)
+	service := NewService(db, nil, nil, nil, nil, nil)
 	ctx := t.Context()
 
 	created, err := service.CreateDefinition(ctx, CreateDefinitionRequest{
@@ -373,7 +373,7 @@ func TestPlanDailyStartAndStopSelection(t *testing.T) {
 	}
 	defer db.Close()
 
-	service := NewService(db, nil, nil, nil, nil)
+	service := NewService(db, nil, nil, nil, nil, nil)
 	ctx := t.Context()
 
 	created, err := service.CreateDefinition(ctx, CreateDefinitionRequest{
@@ -478,7 +478,7 @@ func TestDeleteDefinitionAndUpdateRows(t *testing.T) {
 	}
 	defer db.Close()
 
-	service := NewService(db, nil, nil, nil, nil)
+	service := NewService(db, nil, nil, nil, nil, nil)
 	ctx := t.Context()
 
 	created, err := service.CreateDefinition(ctx, CreateDefinitionRequest{
@@ -533,7 +533,7 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 	}
 	defer db.Close()
 
-	service := NewService(db, nil, nil, nil, nil)
+	service := NewService(db, nil, nil, nil, nil, nil)
 	ctx := t.Context()
 
 	created, err := service.CreateDefinition(ctx, CreateDefinitionRequest{
@@ -553,25 +553,31 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 		t.Fatalf("create plan definition: %v", err)
 	}
 
-	now := time.Now()
-	if isManualStartAllowed(created, time.Date(now.Year(), now.Month(), now.Day(), 8, 59, 0, 0, time.Local)) != true {
+	manualBeforeStart := time.Date(2026, 7, 1, 8, 59, 0, 0, time.Local)
+	manualAtStart := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
+	created.StatusUpdatedAt = time.Date(2026, 7, 1, 8, 0, 0, 0, time.Local).UTC().Format(time.RFC3339)
+	if isManualStartAllowed(created, manualBeforeStart) != true {
 		t.Fatalf("expected manual start allowed before daily_start_time")
 	}
-	if isManualStartAllowed(created, time.Date(now.Year(), now.Month(), now.Day(), 9, 0, 0, 0, time.Local)) != false {
-		t.Fatalf("expected manual start blocked at daily_start_time")
+	if isManualStartAllowed(created, manualAtStart) != false {
+		t.Fatalf("expected manual start blocked at daily_start_time when task should auto start")
+	}
+	created.StatusUpdatedAt = time.Date(2026, 7, 1, 10, 0, 0, 0, time.Local).UTC().Format(time.RFC3339)
+	if isManualStartAllowed(created, time.Date(2026, 7, 1, 10, 1, 0, 0, time.Local)) != true {
+		t.Fatalf("expected manual start allowed after enabling task later than daily_start_time")
 	}
 
 	run := Run{
 		PlanRunID: "plr_test",
 		PlanDefID: created.PlanDefID,
-		RunDate:   now.In(time.Local).Format("2006-01-02"),
+		RunDate:   manualBeforeStart.In(time.Local).Format("2006-01-02"),
 		Status:    RunStatusRunning,
 	}
 
-	if !shouldApplyDailyAdditionsImmediately(created, run, time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, time.Local)) {
+	if !shouldApplyDailyAdditionsImmediately(created, run, time.Date(2026, 7, 1, 10, 0, 0, 0, time.Local)) {
 		t.Fatalf("expected additions applied immediately before deadline")
 	}
-	if shouldApplyDailyAdditionsImmediately(created, run, time.Date(now.Year(), now.Month(), now.Day(), 23, 0, 0, 0, time.Local)) {
+	if shouldApplyDailyAdditionsImmediately(created, run, time.Date(2026, 7, 1, 23, 0, 0, 0, time.Local)) {
 		t.Fatalf("expected additions deferred at deadline")
 	}
 	if shouldApplyDailyAdditionsImmediately(created, Run{
@@ -579,7 +585,7 @@ func TestDailyManualStartAndDeferredDeviceSync(t *testing.T) {
 		PlanDefID: created.PlanDefID,
 		RunDate:   "2000-01-01",
 		Status:    RunStatusStopped,
-	}, time.Date(now.Year(), now.Month(), now.Day(), 10, 0, 0, 0, time.Local)) {
+	}, time.Date(2026, 7, 1, 10, 0, 0, 0, time.Local)) {
 		t.Fatalf("expected additions deferred for inactive or non-today run")
 	}
 }
@@ -599,7 +605,7 @@ func TestScriptPlanBlocksOnOtherPlanRun(t *testing.T) {
 
 	taskSvc := task.NewService(db)
 	dispatchSvc := dispatch.NewService(taskSvc)
-	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil, nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.ExecContext(ctx, `
@@ -652,7 +658,7 @@ func TestStartPlanFailsBeforeCreatingRunWhenTargetDeviceBusy(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -723,7 +729,7 @@ func TestStartOncePlanSkipsOfflineDeviceWithoutError(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
 
@@ -798,7 +804,7 @@ func TestStartOncePlanDoesNotValidateOfflineDeviceExecutionProfile(t *testing.T)
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
 	if _, err := db.ExecContext(ctx, `
@@ -847,7 +853,7 @@ func TestStartOncePlanSkipsDisconnectedOnlineDeviceWithoutError(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
 
@@ -896,7 +902,7 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
 
@@ -907,7 +913,7 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 		TargetScriptVersion: "v1",
 		ScheduleType:        ScheduleTypeDaily,
 		DailyStartTime:      "09:00:00",
-		DailyDeadlineTime:   "23:00:00",
+		DailyDeadlineTime:   "23:59:59",
 		Status:              StatusEnabled,
 		Rows:                []PlanRowBinding{{ZoneID: zoneID, RowID: rowID}},
 	})
@@ -929,11 +935,12 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse next_retry_at: %v", err)
 	}
-	if retryAt.Sub(time.Now().UTC()) < 4*time.Minute {
-		t.Fatalf("expected retry timestamp about 5 minutes later, got %s", run.DeviceRuns[0].NextRetryAt)
+	retryDelay := retryAt.Sub(time.Now().UTC())
+	if retryDelay < 30*time.Second || retryDelay > 90*time.Second {
+		t.Fatalf("expected retry timestamp about 1 minute later, got %s", run.DeviceRuns[0].NextRetryAt)
 	}
 
-	processedRuns, err := planSvc.RetryDueTargets(ctx, time.Now().Add(2*time.Minute), 5*time.Minute)
+	processedRuns, err := planSvc.RetryDueTargets(ctx, time.Now().Add(30*time.Second), time.Minute)
 	if err != nil {
 		t.Fatalf("retry due targets should not fail on disconnected device: %v", err)
 	}
@@ -957,7 +964,7 @@ func TestRetryDailyPlanKeepsDisconnectedDeviceAsDeferred(t *testing.T) {
 		}
 	}
 
-	processedRuns, err = planSvc.RetryDueTargets(ctx, retryAt.Add(2*time.Second), 5*time.Minute)
+	processedRuns, err = planSvc.RetryDueTargets(ctx, retryAt.Add(2*time.Second), time.Minute)
 	if err != nil {
 		t.Fatalf("retry due targets after retry timestamp should not fail: %v", err)
 	}
@@ -993,7 +1000,7 @@ func TestOnceRunBecomesSuccessWhenOnlyOfflinePendingTargetsRemain(t *testing.T) 
 	ctx := t.Context()
 	taskSvc := task.NewService(db)
 	dispatchSvc := dispatch.NewService(taskSvc)
-	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil)
+	planSvc := NewService(db, nil, taskSvc, dispatchSvc, nil, nil)
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := db.ExecContext(ctx, `
@@ -1059,7 +1066,7 @@ func TestStartOncePlanSkippedOfflineDeviceDoesNotBlockNextStart(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: false}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	deviceID, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "offline")
 
@@ -1118,7 +1125,7 @@ func TestAddRowsToOnceRunMarksOfflineNewTargetsFailed(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	onlineDeviceID, zoneID, rowIDOnline := seedBoundRowDevice(t, ctx, db, "online")
 
@@ -1241,7 +1248,7 @@ func TestRemoveRowAppendsPlanRunLevelEvent(t *testing.T) {
 	taskSvc := task.NewService(db)
 	deviceSvc := device.NewService(db)
 	dispatcherStub := &stubPlanDispatcher{hasConnection: true}
-	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil)
+	planSvc := NewService(db, deviceSvc, taskSvc, dispatcherStub, nil, nil)
 
 	_, zoneID, rowID := seedBoundRowDevice(t, ctx, db, "online")
 

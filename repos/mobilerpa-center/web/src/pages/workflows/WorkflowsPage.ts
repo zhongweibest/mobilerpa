@@ -53,11 +53,15 @@ type WorkflowSegmentForm =
   | {
       id: string;
       type: "sequence";
+      segment_name: string;
+      collapsed: boolean;
       steps: SequenceStepForm[];
     }
   | {
       id: string;
       type: "loop";
+      segment_name: string;
+      collapsed: boolean;
       loop: LoopGroupForm;
     };
 
@@ -96,27 +100,36 @@ function cloneStep(step: SequenceStepForm): SequenceStepForm {
   return createSequenceStep(step.node_name, step.script_name, step.script_version);
 }
 
-function createSequenceSegment(stepNames?: string[]): WorkflowSegmentForm {
+function createSequenceSegment(stepNames?: string[], segmentName = ""): WorkflowSegmentForm {
   const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : [""];
   return {
     id: nextID("segment_seq"),
     type: "sequence",
+    segment_name: segmentName,
+    collapsed: false,
     steps: names.map((name) => createSequenceStep(name))
   };
 }
 
-function createLoopSegment(stepNames?: string[], loopName = "", maxIterations = 3): WorkflowSegmentForm {
+function createLoopSegment(stepNames?: string[], loopName = "", maxIterations = 3, segmentName = ""): WorkflowSegmentForm {
   const names = Array.isArray(stepNames) && stepNames.length > 0 ? stepNames : [""];
+  const resolvedName = loopName || segmentName;
   return {
     id: nextID("segment_loop"),
     type: "loop",
+    segment_name: resolvedName,
+    collapsed: false,
     loop: {
       id: nextID("loop"),
-      loop_name: loopName,
+      loop_name: resolvedName,
       max_iterations: maxIterations,
       steps: names.map((name) => createSequenceStep(name))
     }
   };
+}
+
+function getLoopSegmentDisplayName(segment: WorkflowSegmentForm & { type: "loop" }, fallback: string) {
+  return segment.loop.loop_name.trim() || segment.segment_name.trim() || fallback;
 }
 
 function buildWorkflowSummary(item: WorkflowDefinitionRecord) {
@@ -175,7 +188,94 @@ function buildEdgeMaps(edges: WorkflowEdgeRecord[]) {
   return { nextMap, loopBodyMap, loopExitMap };
 }
 
+function parseBuilderSegments(workflow: WorkflowDefinitionRecord): WorkflowSegmentForm[] | null {
+  const raw = (workflow.builder_segments_json || "").trim();
+  if (raw === "") {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return null;
+    }
+    const result: WorkflowSegmentForm[] = [];
+    for (const item of parsed) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      if (item.type === "sequence") {
+        result.push({
+          id: nextID("segment_seq"),
+          type: "sequence",
+          segment_name: String(item.segment_name || ""),
+          collapsed: Boolean(item.collapsed),
+          steps: Array.isArray(item.steps)
+            ? item.steps.map((step: any) => createSequenceStep(String(step?.node_name || ""), String(step?.script_name || ""), String(step?.script_version || "")))
+            : [createSequenceStep()]
+        });
+        continue;
+      }
+      if (item.type === "loop") {
+        const loopName = String(item.loop?.loop_name || item.segment_name || "");
+        result.push({
+          id: nextID("segment_loop"),
+          type: "loop",
+          segment_name: loopName,
+          collapsed: Boolean(item.collapsed),
+          loop: {
+            id: nextID("loop"),
+            loop_name: loopName,
+            max_iterations: Number(item.loop?.max_iterations || 1),
+            steps: Array.isArray(item.loop?.steps)
+              ? item.loop.steps.map((step: any) => createSequenceStep(String(step?.node_name || ""), String(step?.script_name || ""), String(step?.script_version || "")))
+              : [createSequenceStep()]
+          }
+        });
+      }
+    }
+    return result.length > 0 ? result : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+function stringifyBuilderSegments(segments: WorkflowSegmentForm[]) {
+  return JSON.stringify(
+    segments.map((segment) =>
+      segment.type === "sequence"
+        ? {
+            type: "sequence",
+            segment_name: segment.segment_name,
+            collapsed: segment.collapsed,
+            steps: segment.steps.map((step) => ({
+              node_name: step.node_name,
+              script_name: step.script_name,
+              script_version: step.script_version
+            }))
+          }
+        : {
+            type: "loop",
+            segment_name: segment.loop.loop_name,
+            collapsed: segment.collapsed,
+            loop: {
+              loop_name: segment.loop.loop_name,
+              max_iterations: segment.loop.max_iterations,
+              steps: segment.loop.steps.map((step) => ({
+                node_name: step.node_name,
+                script_name: step.script_name,
+                script_version: step.script_version
+              }))
+            }
+          }
+    )
+  );
+}
+
 function buildSegmentsFromWorkflow(workflow: WorkflowDefinitionRecord): WorkflowSegmentForm[] {
+  const builderSegments = parseBuilderSegments(workflow);
+  if (builderSegments && builderSegments.length > 0) {
+    return builderSegments;
+  }
   const nodes = getWorkflowNodes(workflow);
   const edges = getWorkflowEdges(workflow);
   if (nodes.length === 0) {
@@ -241,7 +341,7 @@ function buildSegmentsFromWorkflow(workflow: WorkflowDefinitionRecord): Workflow
         bodyCursor = nodeMap.get(nextID);
       }
 
-      const loopSegment = createLoopSegment(undefined, cursor.node_name || "", Number(cursor.max_iterations || 0) || 1);
+      const loopSegment = createLoopSegment(undefined, cursor.node_name || "", Number(cursor.max_iterations || 0) || 1, cursor.node_name || "");
       loopSegment.loop.steps = loopSteps.length > 0 ? loopSteps : [createSequenceStep()];
       segments.push(loopSegment);
       cursor = nodeMap.get(loopExitMap.get(cursor.node_id) || nextMap.get(cursor.node_id) || "");
@@ -362,7 +462,8 @@ export const WorkflowsPage = defineComponent({
     }
 
     function addLoopSegment() {
-      segments.value.push(createLoopSegment(undefined, `循环段${segments.value.filter((item) => item.type === "loop").length + 1}`, 3));
+      const loopIndex = segments.value.filter((item) => item.type === "loop").length + 1;
+      segments.value.push(createLoopSegment(undefined, `循环段${loopIndex}`, 3, `循环段${loopIndex}`));
     }
 
     function removeSegment(segmentID: string) {
@@ -585,6 +686,7 @@ export const WorkflowsPage = defineComponent({
         const requestPayload = {
           workflow_name: createForm.workflow_name.trim(),
           description: createForm.description.trim(),
+          builder_segments_json: stringifyBuilderSegments(segments.value),
           status: createForm.status,
           nodes: payload.nodes,
           edges: payload.edges
@@ -708,6 +810,11 @@ export const WorkflowsPage = defineComponent({
     }
 
     function renderSequenceSegment(segment: WorkflowSegmentForm & { type: "sequence" }, index: number) {
+      const stepSummary =
+        segment.steps
+          .map((step) => step.node_name.trim() || step.script_name.trim() || "未命名步骤")
+          .filter(Boolean)
+          .join(" -> ") || "暂无步骤";
       return h(
         ElCard,
         { class: "workflow-segment-card", shadow: "never" },
@@ -715,10 +822,20 @@ export const WorkflowsPage = defineComponent({
           header: () =>
             h("div", { class: "card-header" }, [
               h("div", null, [
-                h("div", { class: "card-header__title" }, `顺序段 ${index + 1}`),
-                h("div", { class: "card-header__subtitle" }, "该段中的脚本步骤会按顺序串行执行")
+                h("div", { class: "card-header__title" }, segment.segment_name.trim() || `顺序段 ${index + 1}`),
+                h("div", { class: "card-header__subtitle" }, segment.collapsed ? stepSummary : "该段中的脚本步骤会按顺序串行执行")
               ]),
               h("div", { class: "table-actions" }, [
+                h(
+                  ElButton,
+                  {
+                    link: true,
+                    onClick: () => {
+                      segment.collapsed = !segment.collapsed;
+                    }
+                  },
+                  () => (segment.collapsed ? "展开" : "收起")
+                ),
                 h(
                   ElButton,
                   {
@@ -750,13 +867,28 @@ export const WorkflowsPage = defineComponent({
             ]),
           default: () =>
             h("div", { class: "workflow-segment-body" }, [
-              renderStepTable(segment.steps, "添加步骤")
+              h(ElFormItem, { label: "顺序段名称" }, () =>
+                h(ElInput, {
+                  modelValue: segment.segment_name,
+                  "onUpdate:modelValue": (value: string) => {
+                    segment.segment_name = value;
+                  },
+                  placeholder: "例如：预处理阶段"
+                })
+              ),
+              segment.collapsed ? null : renderStepTable(segment.steps, "添加步骤")
             ])
         }
       );
     }
 
     function renderLoopSegment(segment: WorkflowSegmentForm & { type: "loop" }, index: number) {
+      const stepSummary =
+        segment.loop.steps
+          .map((step) => step.node_name.trim() || step.script_name.trim() || "未命名步骤")
+          .filter(Boolean)
+          .join(" -> ") || "暂无步骤";
+      const displayName = getLoopSegmentDisplayName(segment, `循环段 ${index + 1}`);
       return h(
         ElCard,
         { class: "workflow-segment-card workflow-segment-card--loop", shadow: "never" },
@@ -764,10 +896,24 @@ export const WorkflowsPage = defineComponent({
           header: () =>
             h("div", { class: "card-header" }, [
               h("div", null, [
-                h("div", { class: "card-header__title" }, `循环段 ${index + 1}`),
-                h("div", { class: "card-header__subtitle" }, "循环节点控制进入循环体的总次数")
+                h("div", { class: "card-header__title" }, displayName),
+                h(
+                  "div",
+                  { class: "card-header__subtitle" },
+                  segment.collapsed ? `${displayName} / ${stepSummary}` : "循环节点控制进入循环体的总次数"
+                )
               ]),
               h("div", { class: "table-actions" }, [
+                h(
+                  ElButton,
+                  {
+                    link: true,
+                    onClick: () => {
+                      segment.collapsed = !segment.collapsed;
+                    }
+                  },
+                  () => (segment.collapsed ? "展开" : "收起")
+                ),
                 h(
                   ElButton,
                   {
@@ -799,28 +945,31 @@ export const WorkflowsPage = defineComponent({
             ]),
           default: () =>
             h("div", { class: "workflow-segment-body" }, [
-              h("div", { class: "workflow-segment-grid" }, [
-                h(ElFormItem, { label: "循环段名称" }, () =>
-                  h(ElInput, {
-                    modelValue: segment.loop.loop_name,
-                    "onUpdate:modelValue": (value: string) => {
-                      segment.loop.loop_name = value;
-                    },
-                    placeholder: "例如：CDE 循环"
-                  })
-                ),
-                h(ElFormItem, { label: "最大循环次数" }, () =>
-                  h(ElInputNumber, {
-                    modelValue: segment.loop.max_iterations,
-                    "onUpdate:modelValue": (value: number) => {
-                      segment.loop.max_iterations = Number(value || 0);
-                    },
-                    min: 1,
-                    step: 1
-                  })
-                )
-              ]),
-              renderStepTable(segment.loop.steps, "添加步骤")
+              segment.collapsed
+                ? null
+                : h("div", { class: "workflow-segment-grid" }, [
+                    h(ElFormItem, { label: "循环段名称" }, () =>
+                      h(ElInput, {
+                        modelValue: segment.loop.loop_name,
+                        "onUpdate:modelValue": (value: string) => {
+                          segment.loop.loop_name = value;
+                          segment.segment_name = value;
+                        },
+                        placeholder: "例如：CDE 循环"
+                      })
+                    ),
+                    h(ElFormItem, { label: "最大循环次数" }, () =>
+                      h(ElInputNumber, {
+                        modelValue: segment.loop.max_iterations,
+                        "onUpdate:modelValue": (value: number) => {
+                          segment.loop.max_iterations = Number(value || 0);
+                        },
+                        min: 1,
+                        step: 1
+                      })
+                    )
+                  ]),
+              segment.collapsed ? null : renderStepTable(segment.loop.steps, "添加步骤")
             ])
         }
       );

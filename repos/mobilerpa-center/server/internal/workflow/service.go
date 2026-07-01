@@ -37,14 +37,15 @@ var (
 
 // Definition 表示工作流定义。
 type Definition struct {
-	WorkflowDefID string `json:"workflow_def_id"`
-	WorkflowName  string `json:"workflow_name"`
-	Description   string `json:"description"`
-	Status        string `json:"status"`
-	Nodes         []Node `json:"nodes"`
-	Edges         []Edge `json:"edges"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	WorkflowDefID      string `json:"workflow_def_id"`
+	WorkflowName       string `json:"workflow_name"`
+	Description        string `json:"description"`
+	BuilderSegmentsJSON string `json:"builder_segments_json"`
+	Status             string `json:"status"`
+	Nodes              []Node `json:"nodes"`
+	Edges              []Edge `json:"edges"`
+	CreatedAt          string `json:"created_at"`
+	UpdatedAt          string `json:"updated_at"`
 }
 
 // Node 表示工作流节点定义。
@@ -72,20 +73,22 @@ type Edge struct {
 
 // CreateDefinitionRequest 描述创建工作流定义的请求。
 type CreateDefinitionRequest struct {
-	WorkflowName string `json:"workflow_name"`
-	Description  string `json:"description"`
-	Status       string `json:"status"`
-	Nodes        []Node `json:"nodes"`
-	Edges        []Edge `json:"edges"`
+	WorkflowName        string `json:"workflow_name"`
+	Description         string `json:"description"`
+	BuilderSegmentsJSON string `json:"builder_segments_json"`
+	Status              string `json:"status"`
+	Nodes               []Node `json:"nodes"`
+	Edges               []Edge `json:"edges"`
 }
 
 // UpdateDefinitionRequest 描述更新工作流定义的请求。
 type UpdateDefinitionRequest struct {
-	WorkflowName string `json:"workflow_name"`
-	Description  string `json:"description"`
-	Status       string `json:"status"`
-	Nodes        []Node `json:"nodes"`
-	Edges        []Edge `json:"edges"`
+	WorkflowName        string `json:"workflow_name"`
+	Description         string `json:"description"`
+	BuilderSegmentsJSON string `json:"builder_segments_json"`
+	Status              string `json:"status"`
+	Nodes               []Node `json:"nodes"`
+	Edges               []Edge `json:"edges"`
 }
 
 // Service 现在只负责工作流定义与快照读取，不再承载运行实例生命周期。
@@ -108,6 +111,7 @@ func NewService(db *sql.DB, devices *device.Service, tasks *task.Service, _ any)
 func (s *Service) CreateDefinition(ctx context.Context, req CreateDefinitionRequest) (Definition, error) {
 	req.WorkflowName = strings.TrimSpace(req.WorkflowName)
 	req.Description = strings.TrimSpace(req.Description)
+	req.BuilderSegmentsJSON = strings.TrimSpace(req.BuilderSegmentsJSON)
 	req.Status = strings.TrimSpace(req.Status)
 	if req.WorkflowName == "" {
 		return Definition{}, ErrWorkflowDefinitionNameRequired
@@ -153,10 +157,11 @@ func (s *Service) CreateDefinition(ctx context.Context, req CreateDefinitionRequ
 
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO workflow_defs (
-    workflow_name, description, status, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?)`,
+    workflow_name, description, builder_segments_json, status, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?)`,
 		req.WorkflowName,
 		req.Description,
+		req.BuilderSegmentsJSON,
 		req.Status,
 		now,
 		now,
@@ -233,6 +238,7 @@ func (s *Service) UpdateDefinition(ctx context.Context, workflowDefID string, re
 
 	req.WorkflowName = strings.TrimSpace(req.WorkflowName)
 	req.Description = strings.TrimSpace(req.Description)
+	req.BuilderSegmentsJSON = strings.TrimSpace(req.BuilderSegmentsJSON)
 	req.Status = strings.TrimSpace(req.Status)
 	if req.WorkflowName == "" {
 		return Definition{}, ErrWorkflowDefinitionNameRequired
@@ -278,10 +284,11 @@ func (s *Service) UpdateDefinition(ctx context.Context, workflowDefID string, re
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE workflow_defs
-SET workflow_name = ?, description = ?, status = ?, updated_at = ?
+SET workflow_name = ?, description = ?, builder_segments_json = ?, status = ?, updated_at = ?
 WHERE id = ?`,
 		req.WorkflowName,
 		req.Description,
+		req.BuilderSegmentsJSON,
 		req.Status,
 		now,
 		workflowDefID,
@@ -353,7 +360,7 @@ INSERT INTO workflow_edges (
 // ListDefinitions 返回工作流定义列表。
 func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id AS workflow_def_id, workflow_name, description, status, created_at, updated_at
+SELECT id AS workflow_def_id, workflow_name, description, builder_segments_json, status, created_at, updated_at
 FROM workflow_defs
 ORDER BY id DESC`)
 	if err != nil {
@@ -368,6 +375,7 @@ ORDER BY id DESC`)
 			&item.WorkflowDefID,
 			&item.WorkflowName,
 			&item.Description,
+			&item.BuilderSegmentsJSON,
 			&item.Status,
 			&item.CreatedAt,
 			&item.UpdatedAt,
@@ -415,7 +423,7 @@ func (s *Service) GetDefinition(ctx context.Context, workflowDefID string) (Defi
 
 	var item Definition
 	row := s.db.QueryRowContext(ctx, `
-SELECT id AS workflow_def_id, workflow_name, description, status, created_at, updated_at
+SELECT id AS workflow_def_id, workflow_name, description, builder_segments_json, status, created_at, updated_at
 FROM workflow_defs
 WHERE id = ?`,
 		workflowDefID,
@@ -424,6 +432,7 @@ WHERE id = ?`,
 		&item.WorkflowDefID,
 		&item.WorkflowName,
 		&item.Description,
+		&item.BuilderSegmentsJSON,
 		&item.Status,
 		&item.CreatedAt,
 		&item.UpdatedAt,

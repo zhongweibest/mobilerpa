@@ -10,6 +10,11 @@ export interface PlanDefinitionRecord {
   daily_start_time: string;
   daily_deadline_time: string;
   status: string;
+  status_updated_at: string;
+  retry_policy_mode: string;
+  daily_retry_enabled: boolean;
+  daily_retry_interval_seconds: number;
+  daily_retry_stop_before_deadline_minutes: number;
   rows: PlanRowBinding[];
   created_at: string;
   updated_at: string;
@@ -90,5 +95,15 @@ export interface CreatePlanRequest {
   daily_start_time?: string;
   daily_deadline_time?: string;
   status: string;
+  retry_policy_mode?: string;
+  daily_retry_enabled?: boolean;
+  daily_retry_interval_seconds?: number;
+  daily_retry_stop_before_deadline_minutes?: number;
   rows: PlanRowBinding[];
+}
+
+export interface PlanDailyRetrySettings {
+  plan_daily_retry_enabled: boolean;
+  plan_daily_retry_interval_seconds: number;
+  plan_daily_retry_stop_before_deadline_minutes: number;
 }

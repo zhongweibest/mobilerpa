@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS workflow_defs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     workflow_name TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT '',
+    builder_segments_json TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'draft',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
@@ -168,6 +169,11 @@ CREATE TABLE IF NOT EXISTS plan_defs (
     daily_start_time TEXT NOT NULL DEFAULT '',
     daily_deadline_time TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'enabled',
+    status_updated_at TEXT NOT NULL DEFAULT '',
+    retry_policy_mode TEXT NOT NULL DEFAULT 'inherit',
+    daily_retry_enabled INTEGER NOT NULL DEFAULT 1,
+    daily_retry_interval_seconds INTEGER NOT NULL DEFAULT 60,
+    daily_retry_stop_before_deadline_minutes INTEGER NOT NULL DEFAULT 30,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT NOT NULL DEFAULT ''
@@ -351,6 +357,24 @@ GROUP BY script_name`); err != nil {
 		return err
 	}
 	if err := ensureColumn(ctx, db, "plan_device_runs", "next_retry_at", "ALTER TABLE plan_device_runs ADD COLUMN next_retry_at TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_defs", "status_updated_at", "ALTER TABLE plan_defs ADD COLUMN status_updated_at TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_defs", "retry_policy_mode", "ALTER TABLE plan_defs ADD COLUMN retry_policy_mode TEXT NOT NULL DEFAULT 'inherit'"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_defs", "daily_retry_enabled", "ALTER TABLE plan_defs ADD COLUMN daily_retry_enabled INTEGER NOT NULL DEFAULT 1"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_defs", "daily_retry_interval_seconds", "ALTER TABLE plan_defs ADD COLUMN daily_retry_interval_seconds INTEGER NOT NULL DEFAULT 60"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "plan_defs", "daily_retry_stop_before_deadline_minutes", "ALTER TABLE plan_defs ADD COLUMN daily_retry_stop_before_deadline_minutes INTEGER NOT NULL DEFAULT 30"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "workflow_defs", "builder_segments_json", "ALTER TABLE workflow_defs ADD COLUMN builder_segments_json TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureColumn(ctx, db, "devices", "slot_zone", "ALTER TABLE devices ADD COLUMN slot_zone TEXT NOT NULL DEFAULT ''"); err != nil {

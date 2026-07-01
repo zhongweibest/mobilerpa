@@ -23,6 +23,7 @@ export interface WorkflowDefinitionRecord {
   workflow_def_id: string;
   workflow_name: string;
   description: string;
+  builder_segments_json: string;
   status: string;
   nodes: WorkflowNodeRecord[];
   edges: WorkflowEdgeRecord[];
@@ -33,6 +34,7 @@ export interface WorkflowDefinitionRecord {
 export interface CreateWorkflowRequest {
   workflow_name: string;
   description: string;
+  builder_segments_json?: string;
   status: string;
   nodes: Array<{
     node_id: string;

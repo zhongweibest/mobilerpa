@@ -16,6 +16,7 @@ import {
   ElMessageBox,
   ElOption,
   ElPagination,
+  ElInputNumber,
   ElSelect,
   ElTable,
   ElTableColumn,
@@ -30,10 +31,11 @@ import { usePlansStore } from "../../stores/plans";
 import { useScriptsStore } from "../../stores/scripts";
 import { useWorkflowsStore } from "../../stores/workflows";
 import type { LocationNodeRecord } from "../../types/device";
-import type { PlanDefinitionRecord, PlanRowBinding } from "../../types/plan";
+import type { PlanDailyRetrySettings, PlanDefinitionRecord, PlanRowBinding } from "../../types/plan";
 import type { WorkflowDefinitionRecord } from "../../types/workflow";
 import { formatDateTime } from "../../utils/device";
 import { fetchLocationNodes } from "../../api/devices";
+import { fetchPlanDailyRetrySettings } from "../../api/settings";
 
 const PAGE_SIZES = [10, 20, 30, 50, 100];
 type LocationRowGroup = {
@@ -96,6 +98,9 @@ function parseTodayTime(value: string) {
 }
 
 function isManualStartEnabled(item: PlanDefinitionRecord) {
+  if (item.status !== "enabled") {
+    return false;
+  }
   if (item.schedule_type !== "daily") {
     return true;
   }
@@ -103,14 +108,27 @@ function isManualStartEnabled(item: PlanDefinitionRecord) {
   if (!startAt) {
     return true;
   }
-  return Date.now() < startAt.getTime();
+  if (Date.now() < startAt.getTime()) {
+    return true;
+  }
+  const statusUpdatedAt = item.status_updated_at ? new Date(item.status_updated_at) : null;
+  return Boolean(statusUpdatedAt && statusUpdatedAt.getTime() > startAt.getTime());
 }
 
 function resolveStartDisabledReason(item: PlanDefinitionRecord) {
-  if (item.schedule_type !== "daily") {
-    return "";
+  if (item.status === "disabled") {
+    return "计划任务已禁用，请先启用后再启动";
   }
-  return isManualStartEnabled(item) ? "" : "已到当天开始时间，当前只能等待自动调度启动";
+  if (item.schedule_type === "daily") {
+    const startAt = parseTodayTime(item.daily_start_time || "");
+    if (startAt && Date.now() >= startAt.getTime()) {
+      const statusUpdatedAt = item.status_updated_at ? new Date(item.status_updated_at) : null;
+      if (!statusUpdatedAt || statusUpdatedAt.getTime() <= startAt.getTime()) {
+        return "当前已过开始时间，且该任务应由系统自动启动，不允许重复手动启动";
+      }
+    }
+  }
+  return "";
 }
 
 function resolveWorkflowName(workflows: WorkflowDefinitionRecord[], workflowDefID: string) {
@@ -233,7 +251,7 @@ export const PlansPage = defineComponent({
     const workflowsStore = useWorkflowsStore();
     const noticesStore = useNoticesStore();
 
-    const { plans, total, page, pageSize, loading, creating, deletingPlanID, startingPlanID, mutatingDevices, errorMessage } = storeToRefs(plansStore);
+    const { plans, total, page, pageSize, loading, creating, deletingPlanID, startingPlanID, mutatingDevices, mutatingStatusPlanID, errorMessage } = storeToRefs(plansStore);
     const { scripts } = storeToRefs(scriptsStore);
     const { workflows } = storeToRefs(workflowsStore);
 
@@ -244,6 +262,11 @@ export const PlansPage = defineComponent({
     const supportingDataWarning = ref("");
     const selectedPlan = ref<PlanDefinitionRecord | null>(null);
     const locationNodes = ref<LocationNodeRecord[]>([]);
+    const retryDefaults = ref<PlanDailyRetrySettings>({
+      plan_daily_retry_enabled: true,
+      plan_daily_retry_interval_seconds: 60,
+      plan_daily_retry_stop_before_deadline_minutes: 30
+    });
     const createRowsTableRef = ref();
     const updateRowsTableRef = ref();
 
@@ -258,6 +281,10 @@ export const PlansPage = defineComponent({
       daily_start_time: "",
       daily_deadline_time: "",
       status: "enabled",
+      retry_policy_mode: "inherit",
+      daily_retry_enabled: true,
+      daily_retry_interval_seconds: 60,
+      daily_retry_stop_before_deadline_minutes: 30,
       rows: [] as PlanRowBinding[]
     });
 
@@ -335,6 +362,12 @@ export const PlansPage = defineComponent({
         warnings.push("位置树加载失败");
       }
 
+      try {
+        retryDefaults.value = await fetchPlanDailyRetrySettings();
+      } catch (_error) {
+        warnings.push("计划任务重试默认配置加载失败");
+      }
+
       supportingDataWarning.value = warnings.join("；");
 
       if (scripts.value.length > 0 && createForm.target_script_name === "") {
@@ -386,6 +419,10 @@ export const PlansPage = defineComponent({
       createForm.daily_start_time = "";
       createForm.daily_deadline_time = "";
       createForm.status = "enabled";
+      createForm.retry_policy_mode = "inherit";
+      createForm.daily_retry_enabled = retryDefaults.value.plan_daily_retry_enabled;
+      createForm.daily_retry_interval_seconds = retryDefaults.value.plan_daily_retry_interval_seconds;
+      createForm.daily_retry_stop_before_deadline_minutes = retryDefaults.value.plan_daily_retry_stop_before_deadline_minutes;
       createForm.rows = [];
     }
 
@@ -478,6 +515,11 @@ export const PlansPage = defineComponent({
           daily_start_time: createForm.schedule_type === "daily" ? createForm.daily_start_time.trim() : "",
           daily_deadline_time: createForm.schedule_type === "daily" ? createForm.daily_deadline_time.trim() : "",
           status: createForm.status,
+          retry_policy_mode: createForm.schedule_type === "daily" ? createForm.retry_policy_mode : "inherit",
+          daily_retry_enabled: createForm.schedule_type === "daily" ? createForm.daily_retry_enabled : true,
+          daily_retry_interval_seconds: createForm.schedule_type === "daily" ? Number(createForm.daily_retry_interval_seconds || 60) : 60,
+          daily_retry_stop_before_deadline_minutes:
+            createForm.schedule_type === "daily" ? Number(createForm.daily_retry_stop_before_deadline_minutes || 30) : 30,
           rows: createForm.rows
         });
         createDialogVisible.value = false;
@@ -534,6 +576,17 @@ export const PlansPage = defineComponent({
         await loadPageData();
       } catch (error) {
         noticesStore.error(error instanceof Error ? error.message : "计划任务删除失败", 5000);
+      }
+    }
+
+    async function handleTogglePlanStatus(planItem: PlanDefinitionRecord) {
+      const nextStatus = planItem.status === "enabled" ? "disabled" : "enabled";
+      try {
+        await plansStore.togglePlanStatus(planItem.plan_def_id, nextStatus);
+        noticesStore.success(nextStatus === "enabled" ? "计划任务已启用" : "计划任务已禁用", 3000);
+        await loadPageData();
+      } catch (error) {
+        noticesStore.error(error instanceof Error ? error.message : "计划任务状态更新失败", 5000);
       }
     }
 
@@ -639,6 +692,22 @@ export const PlansPage = defineComponent({
                                                     onClick: () => openUpdateRowsDialog(scope.row)
                                                   },
                                                   () => "变更选择"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "toggle_status",
+                                                    disabled: mutatingStatusPlanID.value === scope.row.plan_def_id,
+                                                    onClick: () => {
+                                                      void handleTogglePlanStatus(scope.row);
+                                                    }
+                                                  },
+                                                  () =>
+                                                    mutatingStatusPlanID.value === scope.row.plan_def_id
+                                                      ? "处理中..."
+                                                      : scope.row.status === "enabled"
+                                                        ? "禁用"
+                                                        : "启用"
                                                 ),
                                                 h(
                                                   ElDropdownItem,
@@ -798,6 +867,50 @@ export const PlansPage = defineComponent({
                           format: "HH:mm:ss",
                           valueFormat: "HH:mm:ss",
                           clearable: true
+                        })
+                      )
+                    ])
+                  : null,
+                createForm.schedule_type === "daily"
+                  ? h(ElFormItem, { label: "离线重试策略" }, () =>
+                      h(
+                        ElSelect,
+                        {
+                          modelValue: createForm.retry_policy_mode,
+                          "onUpdate:modelValue": (value: string) => (createForm.retry_policy_mode = value)
+                        },
+                        () => [h(ElOption, { label: "使用系统默认", value: "inherit" }), h(ElOption, { label: "自定义", value: "custom" })]
+                      )
+                    )
+                  : null,
+                createForm.schedule_type === "daily" && createForm.retry_policy_mode === "custom"
+                  ? h("div", { class: "dialog-grid" }, [
+                      h(ElFormItem, { label: "离线重试" }, () =>
+                        h(
+                          ElSelect,
+                          {
+                            modelValue: createForm.daily_retry_enabled ? "enabled" : "disabled",
+                            "onUpdate:modelValue": (value: string) => (createForm.daily_retry_enabled = value === "enabled")
+                          },
+                          () => [h(ElOption, { label: "启用", value: "enabled" }), h(ElOption, { label: "停用", value: "disabled" })]
+                        )
+                      ),
+                      h(ElFormItem, { label: "重试间隔（秒）" }, () =>
+                        h(ElInputNumber, {
+                          modelValue: createForm.daily_retry_interval_seconds,
+                          "onUpdate:modelValue": (value: number) => (createForm.daily_retry_interval_seconds = Number(value || 60)),
+                          min: 60,
+                          max: 1800,
+                          step: 60
+                        })
+                      ),
+                      h(ElFormItem, { label: "截止前停止重试（分钟）" }, () =>
+                        h(ElInputNumber, {
+                          modelValue: createForm.daily_retry_stop_before_deadline_minutes,
+                          "onUpdate:modelValue": (value: number) => (createForm.daily_retry_stop_before_deadline_minutes = Number(value || 30)),
+                          min: 0,
+                          max: 180,
+                          step: 5
                         })
                       )
                     ])
@@ -1000,9 +1113,21 @@ export const PlansPage = defineComponent({
                     h(ElDescriptionsItem, { label: "计划状态" }, () => renderPlanStatus(selectedPlan.value?.status || "")),
                     h(ElDescriptionsItem, { label: "每日开始时间" }, () => selectedPlan.value?.daily_start_time || "未设置"),
                     h(ElDescriptionsItem, { label: "每日截止时间" }, () => selectedPlan.value?.daily_deadline_time || "未设置"),
+                    h(ElDescriptionsItem, { label: "离线重试策略" }, () =>
+                      selectedPlan.value?.schedule_type === "daily"
+                        ? selectedPlan.value?.retry_policy_mode === "custom"
+                          ? "自定义"
+                          : "使用系统默认"
+                        : "不适用"
+                    ),
+                    h(ElDescriptionsItem, { label: "重试参数" }, () =>
+                      selectedPlan.value?.schedule_type === "daily"
+                        ? `${selectedPlan.value.daily_retry_enabled ? "启用" : "停用"} / ${selectedPlan.value.daily_retry_interval_seconds || 60}秒 / 截止前${selectedPlan.value.daily_retry_stop_before_deadline_minutes || 30}分钟停止`
+                        : "不适用"
+                    ),
                     h(ElDescriptionsItem, { label: "立即启动规则", span: 2 }, () =>
                       selectedPlan.value?.schedule_type === "daily"
-                        ? "仅在当天开始时间之前允许手工立即启动；开始后由自动调度接管。"
+                        ? "启用状态下可手工立即启动；自动调度只会拉起当天开始时间前已处于启用状态的计划任务。"
                         : "一次性计划任务通过手工启动执行。"
                     ),
                     h(ElDescriptionsItem, { label: "创建时间" }, () => formatDateTime(selectedPlan.value?.created_at || "")),

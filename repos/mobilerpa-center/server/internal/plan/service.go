@@ -14,6 +14,7 @@ import (
 
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
@@ -98,6 +99,16 @@ var (
 	ErrPlanDailyStartTimeInvalid = errors.New("plan daily_start_time is invalid")
 	// ErrPlanDailyDeadlineTimeInvalid 表示每日截止时间格式不合法。
 	ErrPlanDailyDeadlineTimeInvalid = errors.New("plan daily_deadline_time is invalid")
+	// ErrPlanStatusInvalid 表示计划任务状态不合法。
+	ErrPlanStatusInvalid = errors.New("plan status is invalid")
+	// ErrPlanRetryPolicyModeInvalid 表示重试策略模式不合法。
+	ErrPlanRetryPolicyModeInvalid = errors.New("plan retry_policy_mode is invalid")
+	// ErrPlanRetryIntervalInvalid 表示重试间隔不合法。
+	ErrPlanRetryIntervalInvalid = errors.New("plan daily_retry_interval_seconds is invalid")
+	// ErrPlanRetryStopWindowInvalid 表示截止前停止重试窗口不合法。
+	ErrPlanRetryStopWindowInvalid = errors.New("plan daily_retry_stop_before_deadline_minutes is invalid")
+	// ErrPlanDefinitionDisabled 表示计划任务已禁用。
+	ErrPlanDefinitionDisabled = errors.New("plan definition is disabled")
 	ErrPlanDefinitionRunning        = errors.New("plan definition has active runs")
 	ErrPlanTodayAlreadyStarted      = errors.New("plan today already started")
 	ErrPlanRunDeleteNotAllowed      = errors.New("plan run delete not allowed")
@@ -123,20 +134,25 @@ func (e *DeviceBusyError) Error() string {
 
 // Definition 表示计划任务定义。
 type Definition struct {
-	PlanDefID           string   `json:"plan_def_id"`
-	PlanName            string   `json:"plan_name"`
-	Description         string   `json:"description"`
-	TargetType          string   `json:"target_type"`
-	TargetScriptName    string   `json:"target_script_name"`
-	TargetScriptVersion string   `json:"target_script_version"`
-	TargetWorkflowDefID string   `json:"target_workflow_def_id"`
-	ScheduleType        string   `json:"schedule_type"`
-	DailyStartTime      string   `json:"daily_start_time"`
-	DailyDeadlineTime   string   `json:"daily_deadline_time"`
-	Status              string   `json:"status"`
-	Rows                []PlanRowBinding `json:"rows"`
-	CreatedAt           string   `json:"created_at"`
-	UpdatedAt           string   `json:"updated_at"`
+	PlanDefID                           string           `json:"plan_def_id"`
+	PlanName                            string           `json:"plan_name"`
+	Description                         string           `json:"description"`
+	TargetType                          string           `json:"target_type"`
+	TargetScriptName                    string           `json:"target_script_name"`
+	TargetScriptVersion                 string           `json:"target_script_version"`
+	TargetWorkflowDefID                 string           `json:"target_workflow_def_id"`
+	ScheduleType                        string           `json:"schedule_type"`
+	DailyStartTime                      string           `json:"daily_start_time"`
+	DailyDeadlineTime                   string           `json:"daily_deadline_time"`
+	Status                              string           `json:"status"`
+	StatusUpdatedAt                     string           `json:"status_updated_at"`
+	RetryPolicyMode                     string           `json:"retry_policy_mode"`
+	DailyRetryEnabled                   bool             `json:"daily_retry_enabled"`
+	DailyRetryIntervalSeconds           int              `json:"daily_retry_interval_seconds"`
+	DailyRetryStopBeforeDeadlineMinutes int              `json:"daily_retry_stop_before_deadline_minutes"`
+	Rows                                []PlanRowBinding `json:"rows"`
+	CreatedAt                           string           `json:"created_at"`
+	UpdatedAt                           string           `json:"updated_at"`
 }
 
 // PlanRowBinding 表示计划任务绑定的分区-排。
@@ -202,21 +218,35 @@ type Event struct {
 
 // CreateDefinitionRequest 描述创建计划任务定义时的请求体。
 type CreateDefinitionRequest struct {
-	PlanName            string   `json:"plan_name"`
-	Description         string   `json:"description"`
-	TargetType          string   `json:"target_type"`
-	TargetScriptName    string   `json:"target_script_name"`
-	TargetScriptVersion string   `json:"target_script_version"`
-	TargetWorkflowDefID string   `json:"target_workflow_def_id"`
-	ScheduleType        string   `json:"schedule_type"`
-	DailyStartTime      string   `json:"daily_start_time"`
-	DailyDeadlineTime   string   `json:"daily_deadline_time"`
-	Status              string   `json:"status"`
-	Rows                []PlanRowBinding `json:"rows"`
+	PlanName                            string           `json:"plan_name"`
+	Description                         string           `json:"description"`
+	TargetType                          string           `json:"target_type"`
+	TargetScriptName                    string           `json:"target_script_name"`
+	TargetScriptVersion                 string           `json:"target_script_version"`
+	TargetWorkflowDefID                 string           `json:"target_workflow_def_id"`
+	ScheduleType                        string           `json:"schedule_type"`
+	DailyStartTime                      string           `json:"daily_start_time"`
+	DailyDeadlineTime                   string           `json:"daily_deadline_time"`
+	Status                              string           `json:"status"`
+	RetryPolicyMode                     string           `json:"retry_policy_mode"`
+	DailyRetryEnabled                   bool             `json:"daily_retry_enabled"`
+	DailyRetryIntervalSeconds           int              `json:"daily_retry_interval_seconds"`
+	DailyRetryStopBeforeDeadlineMinutes int              `json:"daily_retry_stop_before_deadline_minutes"`
+	Rows                                []PlanRowBinding `json:"rows"`
 }
 
 type UpdateDefinitionRowsRequest struct {
 	Rows []PlanRowBinding `json:"rows"`
+}
+
+type UpdateDefinitionStatusRequest struct {
+	Status string `json:"status"`
+}
+
+type effectiveRetryPolicy struct {
+	Enabled                   bool
+	Interval                  time.Duration
+	StopBeforeDeadlineMinutes int
 }
 
 // StartRequest 描述启动计划任务时的请求。
@@ -254,19 +284,21 @@ type Service struct {
 	tasks       TaskCreator
 	dispatcher  TaskDispatcher
 	workflows   WorkflowRunner
+	settings    *settings.Service
 	startFanout int
 	startMu     sync.Mutex
 	starting    map[string]struct{}
 }
 
 // NewService 创建计划任务服务。
-func NewService(db *sql.DB, devices *device.Service, tasks TaskCreator, dispatcher TaskDispatcher, workflows WorkflowRunner) *Service {
+func NewService(db *sql.DB, devices *device.Service, tasks TaskCreator, dispatcher TaskDispatcher, workflows WorkflowRunner, settingsSvc *settings.Service) *Service {
 	return &Service{
 		db:          db,
 		devices:     devices,
 		tasks:       tasks,
 		dispatcher:  dispatcher,
 		workflows:   workflows,
+		settings:    settingsSvc,
 		startFanout: 20,
 		starting:    make(map[string]struct{}),
 	}
@@ -466,8 +498,10 @@ func (s *Service) CreateDefinition(ctx context.Context, req CreateDefinitionRequ
 	result, err := tx.ExecContext(ctx, `
 INSERT INTO plan_defs (
     plan_name, description, target_type, target_script_name, target_script_version,
-    target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, created_at, updated_at, deleted_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+    target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, status_updated_at,
+    retry_policy_mode, daily_retry_enabled, daily_retry_interval_seconds, daily_retry_stop_before_deadline_minutes,
+    created_at, updated_at, deleted_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
 		req.PlanName,
 		req.Description,
 		req.TargetType,
@@ -478,6 +512,11 @@ INSERT INTO plan_defs (
 		req.DailyStartTime,
 		req.DailyDeadlineTime,
 		req.Status,
+		now,
+		req.RetryPolicyMode,
+		condString(req.DailyRetryEnabled, "1", "0"),
+		req.DailyRetryIntervalSeconds,
+		req.DailyRetryStopBeforeDeadlineMinutes,
 		now,
 		now,
 	)
@@ -518,7 +557,9 @@ INSERT INTO plan_definition_rows (
 func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id AS plan_def_id, plan_name, description, target_type, target_script_name, target_script_version,
-       target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, created_at, updated_at
+       target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, status_updated_at,
+       retry_policy_mode, daily_retry_enabled, daily_retry_interval_seconds, daily_retry_stop_before_deadline_minutes,
+       created_at, updated_at
 FROM plan_defs
 WHERE deleted_at = ''
 ORDER BY id DESC`)
@@ -530,6 +571,7 @@ ORDER BY id DESC`)
 	items := make([]Definition, 0)
 	for rows.Next() {
 		var item Definition
+		var retryEnabledValue any
 		if err := rows.Scan(
 			&item.PlanDefID,
 			&item.PlanName,
@@ -542,11 +584,17 @@ ORDER BY id DESC`)
 			&item.DailyStartTime,
 			&item.DailyDeadlineTime,
 			&item.Status,
+			&item.StatusUpdatedAt,
+			&item.RetryPolicyMode,
+			&retryEnabledValue,
+			&item.DailyRetryIntervalSeconds,
+			&item.DailyRetryStopBeforeDeadlineMinutes,
 			&item.CreatedAt,
 			&item.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan plan definition: %w", err)
 		}
+		item.DailyRetryEnabled = parseSQLiteBool(retryEnabledValue)
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
@@ -573,10 +621,13 @@ func (s *Service) GetDefinition(ctx context.Context, planDefID string) (Definiti
 	var item Definition
 	row := s.db.QueryRowContext(ctx, `
 SELECT id AS plan_def_id, plan_name, description, target_type, target_script_name, target_script_version,
-       target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, created_at, updated_at
+       target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, status_updated_at,
+       retry_policy_mode, daily_retry_enabled, daily_retry_interval_seconds, daily_retry_stop_before_deadline_minutes,
+       created_at, updated_at
 FROM plan_defs
 WHERE id = ?
   AND deleted_at = ''`, planDefID)
+	var retryEnabledValue any
 	if err := row.Scan(
 		&item.PlanDefID,
 		&item.PlanName,
@@ -589,6 +640,11 @@ WHERE id = ?
 		&item.DailyStartTime,
 		&item.DailyDeadlineTime,
 		&item.Status,
+		&item.StatusUpdatedAt,
+		&item.RetryPolicyMode,
+		&retryEnabledValue,
+		&item.DailyRetryIntervalSeconds,
+		&item.DailyRetryStopBeforeDeadlineMinutes,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	); err != nil {
@@ -597,6 +653,7 @@ WHERE id = ?
 		}
 		return Definition{}, fmt.Errorf("get plan definition: %w", err)
 	}
+	item.DailyRetryEnabled = parseSQLiteBool(retryEnabledValue)
 
 	rowsByPlan, err := s.listPlanRowsByPlan(ctx)
 	if err != nil {
@@ -613,8 +670,10 @@ func (s *Service) Start(ctx context.Context, planDefID string, req StartRequest)
 		return Run{}, err
 	}
 
-	now := time.Now()
-	if req.Manual && !isManualStartAllowed(definition, now) {
+	if definition.Status != StatusEnabled {
+		return Run{}, ErrPlanDefinitionDisabled
+	}
+	if req.Manual && !isManualStartAllowed(definition, time.Now()) {
 		return Run{}, ErrPlanTodayAlreadyStarted
 	}
 
@@ -788,11 +847,7 @@ ORDER BY id ASC`,
 			s.releaseStarting(planDefID)
 			return nil, err
 		}
-		if !isDailyStartReached(definition.DailyStartTime, now) {
-			s.releaseStarting(planDefID)
-			continue
-		}
-		if isDailyDeadlineReached(definition.DailyDeadlineTime, now) {
+		if !shouldAutoStartDaily(definition, now) {
 			s.releaseStarting(planDefID)
 			continue
 		}
@@ -911,10 +966,7 @@ ORDER BY id ASC`,
 		if err != nil {
 			return nil, err
 		}
-		if !isDailyStartReached(definition.DailyStartTime, now) {
-			continue
-		}
-		if isDailyDeadlineReached(definition.DailyDeadlineTime, now) {
+		if !shouldAutoStartDaily(definition, now) {
 			continue
 		}
 
@@ -945,13 +997,10 @@ func (s *Service) AutoStartDefinition(ctx context.Context, planDefID string, now
 	if err != nil {
 		return "", err
 	}
-	if definition.Status != StatusEnabled || definition.ScheduleType != ScheduleTypeDaily {
+	if definition.ScheduleType != ScheduleTypeDaily {
 		return "", nil
 	}
-	if !isDailyStartReached(definition.DailyStartTime, now) {
-		return "", nil
-	}
-	if isDailyDeadlineReached(definition.DailyDeadlineTime, now) {
+	if !shouldAutoStartDaily(definition, now) {
 		return "", nil
 	}
 
@@ -1033,10 +1082,6 @@ func (s *Service) RetryDueTargets(ctx context.Context, now time.Time, retryInter
 	if len(targets) == 0 {
 		return nil, nil
 	}
-	if retryInterval <= 0 {
-		retryInterval = 5 * time.Minute
-	}
-
 	nowText := now.UTC().Format(time.RFC3339)
 	affectedRuns := make(map[string]struct{})
 	processedRuns := make([]string, 0)
@@ -1059,7 +1104,14 @@ func (s *Service) RetryDueTargets(ctx context.Context, now time.Time, retryInter
 			}
 			continue
 		}
-		if !isRetryWindowOpen(definition.DailyDeadlineTime, now) {
+		policy := s.resolveEffectiveRetryPolicy(ctx, definition)
+		if !policy.Enabled {
+			if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = '', updated_at = ? WHERE id = ?`, nowText, target.PlanDeviceRunID); err != nil {
+				return nil, fmt.Errorf("clear disabled retry target: %w", err)
+			}
+			continue
+		}
+		if !isRetryWindowOpenWithOffset(definition.DailyDeadlineTime, policy.StopBeforeDeadlineMinutes, now) {
 			if _, err := s.db.ExecContext(ctx, `UPDATE plan_device_runs SET next_retry_at = '', updated_at = ? WHERE id = ?`, nowText, target.PlanDeviceRunID); err != nil {
 				return nil, fmt.Errorf("clear expired retry target: %w", err)
 			}
@@ -1067,7 +1119,7 @@ func (s *Service) RetryDueTargets(ctx context.Context, now time.Time, retryInter
 		}
 
 		deviceRun := target
-		if err := s.retryPlanDeviceTarget(ctx, definition, run, deviceRun, nowText, retryInterval); err != nil {
+		if err := s.retryPlanDeviceTarget(ctx, definition, run, deviceRun, nowText, policy.Interval); err != nil {
 			return nil, err
 		}
 		affectedRuns[run.PlanRunID] = struct{}{}
@@ -1095,6 +1147,58 @@ func isRetryWindowOpen(deadlineTime string, now time.Time) bool {
 	localNow := now.In(time.Local)
 	deadlineAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.Local)
 	return localNow.Before(deadlineAt.Add(-30 * time.Minute))
+}
+
+func isRetryWindowOpenWithOffset(deadlineTime string, stopBeforeDeadlineMinutes int, now time.Time) bool {
+	deadlineTime = strings.TrimSpace(deadlineTime)
+	if deadlineTime == "" {
+		return true
+	}
+	parsed, err := time.Parse("15:04:05", deadlineTime)
+	if err != nil {
+		return false
+	}
+	if stopBeforeDeadlineMinutes < 0 {
+		stopBeforeDeadlineMinutes = 0
+	}
+	localNow := now.In(time.Local)
+	deadlineAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.Local)
+	return localNow.Before(deadlineAt.Add(-time.Duration(stopBeforeDeadlineMinutes) * time.Minute))
+}
+
+func (s *Service) resolveEffectiveRetryPolicy(ctx context.Context, definition Definition) effectiveRetryPolicy {
+	policy := effectiveRetryPolicy{
+		Enabled:                   true,
+		Interval:                  time.Minute,
+		StopBeforeDeadlineMinutes: 30,
+	}
+	if s.settings != nil {
+		if settingsValue, err := s.settings.GetPlanDailyRetrySettings(ctx); err == nil {
+			policy.Enabled = settingsValue.PlanDailyRetryEnabled
+			if settingsValue.PlanDailyRetryIntervalSeconds > 0 {
+				policy.Interval = time.Duration(settingsValue.PlanDailyRetryIntervalSeconds) * time.Second
+			}
+			if settingsValue.PlanDailyRetryStopBeforeDeadlineMinutes >= 0 {
+				policy.StopBeforeDeadlineMinutes = settingsValue.PlanDailyRetryStopBeforeDeadlineMinutes
+			}
+		}
+	}
+	if definition.RetryPolicyMode == "custom" {
+		policy.Enabled = definition.DailyRetryEnabled
+		if definition.DailyRetryIntervalSeconds > 0 {
+			policy.Interval = time.Duration(definition.DailyRetryIntervalSeconds) * time.Second
+		}
+		if definition.DailyRetryStopBeforeDeadlineMinutes >= 0 {
+			policy.StopBeforeDeadlineMinutes = definition.DailyRetryStopBeforeDeadlineMinutes
+		}
+	}
+	if policy.Interval <= 0 {
+		policy.Interval = time.Minute
+	}
+	if policy.StopBeforeDeadlineMinutes < 0 {
+		policy.StopBeforeDeadlineMinutes = 30
+	}
+	return policy
 }
 
 func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, retryInterval time.Duration) error {
@@ -1610,6 +1714,35 @@ func (s *Service) UpdateDefinitionRows(ctx context.Context, planDefID string, re
 		return Definition{}, err
 	}
 
+	return s.GetDefinition(ctx, planDefID)
+}
+
+func (s *Service) UpdateDefinitionStatus(ctx context.Context, planDefID string, req UpdateDefinitionStatusRequest) (Definition, error) {
+	planDefID = strings.TrimSpace(planDefID)
+	req.Status = strings.TrimSpace(req.Status)
+	if planDefID == "" {
+		return Definition{}, ErrPlanDefinitionNotFound
+	}
+	if req.Status != StatusEnabled && req.Status != StatusDisabled {
+		return Definition{}, ErrPlanStatusInvalid
+	}
+	if _, err := s.GetDefinition(ctx, planDefID); err != nil {
+		return Definition{}, err
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := s.db.ExecContext(ctx, `
+UPDATE plan_defs
+SET status = ?, status_updated_at = ?, updated_at = ?
+WHERE id = ?
+  AND deleted_at = ''`,
+		req.Status,
+		now,
+		now,
+		planDefID,
+	); err != nil {
+		return Definition{}, fmt.Errorf("update plan definition status: %w", err)
+	}
 	return s.GetDefinition(ctx, planDefID)
 }
 
@@ -2656,16 +2789,22 @@ func (s *Service) isDeviceReachableForPlanStart(ctx context.Context, deviceID st
 }
 
 func (s *Service) deferPlanDeviceStart(ctx context.Context, definition Definition, run Run, deviceRun DeviceRun, nowText string, includeRetryTimestamp bool, retryInterval time.Duration) error {
+	policy := s.resolveEffectiveRetryPolicy(ctx, definition)
 	nextRetryText := ""
 	if definition.ScheduleType == ScheduleTypeDaily {
+		if !policy.Enabled {
+			retryInterval = 0
+		}
 		baseTime, err := time.Parse(time.RFC3339, nowText)
 		if err != nil {
 			return fmt.Errorf("parse plan retry base time: %w", err)
 		}
 		if retryInterval <= 0 {
-			retryInterval = 5 * time.Minute
+			retryInterval = policy.Interval
 		}
-		nextRetryText = baseTime.Add(retryInterval).UTC().Format(time.RFC3339)
+		if retryInterval > 0 && isRetryWindowOpenWithOffset(definition.DailyDeadlineTime, policy.StopBeforeDeadlineMinutes, baseTime) {
+			nextRetryText = baseTime.Add(retryInterval).UTC().Format(time.RFC3339)
+		}
 	}
 	message := "设备不在线未启动"
 	if includeRetryTimestamp {
@@ -2764,11 +2903,21 @@ func normalizeCreateDefinitionRequest(req CreateDefinitionRequest) CreateDefinit
 	req.DailyStartTime = strings.TrimSpace(req.DailyStartTime)
 	req.DailyDeadlineTime = strings.TrimSpace(req.DailyDeadlineTime)
 	req.Status = strings.TrimSpace(req.Status)
+	req.RetryPolicyMode = strings.TrimSpace(req.RetryPolicyMode)
 	if req.ScheduleType == "" {
 		req.ScheduleType = ScheduleTypeOnce
 	}
 	if req.Status == "" {
 		req.Status = StatusEnabled
+	}
+	if req.RetryPolicyMode == "" {
+		req.RetryPolicyMode = "inherit"
+	}
+	if req.DailyRetryIntervalSeconds <= 0 {
+		req.DailyRetryIntervalSeconds = 60
+	}
+	if req.DailyRetryStopBeforeDeadlineMinutes < 0 {
+		req.DailyRetryStopBeforeDeadlineMinutes = 30
 	}
 	return req
 }
@@ -2799,6 +2948,18 @@ func validateDefinitionRequest(req CreateDefinitionRequest) error {
 	}
 	if !isDailyTimeValid(req.DailyDeadlineTime) {
 		return ErrPlanDailyDeadlineTimeInvalid
+	}
+	if req.Status != StatusEnabled && req.Status != StatusDisabled {
+		return ErrPlanStatusInvalid
+	}
+	if req.RetryPolicyMode != "inherit" && req.RetryPolicyMode != "custom" {
+		return ErrPlanRetryPolicyModeInvalid
+	}
+	if req.DailyRetryIntervalSeconds < 60 || req.DailyRetryIntervalSeconds > 1800 {
+		return ErrPlanRetryIntervalInvalid
+	}
+	if req.DailyRetryStopBeforeDeadlineMinutes < 0 || req.DailyRetryStopBeforeDeadlineMinutes > 180 {
+		return ErrPlanRetryStopWindowInvalid
 	}
 	return nil
 }
@@ -2848,6 +3009,25 @@ func condString(ok bool, left string, right string) string {
 		return left
 	}
 	return right
+}
+
+func parseSQLiteBool(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case int64:
+		return typed != 0
+	case int:
+		return typed != 0
+	case []byte:
+		text := strings.TrimSpace(string(typed))
+		return text == "1" || strings.EqualFold(text, "true")
+	case string:
+		text := strings.TrimSpace(typed)
+		return text == "1" || strings.EqualFold(text, "true")
+	default:
+		return false
+	}
 }
 
 type runScanner interface {
@@ -3026,6 +3206,59 @@ func isDailyStartReached(startTime string, now time.Time) bool {
 	return !localNow.Before(startAt)
 }
 
+func shouldAutoStartDaily(definition Definition, now time.Time) bool {
+	if definition.Status != StatusEnabled {
+		return false
+	}
+	if !isDailyStartReached(definition.DailyStartTime, now) {
+		return false
+	}
+	if isDailyDeadlineReached(definition.DailyDeadlineTime, now) {
+		return false
+	}
+	statusUpdatedAt := strings.TrimSpace(definition.StatusUpdatedAt)
+	if statusUpdatedAt == "" {
+		return true
+	}
+	parsed, err := time.Parse(time.RFC3339, statusUpdatedAt)
+	if err != nil {
+		return true
+	}
+	startTime := strings.TrimSpace(definition.DailyStartTime)
+	if startTime == "" {
+		return true
+	}
+	startParsed, err := time.Parse("15:04:05", startTime)
+	if err != nil {
+		return true
+	}
+	localNow := now.In(time.Local)
+	startAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), startParsed.Hour(), startParsed.Minute(), startParsed.Second(), 0, time.Local)
+	return !parsed.In(time.Local).After(startAt)
+}
+
+func wasEnabledAfterTodayStart(definition Definition, now time.Time) bool {
+	statusUpdatedAt := strings.TrimSpace(definition.StatusUpdatedAt)
+	if statusUpdatedAt == "" {
+		return false
+	}
+	parsed, err := time.Parse(time.RFC3339, statusUpdatedAt)
+	if err != nil {
+		return false
+	}
+	startTime := strings.TrimSpace(definition.DailyStartTime)
+	if startTime == "" {
+		return true
+	}
+	startParsed, err := time.Parse("15:04:05", startTime)
+	if err != nil {
+		return false
+	}
+	localNow := now.In(time.Local)
+	startAt := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), startParsed.Hour(), startParsed.Minute(), startParsed.Second(), 0, time.Local)
+	return parsed.In(time.Local).After(startAt)
+}
+
 func isDailyDeadlineReached(deadlineTime string, now time.Time) bool {
 	deadlineTime = strings.TrimSpace(deadlineTime)
 	if deadlineTime == "" {
@@ -3057,14 +3290,16 @@ func shouldApplyDailyAdditionsImmediately(definition Definition, run Run, now ti
 }
 
 func isManualStartAllowed(definition Definition, now time.Time) bool {
+	if definition.Status != StatusEnabled {
+		return false
+	}
 	if definition.ScheduleType != ScheduleTypeDaily {
 		return true
 	}
-	startTime := strings.TrimSpace(definition.DailyStartTime)
-	if startTime == "" {
+	if !isDailyStartReached(definition.DailyStartTime, now) {
 		return true
 	}
-	return !isDailyStartReached(startTime, now)
+	return wasEnabledAfterTodayStart(definition, now)
 }
 
 func isSameLocalRunDate(runDate string, now time.Time) bool {

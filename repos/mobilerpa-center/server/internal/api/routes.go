@@ -28,7 +28,7 @@ import (
 func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Service, dispatcher *dispatch.Service, discoveryService *discovery.Service, extras ...any) {
 	scripts := script.NewService(nil, "./data/scripts")
 	systemSettings := settings.NewService(nil)
-	plans := plan.NewService(nil, nil, nil, nil, nil)
+	plans := plan.NewService(nil, nil, nil, nil, nil, nil)
 	workflows := workflow.NewService(nil, nil, nil, nil)
 	var wsHandler http.Handler
 
@@ -72,6 +72,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/discovery/agent-actions", controlAgent(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/pair", pairDevice(discoveryService))
 	mux.HandleFunc("/api/v1/settings/discovery", discoverySettings(systemSettings))
+	mux.HandleFunc("/api/v1/settings/plans/daily-retry", planDailyRetrySettings(systemSettings))
 	mux.HandleFunc("/api/v1/plans", plansCollection(plans))
 	mux.HandleFunc("/api/v1/plans/", planSubResources(plans))
 	mux.HandleFunc("/api/v1/script-names", scriptNamesCollection(scripts))
@@ -259,6 +260,24 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 				return
 			}
 			result, err := plans.UpdateDefinitionRows(ctx, planDefID, req)
+			if err != nil {
+				writePlanError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+			return
+		}
+
+		if len(parts) == 2 && parts[1] == "status" && r.Method == http.MethodPut {
+			var req plan.UpdateDefinitionStatusRequest
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := plans.UpdateDefinitionStatus(ctx, planDefID, req)
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -585,6 +604,46 @@ func discoverySettings(service *settings.Service) http.HandlerFunc {
 			})
 		default:
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed")
+		}
+	}
+}
+
+func planDailyRetrySettings(service *settings.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		switch r.Method {
+		case http.MethodGet:
+			result, err := service.GetPlanDailyRetrySettings(ctx)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		case http.MethodPut:
+			var req settings.PlanDailyRetrySettings
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_json")
+				return
+			}
+			result, err := service.SavePlanDailyRetrySettings(ctx, req)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodGet, http.MethodPut},
+			})
 		}
 	}
 }
@@ -1665,6 +1724,16 @@ func writePlanError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "plan_daily_start_time_invalid")
 	case errors.Is(err, plan.ErrPlanDailyDeadlineTimeInvalid):
 		writeError(w, http.StatusBadRequest, "plan_daily_deadline_time_invalid")
+	case errors.Is(err, plan.ErrPlanStatusInvalid):
+		writeError(w, http.StatusBadRequest, "plan_status_invalid")
+	case errors.Is(err, plan.ErrPlanRetryPolicyModeInvalid):
+		writeError(w, http.StatusBadRequest, "plan_retry_policy_mode_invalid")
+	case errors.Is(err, plan.ErrPlanRetryIntervalInvalid):
+		writeError(w, http.StatusBadRequest, "plan_daily_retry_interval_seconds_invalid")
+	case errors.Is(err, plan.ErrPlanRetryStopWindowInvalid):
+		writeError(w, http.StatusBadRequest, "plan_daily_retry_stop_before_deadline_minutes_invalid")
+	case errors.Is(err, plan.ErrPlanDefinitionDisabled):
+		writeError(w, http.StatusConflict, "plan_definition_disabled")
 	case errors.Is(err, plan.ErrPlanDefinitionRunning):
 		writeError(w, http.StatusConflict, "plan_definition_running")
 	case errors.Is(err, plan.ErrPlanRunDeleteNotAllowed):

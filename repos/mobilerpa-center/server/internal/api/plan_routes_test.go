@@ -49,7 +49,7 @@ func TestPlanCreateListAndGet(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil)
+	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil, nil)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
 	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, nil)
 
@@ -175,7 +175,7 @@ func TestPlanStartScriptRun(t *testing.T) {
 	taskService := task.NewService(db)
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
-	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil)
+	planService := plan.NewService(db, deviceService, taskService, dispatchService, nil, nil)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
 	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, nil)
 
@@ -327,7 +327,7 @@ func TestPlanStartWorkflowRun(t *testing.T) {
 	dispatchService := dispatch.NewService(taskService)
 	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
 	workflowService := workflow.NewService(db, deviceService, taskService, dispatchService)
-	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService)
+	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService, nil)
 	dispatchService.AddTaskResultHook(planService.HandleTaskResult)
 	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, workflowService)
 

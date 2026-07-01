@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { ref } from "vue";
 
-import { addPlanRows, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanRow, startPlan, stopPlanDeviceRun, stopPlanRun, updatePlanRows } from "../api/plans";
+import { addPlanRows, createPlan, deletePlan, deletePlanRun, fetchPlanEvents, fetchPlanRuns, fetchPlans, removePlanRow, startPlan, stopPlanDeviceRun, stopPlanRun, updatePlanRows, updatePlanStatus } from "../api/plans";
 import type { CreatePlanRequest, PlanDefinitionRecord, PlanEventRecord, PlanRunRecord, PlanRowBinding } from "../types/plan";
 
 export const usePlansStore = defineStore("plans", () => {
@@ -23,6 +23,7 @@ export const usePlansStore = defineStore("plans", () => {
   const stoppingRunID = ref("");
   const deletingRunID = ref("");
   const mutatingDevices = ref(false);
+  const mutatingStatusPlanID = ref("");
   const errorMessage = ref("");
 
   async function loadPlans() {
@@ -69,7 +70,7 @@ export const usePlansStore = defineStore("plans", () => {
     loadingEvents.value = true;
     errorMessage.value = "";
     try {
-      selectedEvents.value = await fetchPlanEvents(planDefID, planRunID);
+      selectedEvents.value = (await fetchPlanEvents(planDefID, planRunID)).sort((left, right) => String(right.created_at || "").localeCompare(String(left.created_at || "")));
       return selectedEvents.value;
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : "load_plan_events_failed";
@@ -138,6 +139,21 @@ export const usePlansStore = defineStore("plans", () => {
       throw error;
     } finally {
       mutatingDevices.value = false;
+    }
+  }
+
+  async function togglePlanStatus(planDefID: string, status: string) {
+    mutatingStatusPlanID.value = planDefID;
+    errorMessage.value = "";
+    try {
+      const result = await updatePlanStatus(planDefID, status);
+      await loadPlans();
+      return result;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "update_plan_status_failed";
+      throw error;
+    } finally {
+      mutatingStatusPlanID.value = "";
     }
   }
 
@@ -256,6 +272,7 @@ export const usePlansStore = defineStore("plans", () => {
     stoppingRunID,
     deletingRunID,
     mutatingDevices,
+    mutatingStatusPlanID,
     errorMessage,
     loadPlans,
     loadRuns,
@@ -263,6 +280,7 @@ export const usePlansStore = defineStore("plans", () => {
     submitPlan,
     removePlan,
     updateDefinitionRows,
+    togglePlanStatus,
     triggerStartPlan,
     triggerStopPlanRun,
     triggerStopPlanDeviceRun,

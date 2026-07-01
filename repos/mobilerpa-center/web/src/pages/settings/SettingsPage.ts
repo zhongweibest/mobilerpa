@@ -1,7 +1,7 @@
-import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElTag } from "element-plus";
+import { ElButton, ElCard, ElForm, ElFormItem, ElInput, ElInputNumber, ElSelect, ElOption, ElTag } from "element-plus";
 import { defineComponent, h, onMounted, reactive, ref, watch } from "vue";
 
-import { fetchDiscoverySettings, saveDiscoverySettings } from "../../api/settings";
+import { fetchDiscoverySettings, fetchPlanDailyRetrySettings, saveDiscoverySettings, savePlanDailyRetrySettings } from "../../api/settings";
 import { useNoticesStore } from "../../stores/notices";
 
 export const SettingsPage = defineComponent({
@@ -13,7 +13,10 @@ export const SettingsPage = defineComponent({
     const errorMessage = ref("");
     const savedMessage = ref("");
     const form = reactive({
-      center_base_url: ""
+      center_base_url: "",
+      plan_daily_retry_enabled: true,
+      plan_daily_retry_interval_seconds: 60,
+      plan_daily_retry_stop_before_deadline_minutes: 30
     });
 
     async function loadSettings() {
@@ -22,6 +25,10 @@ export const SettingsPage = defineComponent({
       try {
         const settings = await fetchDiscoverySettings();
         form.center_base_url = settings.center_base_url || "";
+        const retrySettings = await fetchPlanDailyRetrySettings();
+        form.plan_daily_retry_enabled = retrySettings.plan_daily_retry_enabled;
+        form.plan_daily_retry_interval_seconds = retrySettings.plan_daily_retry_interval_seconds || 60;
+        form.plan_daily_retry_stop_before_deadline_minutes = retrySettings.plan_daily_retry_stop_before_deadline_minutes || 30;
       } catch (error) {
         errorMessage.value = error instanceof Error ? error.message : "load_settings_failed";
       } finally {
@@ -38,6 +45,14 @@ export const SettingsPage = defineComponent({
           center_base_url: form.center_base_url.trim()
         });
         form.center_base_url = result.center_base_url || "";
+        const retrySettings = await savePlanDailyRetrySettings({
+          plan_daily_retry_enabled: form.plan_daily_retry_enabled,
+          plan_daily_retry_interval_seconds: Number(form.plan_daily_retry_interval_seconds || 60),
+          plan_daily_retry_stop_before_deadline_minutes: Number(form.plan_daily_retry_stop_before_deadline_minutes || 30)
+        });
+        form.plan_daily_retry_enabled = retrySettings.plan_daily_retry_enabled;
+        form.plan_daily_retry_interval_seconds = retrySettings.plan_daily_retry_interval_seconds || 60;
+        form.plan_daily_retry_stop_before_deadline_minutes = retrySettings.plan_daily_retry_stop_before_deadline_minutes || 30;
         savedMessage.value = "系统配置已保存";
       } catch (error) {
         errorMessage.value = error instanceof Error ? error.message : "save_settings_failed";
@@ -153,23 +168,62 @@ export const SettingsPage = defineComponent({
               header: () =>
                 h("div", { class: "card-header" }, [
                   h("div", null, [
-                    h("div", { class: "card-header__title" }, "默认心跳参数"),
-                    h("div", { class: "card-header__subtitle" }, "后续会把心跳间隔、离线超时、扫描周期统一归口到这个页面维护。")
+                    h("div", { class: "card-header__title" }, "计划任务默认重试"),
+                    h("div", { class: "card-header__subtitle" }, "按天循环任务中，离线设备默认多久重试一次，以及截止前多久停止重试。")
                   ]),
                   h(
                     ElTag,
                     {
-                      type: "info",
+                      type: "success",
                       effect: "light"
                     },
-                    () => "待接入"
+                    () => "已接入"
                   )
                 ]),
               default: () =>
-                h("div", { class: "settings-placeholder" }, [
-                  h("div", { class: "settings-placeholder__title" }, "预留配置项"),
-                  h("div", { class: "settings-placeholder__text" }, "heartbeat_interval、offline_timeout、scan_interval 会在后端参数化能力完善后统一接入。")
-                ])
+                h(
+                  ElForm,
+                  {
+                    labelPosition: "top",
+                    class: "dialog-form"
+                  },
+                  () => [
+                    h(ElFormItem, { label: "默认离线重试" }, () =>
+                      h(
+                        ElSelect,
+                        {
+                          modelValue: form.plan_daily_retry_enabled ? "enabled" : "disabled",
+                          "onUpdate:modelValue": (value: string) => {
+                            form.plan_daily_retry_enabled = value === "enabled";
+                          }
+                        },
+                        () => [h(ElOption, { label: "启用", value: "enabled" }), h(ElOption, { label: "停用", value: "disabled" })]
+                      )
+                    ),
+                    h(ElFormItem, { label: "默认重试间隔（秒）" }, () =>
+                      h(ElInputNumber, {
+                        modelValue: form.plan_daily_retry_interval_seconds,
+                        "onUpdate:modelValue": (value?: number) => {
+                          form.plan_daily_retry_interval_seconds = Number(value || 60);
+                        },
+                        min: 60,
+                        max: 1800,
+                        step: 60
+                      })
+                    ),
+                    h(ElFormItem, { label: "截止前停止重试（分钟）" }, () =>
+                      h(ElInputNumber, {
+                        modelValue: form.plan_daily_retry_stop_before_deadline_minutes,
+                        "onUpdate:modelValue": (value?: number) => {
+                          form.plan_daily_retry_stop_before_deadline_minutes = Number(value || 30);
+                        },
+                        min: 0,
+                        max: 180,
+                        step: 5
+                      })
+                    )
+                  ]
+                )
             }
           ),
           h(
