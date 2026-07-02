@@ -1,17 +1,23 @@
-﻿# mobilerpa-agent
+# mobilerpa-agent
 
-这是 MobileRPA 的手机端运行仓库，负责 AutoJs Agent、业务脚本、调试入口以及真机调试工具。
+这是 MobileRPA 的手机端运行仓库。
 
-## 仓库职责
-本仓库负责以下内容：
-- 常驻手机端 Agent
-- 脚本清单与版本目录结构
-- 脚本调试入口
-- 面向开发者的本地真机调试工具
+## 当前结构
 
-## 核心原则
-- 平台逻辑与业务自动化逻辑必须解耦
-- 脚本核心必须同时支持本地调试模式和生产 Agent 模式
+- [js-agent](D:/dev/code/mobilerpa/repos/mobilerpa-agent/js-agent)
+  纯 JavaScript 版本，作为回滚基线保留
+- [ts-agent](D:/dev/code/mobilerpa/repos/mobilerpa-agent/ts-agent)
+  TypeScript 独立工程，当前正式维护版本
+- `docs/`
+  迁移、验收与方案文档
 
-## 文档语言约定
-本仓库中的规范、流程、脚本设计说明默认使用中文。
+## 当前发布约定
+
+- 默认正式发布源： [ts-agent/release](D:/dev/code/mobilerpa/repos/mobilerpa-agent/ts-agent/release)
+- JS 回滚基线： [js-agent](D:/dev/code/mobilerpa/repos/mobilerpa-agent/js-agent)
+
+## 原则
+
+- JS 版和 TS 版必须目录隔离
+- 业务脚本与 Agent 核心继续解耦
+- 仓库规范与设计说明默认使用中文

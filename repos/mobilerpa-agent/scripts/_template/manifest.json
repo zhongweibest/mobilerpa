@@ -1,8 +1,0 @@
-{
-  "script_name": "template_script",
-  "version": "dev",
-  "entry": "main.js",
-  "debug_entry": "debug/debug_main.js",
-  "compatible_agent": ">=0.1.0",
-  "description": "template for new mobile rpa scripts"
-}

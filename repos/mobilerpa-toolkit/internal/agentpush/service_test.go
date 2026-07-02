@@ -91,6 +91,9 @@ func TestPushCreatesBootstrapWhenConfigMissing(t *testing.T) {
 	if !strings.Contains(joined, "/runtime/bootstrap.json") {
 		t.Fatalf("expected bootstrap push call, got:\n%s", joined)
 	}
+	if !strings.Contains(joined, "push "+agentRoot+string(os.PathSeparator)+"config.example.json "+DefaultRemoteRoot+"/agent/config.example.json") {
+		t.Fatalf("expected recursive agent file push call, got:\n%s", joined)
+	}
 	if !strings.Contains(joined, "shell mkdir -p "+DefaultRemoteRoot+"/agent "+DefaultRemoteRoot+"/agent/runtime "+DefaultRemoteRoot+"/agent/scripts") {
 		t.Fatalf("expected remote scripts dir creation call, got:\n%s", joined)
 	}
@@ -190,18 +193,17 @@ func createTestAgentRoot(t *testing.T) string {
 	t.Helper()
 
 	root := t.TempDir()
-	libDir := root + string(os.PathSeparator) + "lib"
-	if err := os.MkdirAll(libDir, 0o755); err != nil {
-		t.Fatalf("mkdir lib dir: %v", err)
-	}
 	if err := os.WriteFile(root+string(os.PathSeparator)+"agent.js", []byte("console.log('ok');"), 0o644); err != nil {
 		t.Fatalf("write agent.js: %v", err)
 	}
-	if err := os.WriteFile(libDir+string(os.PathSeparator)+"runtime.js", []byte("module.exports = {};"), 0o644); err != nil {
-		t.Fatalf("write lib file: %v", err)
+	if err := os.WriteFile(root+string(os.PathSeparator)+"config.example.json", []byte("{}"), 0o644); err != nil {
+		t.Fatalf("write config.example.json: %v", err)
 	}
-	if err := os.WriteFile(libDir+string(os.PathSeparator)+"task_runner.js", []byte("module.exports = {};"), 0o644); err != nil {
-		t.Fatalf("write task_runner file: %v", err)
+	if err := os.MkdirAll(root+string(os.PathSeparator)+"assets", 0o755); err != nil {
+		t.Fatalf("mkdir assets dir: %v", err)
+	}
+	if err := os.WriteFile(root+string(os.PathSeparator)+"assets"+string(os.PathSeparator)+"meta.txt", []byte("ok"), 0o644); err != nil {
+		t.Fatalf("write nested asset file: %v", err)
 	}
 	return root
 }

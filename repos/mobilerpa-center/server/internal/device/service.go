@@ -367,7 +367,28 @@ func (s *Service) DeleteByID(ctx context.Context, deviceID string) error {
 		return ErrDeviceOnline
 	}
 
-	result, err := s.db.ExecContext(ctx, `
+	now := time.Now().UTC().Format(time.RFC3339)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete device tx: %w", err)
+	}
+	defer func() {
+		if tx != nil {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE location_nodes
+SET device_id = 0, updated_at = ?
+WHERE node_type = 'slot' AND device_id = ?`,
+		now,
+		deviceID,
+	); err != nil {
+		return fmt.Errorf("clear bound slot nodes before delete device: %w", err)
+	}
+
+	result, err := tx.ExecContext(ctx, `
 DELETE FROM devices
 WHERE id = ?`, deviceID)
 	if err != nil {
@@ -381,6 +402,11 @@ WHERE id = ?`, deviceID)
 	if rowsAffected == 0 {
 		return ErrDeviceNotFound
 	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete device tx: %w", err)
+	}
+	tx = nil
 
 	s.mu.Lock()
 	delete(s.sessions, deviceID)

@@ -363,3 +363,75 @@ func TestDeleteLocationNodeRemovesSubtreeAndClearsBoundDevice(t *testing.T) {
 		t.Fatalf("unexpected bind status after subtree delete: %s", boundDevice.BindStatus)
 	}
 }
+
+func TestDeleteDeviceClearsBoundSlotNode(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "device-delete-service.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	service := NewService(db)
+	req := httptest.NewRequest("POST", "/api/v1/device/register", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+
+	deviceRecord, err := service.Register(context.Background(), RegisterRequest{
+		AgentUUID:  "agent-delete-001",
+		DeviceName: "Delete Device",
+		Brand:      "Google",
+		Model:      "Pixel 8",
+	}, req)
+	if err != nil {
+		t.Fatalf("register device: %v", err)
+	}
+
+	zone, err := service.CreateLocationNode(context.Background(), CreateLocationNodeRequest{NodeType: "zone", NodeName: "A区"})
+	if err != nil {
+		t.Fatalf("create zone: %v", err)
+	}
+	row, err := service.CreateLocationNode(context.Background(), CreateLocationNodeRequest{
+		ParentID: zone.NodeID,
+		NodeType: "row",
+		NodeName: "第1排",
+	})
+	if err != nil {
+		t.Fatalf("create row: %v", err)
+	}
+	slot, err := service.CreateLocationNode(context.Background(), CreateLocationNodeRequest{
+		ParentID: row.NodeID,
+		NodeType: "slot",
+		NodeName: "01",
+	})
+	if err != nil {
+		t.Fatalf("create slot: %v", err)
+	}
+
+	if _, err := service.BindDeviceToLocationNode(context.Background(), slot.NodeID, BindLocationNodeRequest{
+		DeviceID: deviceRecord.DeviceID,
+	}); err != nil {
+		t.Fatalf("bind location node: %v", err)
+	}
+
+	if err := service.MarkOffline(context.Background(), deviceRecord.DeviceID, time.Now()); err != nil {
+		t.Fatalf("mark device offline: %v", err)
+	}
+
+	if err := service.DeleteByID(context.Background(), deviceRecord.DeviceID); err != nil {
+		t.Fatalf("delete device: %v", err)
+	}
+
+	if _, err := service.GetByID(context.Background(), deviceRecord.DeviceID); err == nil {
+		t.Fatalf("expected deleted device to be missing")
+	}
+
+	clearedSlot, err := service.GetLocationNodeByID(context.Background(), slot.NodeID)
+	if err != nil {
+		t.Fatalf("get slot after device delete: %v", err)
+	}
+	if clearedSlot.DeviceID != "" {
+		t.Fatalf("expected slot binding cleared after device delete, got %q", clearedSlot.DeviceID)
+	}
+}

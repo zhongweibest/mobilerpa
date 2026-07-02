@@ -3,6 +3,8 @@
 Thumbs.db
 .idea/
 .vscode/
+node_modules/
+ts-agent/node_modules/
 
 # 运行时输出
 logs/
@@ -10,11 +12,13 @@ screenshots/
 dumps/
 temp/
 tmp/
+ts-agent/dist/
 
 # 本地设备与运行状态
-agent/runtime/
-agent/config.local.json
-agent/device.local.json
+ts-agent/runtime/
+ts-agent/config.local.json
+ts-agent/device.local.json
+js-agent/runtime/
 
 # 工具输出
 tools/**/dist/

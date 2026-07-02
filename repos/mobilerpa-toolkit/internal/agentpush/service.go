@@ -45,8 +45,18 @@ func (s *Service) Push(ctx context.Context, options PushOptions) error {
 	if _, err := s.runDeviceADB(ctx, options, "push", paths.AgentEntry, remoteEntryPath); err != nil {
 		return err
 	}
-	if _, err := s.runDeviceADB(ctx, options, "push", paths.AgentLibDir, remoteAgentDir+"/"); err != nil {
-		return err
+
+	for _, file := range paths.AgentFiles {
+		remotePath := remoteAgentDir + "/" + filepath.ToSlash(file.RelativePath)
+		remoteDir := filepath.ToSlash(filepath.Dir(remotePath))
+		if remoteDir != "." && remoteDir != "" {
+			if _, err := s.runDeviceADB(ctx, options, "shell", "mkdir", "-p", remoteDir); err != nil {
+				return err
+			}
+		}
+		if _, err := s.runDeviceADB(ctx, options, "push", file.LocalPath, remotePath); err != nil {
+			return err
+		}
 	}
 
 	needConfig := options.ResetConfig
@@ -94,25 +104,62 @@ func (s *Service) runDeviceADB(ctx context.Context, options PushOptions, args ..
 }
 
 type agentPaths struct {
-	AgentEntry  string
-	AgentLibDir string
+	AgentEntry string
+	AgentFiles []agentFile
+}
+
+type agentFile struct {
+	LocalPath    string
+	RelativePath string
 }
 
 func resolveAgentPaths(agentRoot string) (agentPaths, error) {
 	root := filepath.Clean(agentRoot)
 	entry := filepath.Join(root, "agent.js")
-	libDir := filepath.Join(root, "lib")
 
 	if stat, err := os.Stat(entry); err != nil || stat.IsDir() {
 		return agentPaths{}, fmt.Errorf("agent entry not found: %s", entry)
 	}
-	if stat, err := os.Stat(libDir); err != nil || !stat.IsDir() {
-		return agentPaths{}, fmt.Errorf("agent lib dir not found: %s", libDir)
+
+	files := make([]agentFile, 0)
+	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if path == root {
+			return nil
+		}
+
+		relativePath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relativePath = filepath.Clean(relativePath)
+
+		if info.IsDir() {
+			if relativePath == "runtime" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		if relativePath == "agent.js" {
+			return nil
+		}
+
+		files = append(files, agentFile{
+			LocalPath:    path,
+			RelativePath: relativePath,
+		})
+		return nil
+	})
+	if err != nil {
+		return agentPaths{}, fmt.Errorf("walk agent root: %w", err)
 	}
 
 	return agentPaths{
-		AgentEntry:  entry,
-		AgentLibDir: libDir,
+		AgentEntry: entry,
+		AgentFiles: files,
 	}, nil
 }
 

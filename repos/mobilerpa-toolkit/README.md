@@ -27,7 +27,7 @@
 cd D:\dev\code\mobilerpa\repos\mobilerpa-toolkit
 $env:GOCACHE="D:\dev\code\mobilerpa\.tmp\gocache"
 $env:GOMODCACHE="D:\dev\code\mobilerpa\.tmp\gomodcache"
-go build -o D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe .\cmd\mobilerpa-toolkit
+go build -o D:\dev\code\mobilerpa\repos\mobilerpa-toolkit\build\mobilerpa-toolkit.exe .\cmd\mobilerpa-toolkit
 ```
 
 ## 3. 命令总览
@@ -52,14 +52,14 @@ mobilerpa-toolkit stop-agent --device <adb-device> [--adb-path <path>] [--remote
 D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe push-center `
   --device 192.168.0.120:37123 `
   --center-base-url http://192.168.0.155:28080 `
-  --agent-root D:\dev\code\mobilerpa\repos\mobilerpa-agent\agent
+  --agent-root D:\dev\code\mobilerpa\repos\mobilerpa-agent\ts-agent\release
 ```
 
 常用参数：
 
 - `--device`：ADB 序列号或无线调试地址。
 - `--center-base-url`：写入设备 `bootstrap.json` 的中心服务地址。
-- `--agent-root`：Agent 根目录，内部需包含 `agent.js`、`lib/`。
+- `--agent-root`：Agent 根目录，内部至少需包含 `agent.js`。工具会递归推送根目录下实际存在的文件。
 - `--adb-path`：可选，默认为 `adb`。
 - `--reset-config`：显式重置设备端 `config.json`。
 - `--no-run`：只推送，不自动启动 Agent。
@@ -85,7 +85,7 @@ D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe push-center `
 ```powershell
 D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe push-manual `
   --center-base-url http://192.168.0.155:28080 `
-  --agent-root D:\dev\code\mobilerpa\repos\mobilerpa-agent\agent
+  --agent-root D:\dev\code\mobilerpa\repos\mobilerpa-agent\ts-agent\release
 ```
 
 如果不传 `--device` 和 `--all`，会进入交互式设备选择。

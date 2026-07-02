@@ -563,6 +563,11 @@ export const DevicesPage = defineComponent({
                 return h("div", "暂无数据");
               }
               const occupancy = selectedOccupancy.value.occupancy;
+              const currentTaskId = selectedOccupancy.value?.current_task_id;
+              const normalizedCurrentTaskId =
+                currentTaskId === undefined || currentTaskId === null || `${currentTaskId}`.trim() === "" || `${currentTaskId}` === "0"
+                  ? "暂无"
+                  : `${currentTaskId}`;
               return h("div", { class: "device-occupancy-panel" }, [
                 h("div", { class: "task-events-dialog__message" }, occupancy ? occupancy.message || "当前存在占用" : "当前没有任务或工作流占用该设备"),
                 h(
@@ -578,9 +583,9 @@ export const DevicesPage = defineComponent({
                     h(ElDescriptionsItem, { label: "占用类型" }, () => occupancy?.occupancy_type || "暂无"),
                     h(ElDescriptionsItem, { label: "任务状态" }, () => occupancy?.task_status || "暂无"),
                     h(ElDescriptionsItem, { label: "任务 ID" }, () => occupancy?.task_id || "暂无"),
-                    h(ElDescriptionsItem, { label: "current_task_id" }, () => selectedOccupancy.value?.current_task_id || "暂无"),
-                    h(ElDescriptionsItem, { label: "current_step" }, () => selectedOccupancy.value?.current_step || "暂无"),
-                    h(ElDescriptionsItem, { label: "last_error" }, () => selectedOccupancy.value?.last_error || "暂无")
+                    h(ElDescriptionsItem, { label: "当前任务" }, () => normalizedCurrentTaskId),
+                    h(ElDescriptionsItem, { label: "当前步骤" }, () => selectedOccupancy.value?.current_step || "暂无"),
+                    h(ElDescriptionsItem, { label: "最近错误" }, () => selectedOccupancy.value?.last_error || "暂无")
                   ]
                 )
               ]);

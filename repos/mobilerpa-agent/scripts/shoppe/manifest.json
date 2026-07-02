@@ -1,8 +1,0 @@
-﻿{
-  "script_name": "shoppe",
-  "version": "dev",
-  "entry": "main.js",
-  "debug_entry": "debug/debug_main.js",
-  "compatible_agent": ">=0.1.0",
-  "description": "initial migrated script placeholder"
-}
