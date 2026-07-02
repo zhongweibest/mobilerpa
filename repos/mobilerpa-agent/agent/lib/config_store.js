@@ -9,6 +9,7 @@ var runtime = require("./runtime");
  * @property {string} center_base_url 中心服务基础地址。
  * @property {string} agent_uuid Agent 本地稳定标识。
  * @property {string} device_id 中心服务返回的设备标识。
+ * @property {string} device_link_sn 设备发现阶段下发的链路标识。
  * @property {Object} device 设备信息覆盖项。
  * @property {Object} websocket WebSocket 连接配置。
  * @property {Object} last_register 最近一次注册结果。
@@ -205,6 +206,7 @@ function createEmptyConfig() {
         center_base_url: "http://127.0.0.1:18080",
         agent_uuid: "",
         device_id: "",
+        device_link_sn: "",
         device: {},
         websocket: {
             enabled: true,
@@ -233,6 +235,7 @@ function normalizeConfig(raw) {
         center_base_url: input.center_base_url || base.center_base_url,
         agent_uuid: input.agent_uuid || "",
         device_id: input.device_id || "",
+        device_link_sn: input.device_link_sn || "",
         device: input.device || {},
         websocket: normalizeWebSocketConfig(input.websocket, base.websocket),
         last_register: input.last_register || {},

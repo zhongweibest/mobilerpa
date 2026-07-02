@@ -2,6 +2,8 @@
 import {
   ElButton,
   ElCard,
+  ElDescriptions,
+  ElDescriptionsItem,
   ElDialog,
   ElDropdown,
   ElDropdownItem,
@@ -366,8 +368,10 @@ export const WorkflowsPage = defineComponent({
     const { scripts } = storeToRefs(scriptsStore);
 
     const createDialogVisible = ref(false);
+    const detailDialogVisible = ref(false);
     const dialogMode = ref<"create" | "copy" | "edit">("create");
     const editingWorkflowID = ref("");
+    const selectedWorkflow = ref<WorkflowDefinitionRecord | null>(null);
     const createForm = reactive({
       workflow_name: "",
       description: "",
@@ -454,6 +458,15 @@ export const WorkflowsPage = defineComponent({
         createDialogVisible.value = true;
       } catch (error) {
         noticesStore.error("加载工作流详情失败，暂时无法编辑", 5000);
+      }
+    }
+
+    async function openDetailDialog(workflow: WorkflowDefinitionRecord) {
+      try {
+        selectedWorkflow.value = await workflowsStore.loadWorkflowDetail(workflow.workflow_def_id);
+        detailDialogVisible.value = true;
+      } catch (_error) {
+        noticesStore.error("加载工作流详情失败，暂时无法查看", 5000);
       }
     }
 
@@ -1023,30 +1036,10 @@ export const WorkflowsPage = defineComponent({
                             h(ElTableColumn, { label: "更新时间", minWidth: 180, formatter: (row) => formatDateTime(row.updated_at) }),
                             h(
                               ElTableColumn,
-                              { label: "操作", minWidth: 180, fixed: "right" },
+                              { label: "操作", width: 160, fixed: "right" },
                               {
                                 default: ({ row }) =>
-                                  h("div", { class: "table-actions" }, [
-                                    h(
-                                      ElButton,
-                                      {
-                                        link: true,
-                                        onClick: () => {
-                                          void openEditDialog(row);
-                                        }
-                                      },
-                                      () => "编辑"
-                                    ),
-                                    h(
-                                      ElButton,
-                                      {
-                                        link: true,
-                                        onClick: () => {
-                                          void openCopyDialog(row);
-                                        }
-                                      },
-                                      () => "复制"
-                                    ),
+                                  h("div", { class: "table-actions table-actions--nowrap" }, [
                                     h(
                                       ElButton,
                                       {
@@ -1058,6 +1051,54 @@ export const WorkflowsPage = defineComponent({
                                         }
                                       },
                                       () => "删除"
+                                    ),
+                                    h(
+                                      ElDropdown,
+                                      {
+                                        trigger: "click"
+                                      },
+                                      {
+                                        default: () => h(ElButton, { type: "primary", link: true }, () => "更多"),
+                                        dropdown: () =>
+                                          h(
+                                            ElDropdownMenu,
+                                            null,
+                                            {
+                                              default: () => [
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "view_detail",
+                                                    onClick: () => {
+                                                      void openDetailDialog(row);
+                                                    }
+                                                  },
+                                                  () => "查看"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "edit_workflow",
+                                                    onClick: () => {
+                                                      void openEditDialog(row);
+                                                    }
+                                                  },
+                                                  () => "编辑"
+                                                ),
+                                                h(
+                                                  ElDropdownItem,
+                                                  {
+                                                    key: "copy_workflow",
+                                                    onClick: () => {
+                                                      void openCopyDialog(row);
+                                                    }
+                                                  },
+                                                  () => "复制"
+                                                )
+                                              ]
+                                            }
+                                          )
+                                      }
                                     )
                                   ])
                               }
@@ -1085,6 +1126,39 @@ export const WorkflowsPage = defineComponent({
                       })
                     )
                   ])
+          }
+        ),
+        h(
+          ElDialog,
+          {
+            modelValue: detailDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => (detailDialogVisible.value = value),
+            title: selectedWorkflow.value ? `工作流详情：${selectedWorkflow.value.workflow_name}` : "工作流详情",
+            width: "900px"
+          },
+          {
+            default: () =>
+              selectedWorkflow.value
+                ? h(
+                    ElDescriptions,
+                    {
+                      border: true,
+                      column: 2,
+                      class: "task-events-dialog__descriptions"
+                    },
+                    () => [
+                      h(ElDescriptionsItem, { label: "工作流名称" }, () => selectedWorkflow.value?.workflow_name || "暂无"),
+                      h(ElDescriptionsItem, { label: "工作流ID" }, () => selectedWorkflow.value?.workflow_def_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "状态" }, () => selectedWorkflow.value?.status || "暂无"),
+                      h(ElDescriptionsItem, { label: "节点数" }, () => `${getWorkflowNodes(selectedWorkflow.value).length} 个节点`),
+                      h(ElDescriptionsItem, { label: "编排摘要" }, () => buildWorkflowSummary(selectedWorkflow.value as WorkflowDefinitionRecord)),
+                      h(ElDescriptionsItem, { label: "更新时间" }, () => formatDateTime(selectedWorkflow.value?.updated_at)),
+                      h(ElDescriptionsItem, { label: "说明", span: 2 }, () => selectedWorkflow.value?.description || "暂无说明"),
+                      h(ElDescriptionsItem, { label: "路径预览", span: 2 }, () => buildWorkflowPathText(selectedWorkflow.value as WorkflowDefinitionRecord))
+                    ]
+                  )
+                : h("div", "暂无数据"),
+            footer: () => h(ElButton, { onClick: () => (detailDialogVisible.value = false) }, () => "关闭")
           }
         ),
         h(

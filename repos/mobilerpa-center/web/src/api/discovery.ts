@@ -1,5 +1,15 @@
 import { requestJSON } from "./http";
-import type { AgentActionRequest, AgentActionResult, AgentDeploymentRequest, AgentDeploymentResult, DiscoveredDevice, PairDeviceRequest, PairDeviceResult } from "../types/discovery";
+import type {
+  AgentActionRequest,
+  AgentActionResult,
+  AgentDeploymentRequest,
+  AgentDeploymentResult,
+  DiscoveredDevice,
+  PairDeviceRequest,
+  PairDeviceResult,
+  SoftwareInstallJob,
+  SoftwareInstallRequest
+} from "../types/discovery";
 import type { PaginatedResult, PaginationQuery } from "../types/pagination";
 
 export function fetchDiscoveredDevices(query: PaginationQuery): Promise<PaginatedResult<DiscoveredDevice>> {
@@ -38,4 +48,18 @@ export function pairDevice(payload: PairDeviceRequest): Promise<PairDeviceResult
     },
     body: JSON.stringify(payload)
   });
+}
+
+export function startSoftwareInstall(payload: SoftwareInstallRequest): Promise<SoftwareInstallJob> {
+  return requestJSON<SoftwareInstallJob>("/api/v1/discovery/software-installs", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export function fetchSoftwareInstallJob(jobID: string): Promise<SoftwareInstallJob> {
+  return requestJSON<SoftwareInstallJob>(`/api/v1/discovery/software-installs/${encodeURIComponent(jobID)}`);
 }

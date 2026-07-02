@@ -117,6 +117,7 @@ function connectAutoJs(options) {
     var reconnectBackoffMultiplier = Number(options.reconnectBackoffMultiplier || 2);
     var deviceID = String(options.deviceID || "");
     var agentUUID = String(options.agentUUID || "");
+    var deviceLinkSN = String(options.deviceLinkSN || "");
     var onAssignTask = typeof options.onAssignTask === "function" ? options.onAssignTask : null;
     var heartbeatStarted = false;
     var reconnectAttempt = 0;
@@ -147,6 +148,7 @@ function connectAutoJs(options) {
     function sendHeartbeat() {
         send("heartbeat", createRequestID("agent-heartbeat"), {
             agent_uuid: agentUUID,
+            device_link_sn: deviceLinkSN,
             execution_profile: runtime.collectExecutionProfile()
         });
     }
@@ -637,6 +639,7 @@ function connectAutoJs(options) {
                 try {
                     send("hello", createRequestID("agent-hello"), {
                         agent_uuid: agentUUID,
+                        device_link_sn: deviceLinkSN,
                         execution_profile: runtime.collectExecutionProfile()
                     });
                 } catch (error) {

@@ -8,20 +8,21 @@ import (
 )
 
 const (
-	defaultHTTPAddr            = ":8080"
-	defaultDBPath              = "./data/mobilerpa.db"
-	defaultHeartbeatInterval   = 30 * time.Second
-	defaultOfflineTimeout      = 90 * time.Second
-	defaultOfflineScanInterval = 15 * time.Second
-	defaultCORSAllowedOrigins  = "http://localhost:5173,http://127.0.0.1:5173"
-	defaultADBPath             = "adb"
-	defaultAgentRootPath       = "../../mobilerpa-agent/agent"
-	defaultScriptRootPath      = "./data/scripts"
-	defaultCenterBaseURL       = "http://127.0.0.1:8080"
+	defaultHTTPAddr             = ":8080"
+	defaultDBPath               = "./data/mobilerpa.db"
+	defaultHeartbeatInterval    = 30 * time.Second
+	defaultOfflineTimeout       = 90 * time.Second
+	defaultOfflineScanInterval  = 15 * time.Second
+	defaultCORSAllowedOrigins   = "http://localhost:5173,http://127.0.0.1:5173"
+	defaultADBPath              = "adb"
+	defaultAgentRootPath        = "../../mobilerpa-agent/agent"
+	defaultScriptRootPath       = "./data/scripts"
+	defaultSoftwareRootPath     = "./data/software"
+	defaultCenterBaseURL        = "http://127.0.0.1:8080"
 	defaultToolkitPath          = ""
 	defaultWorkflowScanInterval = 15 * time.Second
 	defaultPlanScanInterval     = 1 * time.Second
-	defaultPlanRetryInterval     = 1 * time.Minute
+	defaultPlanRetryInterval    = 1 * time.Minute
 	defaultPlanStartWorkers     = 2
 	defaultPlanStartFanout      = 20
 )
@@ -46,6 +47,8 @@ type Config struct {
 	AgentRootPath string
 	// ScriptRootPath 是中心服务本地可供下载的脚本目录根目录。
 	ScriptRootPath string
+	// SoftwareRootPath 是中心服务保存软件安装包的目录根目录。
+	SoftwareRootPath string
 	// CenterBaseURL 是写入手机端 bootstrap 的默认中心地址。
 	CenterBaseURL string
 	// ToolkitPath 是网页下发 Agent 时使用的 toolkit 可执行文件路径。
@@ -70,6 +73,7 @@ func Load() Config {
 		"CENTER_ADB_PATH":                     defaultADBPath,
 		"CENTER_AGENT_ROOT_PATH":              defaultAgentRootPath,
 		"CENTER_SCRIPT_ROOT_PATH":             defaultScriptRootPath,
+		"CENTER_SOFTWARE_ROOT_PATH":           defaultSoftwareRootPath,
 		"CENTER_BASE_URL":                     defaultCenterBaseURL,
 		"CENTER_TOOLKIT_PATH":                 defaultToolkitPath,
 		"CENTER_WORKFLOW_SCAN_INTERVAL":       defaultWorkflowScanInterval.String(),
@@ -101,6 +105,7 @@ func Load() Config {
 		ADBPath:                   values["CENTER_ADB_PATH"],
 		AgentRootPath:             values["CENTER_AGENT_ROOT_PATH"],
 		ScriptRootPath:            values["CENTER_SCRIPT_ROOT_PATH"],
+		SoftwareRootPath:          values["CENTER_SOFTWARE_ROOT_PATH"],
 		CenterBaseURL:             values["CENTER_BASE_URL"],
 		ToolkitPath:               values["CENTER_TOOLKIT_PATH"],
 		WorkflowScanInterval:      workflowScanInterval,

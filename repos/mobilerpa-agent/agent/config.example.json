@@ -2,6 +2,7 @@
   "center_base_url": "http://127.0.0.1:18080",
   "agent_uuid": "",
   "device_id": "",
+  "device_link_sn": "",
   "device": {
     "device_name": "AutoJs Test Device",
     "brand": "unknown",

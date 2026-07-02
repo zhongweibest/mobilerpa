@@ -9,6 +9,11 @@ export const useDevicesStore = defineStore("devices", () => {
   const total = ref(0);
   const page = ref(1);
   const pageSize = ref(10);
+  const filters = ref({
+    slot_zone: "",
+    slot_row: "",
+    slot_position: ""
+  });
   const loading = ref(false);
   const deletingDeviceID = ref("");
   const errorMessage = ref("");
@@ -19,7 +24,10 @@ export const useDevicesStore = defineStore("devices", () => {
     try {
       const result = await fetchDevices({
         page: page.value,
-        page_size: pageSize.value
+        page_size: pageSize.value,
+        slot_zone: filters.value.slot_zone,
+        slot_row: filters.value.slot_row,
+        slot_position: filters.value.slot_position
       });
       devices.value = result.items;
       total.value = result.total;
@@ -39,6 +47,16 @@ export const useDevicesStore = defineStore("devices", () => {
 
   async function changePageSize(nextPageSize: number) {
     pageSize.value = nextPageSize;
+    page.value = 1;
+    await loadDevices();
+  }
+
+  async function applyFilters(nextFilters: { slot_zone: string; slot_row: string; slot_position: string }) {
+    filters.value = {
+      slot_zone: nextFilters.slot_zone || "",
+      slot_row: nextFilters.slot_row || "",
+      slot_position: nextFilters.slot_position || ""
+    };
     page.value = 1;
     await loadDevices();
   }
@@ -65,12 +83,14 @@ export const useDevicesStore = defineStore("devices", () => {
     total,
     page,
     pageSize,
+    filters,
     loading,
     deletingDeviceID,
     errorMessage,
     loadDevices,
     changePage,
     changePageSize,
+    applyFilters,
     removeDevice
   };
 });

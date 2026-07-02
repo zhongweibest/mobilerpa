@@ -14,7 +14,20 @@ export function fetchDevices(query: PaginationQuery): Promise<PaginatedResult<De
     page: String(query.page),
     page_size: String(query.page_size)
   });
+  if (query.slot_zone?.trim()) {
+    searchParams.set("slot_zone", query.slot_zone.trim());
+  }
+  if (query.slot_row?.trim()) {
+    searchParams.set("slot_row", query.slot_row.trim());
+  }
+  if (query.slot_position?.trim()) {
+    searchParams.set("slot_position", query.slot_position.trim());
+  }
   return requestJSON<PaginatedResult<DeviceRecord>>(`/api/v1/devices?${searchParams.toString()}`);
+}
+
+export function fetchDeviceByID(deviceID: string): Promise<DeviceRecord> {
+  return requestJSON<DeviceRecord>(`/api/v1/devices/${encodeURIComponent(deviceID)}`);
 }
 
 export function deleteDevice(deviceID: string): Promise<{ device_id: string; deleted: boolean }> {

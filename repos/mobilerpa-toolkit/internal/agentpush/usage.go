@@ -6,8 +6,8 @@ var ErrUsage = errors.New(UsageText())
 
 func UsageText() string {
 	return `Usage:
-  mobilerpa-toolkit push-center --device <adb-device> --center-base-url <url> --script-name <name> --script-version <version> [--agent-root <path>] [--adb-path <path>] [--reset-config] [--no-run]
-  mobilerpa-toolkit push-manual [--device <adb-device> | --all] --center-base-url <url> --script-name <name> --script-version <version> [--agent-root <path>] [--adb-path <path>] [--reset-config] [--no-run]
+  mobilerpa-toolkit push-center --device <adb-device> --center-base-url <url> [--device-link-sn <value>] [--agent-root <path>] [--adb-path <path>] [--reset-config] [--no-run]
+  mobilerpa-toolkit push-manual [--device <adb-device> | --all] --center-base-url <url> [--agent-root <path>] [--adb-path <path>] [--reset-config] [--no-run]
   mobilerpa-toolkit start-agent --device <adb-device> [--adb-path <path>] [--autojs-component <component>] [--remote-root <path>]
   mobilerpa-toolkit stop-agent --device <adb-device> [--adb-path <path>] [--remote-root <path>]
 

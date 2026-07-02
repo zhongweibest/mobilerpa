@@ -71,19 +71,28 @@ export const DevicesPage = defineComponent({
   setup() {
     const devicesStore = useDevicesStore();
     const noticesStore = useNoticesStore();
-    const { devices, total, page, pageSize, loading, deletingDeviceID, errorMessage } = storeToRefs(devicesStore);
+    const { devices, total, page, pageSize, loading, deletingDeviceID, errorMessage, filters } = storeToRefs(devicesStore);
     const occupancyDialogVisible = ref(false);
+    const detailDialogVisible = ref(false);
     const loadingOccupancy = ref(false);
     const selectedOccupancy = ref<DeviceOccupancyDetail | null>(null);
+    const selectedDevice = ref<DeviceRecord | null>(null);
     const bindDialogVisible = ref(false);
     const bindingDevice = ref<DeviceRecord | null>(null);
     const bindingNodes = ref<LocationNodeRecord[]>([]);
     const loadingSlots = ref(false);
     const binding = ref(false);
+    const loadingFilters = ref(false);
+    const filterNodes = ref<LocationNodeRecord[]>([]);
     const bindForm = reactive({
       slot_zone: "",
       slot_row: "",
       slot_id: ""
+    });
+    const searchForm = reactive({
+      slot_zone: "",
+      slot_row: "",
+      slot_position: ""
     });
 
     const availableZones = computed(() =>
@@ -95,9 +104,15 @@ export const DevicesPage = defineComponent({
     const availableSlots = computed(() =>
       bindingNodes.value.filter((item) => item.node_type === "slot" && item.parent_id === bindForm.slot_row.trim())
     );
+    const filterZones = computed(() => filterNodes.value.filter((item) => item.node_type === "zone"));
+    const filterRows = computed(() => filterNodes.value.filter((item) => item.node_type === "row" && item.parent_id === searchForm.slot_zone.trim()));
+    const filterSlots = computed(() => filterNodes.value.filter((item) => item.node_type === "slot" && item.parent_id === searchForm.slot_row.trim()));
 
     onMounted(() => {
-      void devicesStore.loadDevices();
+      searchForm.slot_zone = filters.value.slot_zone || "";
+      searchForm.slot_row = filters.value.slot_row || "";
+      searchForm.slot_position = filters.value.slot_position || "";
+      void Promise.all([devicesStore.loadDevices(), loadFilterNodes()]);
     });
 
     watch(
@@ -108,6 +123,40 @@ export const DevicesPage = defineComponent({
         }
       }
     );
+
+    async function loadFilterNodes() {
+      loadingFilters.value = true;
+      try {
+        filterNodes.value = await fetchLocationNodes();
+      } catch (_error) {
+        noticesStore.error("加载设备搜索位置树失败", 5000);
+      } finally {
+        loadingFilters.value = false;
+      }
+    }
+
+    async function handleSearch() {
+      await devicesStore.applyFilters({
+        slot_zone: searchForm.slot_zone,
+        slot_row: searchForm.slot_row,
+        slot_position: searchForm.slot_position
+      });
+    }
+
+    function clearZone() {
+      searchForm.slot_zone = "";
+      searchForm.slot_row = "";
+      searchForm.slot_position = "";
+    }
+
+    function clearRow() {
+      searchForm.slot_row = "";
+      searchForm.slot_position = "";
+    }
+
+    function clearSlot() {
+      searchForm.slot_position = "";
+    }
 
     async function handleDelete(deviceID: string) {
       try {
@@ -140,6 +189,11 @@ export const DevicesPage = defineComponent({
       } finally {
         loadingOccupancy.value = false;
       }
+    }
+
+    function openDetailDialog(device: DeviceRecord) {
+      selectedDevice.value = device;
+      detailDialogVisible.value = true;
     }
 
     async function handleOpenBindDialog(device: DeviceRecord) {
@@ -191,6 +245,68 @@ export const DevicesPage = defineComponent({
       h("section", { class: "devices-page" }, [
         h("div", { class: "page-toolbar" }, [
           h(
+            ElSelect,
+            {
+              modelValue: searchForm.slot_zone,
+              filterable: true,
+              clearable: true,
+              placeholder: "选择分区",
+              loading: loadingFilters.value,
+              style: { width: "160px" },
+              "onUpdate:modelValue": (value: string) => {
+                searchForm.slot_zone = value || "";
+                searchForm.slot_row = "";
+                searchForm.slot_position = "";
+              },
+              onClear: clearZone
+            },
+            () => filterZones.value.map((item) => h(ElOption, { key: item.node_id, label: item.node_name, value: item.node_id }))
+          ),
+          h(
+            ElSelect,
+            {
+              modelValue: searchForm.slot_row,
+              filterable: true,
+              clearable: true,
+              placeholder: "选择排号",
+              disabled: searchForm.slot_zone.trim() === "",
+              style: { width: "160px" },
+              "onUpdate:modelValue": (value: string) => {
+                searchForm.slot_row = value || "";
+                searchForm.slot_position = "";
+              },
+              onClear: clearRow
+            },
+            () => filterRows.value.map((item) => h(ElOption, { key: item.node_id, label: item.node_name, value: item.node_id }))
+          ),
+          h(
+            ElSelect,
+            {
+              modelValue: searchForm.slot_position,
+              filterable: true,
+              clearable: true,
+              placeholder: "选择槽位",
+              disabled: searchForm.slot_row.trim() === "",
+              style: { width: "180px" },
+              "onUpdate:modelValue": (value: string) => {
+                searchForm.slot_position = value || "";
+              },
+              onClear: clearSlot
+            },
+            () => filterSlots.value.map((item) => h(ElOption, { key: item.node_id, label: buildSlotLabel(item), value: item.node_id }))
+          ),
+          h(
+            ElButton,
+            {
+              type: "primary",
+              loading: loading.value,
+              onClick: () => {
+                void handleSearch();
+              }
+            },
+            () => "搜索"
+          ),
+          h(
             ElButton,
             {
               loading: loading.value,
@@ -221,6 +337,16 @@ export const DevicesPage = defineComponent({
                         },
                           {
                             default: () => [
+                              h(ElTableColumn, {
+                                prop: "device_id",
+                                label: "设备 ID",
+                                minWidth: 160
+                              }),
+                              h(ElTableColumn, {
+                                label: "物理位置",
+                                minWidth: 120,
+                                formatter: (row) => (row.physical_slot?.trim() ? row.physical_slot : "未录入")
+                              }),
                               h(
                                 ElTableColumn,
                                 {
@@ -231,11 +357,6 @@ export const DevicesPage = defineComponent({
                                   default: ({ row }) => h("div", { class: "devices-table__name" }, getDeviceDisplayName(row))
                                 }
                               ),
-                              h(ElTableColumn, {
-                                prop: "device_id",
-                                label: "设备 ID",
-                                minWidth: 160
-                              }),
                               h(
                                 ElTableColumn,
                                 {
@@ -281,11 +402,6 @@ export const DevicesPage = defineComponent({
                                   default: ({ row }) => renderOccupancyTag(row.occupancy)
                                 }
                               ),
-                              h(ElTableColumn, {
-                                label: "物理位置",
-                                minWidth: 120,
-                                formatter: (row) => (row.physical_slot?.trim() ? row.physical_slot : "未录入")
-                              }),
                               h(
                                 ElTableColumn,
                                 {
@@ -322,6 +438,16 @@ export const DevicesPage = defineComponent({
                                               null,
                                               {
                                                 default: () => [
+                                                  h(
+                                                    ElDropdownItem,
+                                                    {
+                                                      key: "detail",
+                                                      onClick: () => {
+                                                        openDetailDialog(row);
+                                                      }
+                                                    },
+                                                    () => "查看"
+                                                  ),
                                                   h(
                                                     ElDropdownItem,
                                                     {
@@ -374,6 +500,51 @@ export const DevicesPage = defineComponent({
                       })
                     )
                   ])
+          }
+        ),
+        h(
+          ElDialog,
+          {
+            modelValue: detailDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => {
+              detailDialogVisible.value = value;
+            },
+            title: selectedDevice.value ? `设备详情：${getDeviceDisplayName(selectedDevice.value)}` : "设备详情",
+            width: "820px"
+          },
+          {
+            default: () =>
+              selectedDevice.value
+                ? h(
+                    ElDescriptions,
+                    {
+                      border: true,
+                      column: 2,
+                      class: "task-events-dialog__descriptions"
+                    },
+                    () => [
+                      h(ElDescriptionsItem, { label: "设备名称" }, () => getDeviceDisplayName(selectedDevice.value as DeviceRecord)),
+                      h(ElDescriptionsItem, { label: "设备 ID" }, () => selectedDevice.value?.device_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "Agent UUID" }, () => selectedDevice.value?.agent_uuid || "暂无"),
+                      h(ElDescriptionsItem, { label: "在线状态" }, () => normalizeDeviceStatus(selectedDevice.value?.status || "") === "online" ? "在线" : "离线"),
+                      h(ElDescriptionsItem, { label: "绑定状态" }, () => {
+                        const bindStatus = normalizeBindStatus(selectedDevice.value?.bind_status || "");
+                        return bindStatus === "bound" ? "已绑定" : bindStatus === "pending" ? "待绑定" : "未知";
+                      }),
+                      h(ElDescriptionsItem, { label: "物理位置" }, () => selectedDevice.value?.physical_slot || "未录入"),
+                      h(ElDescriptionsItem, { label: "品牌" }, () => selectedDevice.value?.brand || "暂无"),
+                      h(ElDescriptionsItem, { label: "型号" }, () => selectedDevice.value?.model || "暂无"),
+                      h(ElDescriptionsItem, { label: "Android ID" }, () => selectedDevice.value?.android_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "ADB Serial" }, () => selectedDevice.value?.adb_serial || "暂无"),
+                      h(ElDescriptionsItem, { label: "Device Link SN" }, () => selectedDevice.value?.device_link_sn || "暂无"),
+                      h(ElDescriptionsItem, { label: "最近心跳" }, () => formatDateTime(selectedDevice.value?.last_heartbeat_at)),
+                      h(ElDescriptionsItem, { label: "当前任务" }, () => selectedDevice.value?.current_task_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "当前步骤" }, () => selectedDevice.value?.current_step || "暂无"),
+                      h(ElDescriptionsItem, { label: "最近错误", span: 2 }, () => selectedDevice.value?.last_error || "暂无")
+                    ]
+                  )
+                : h("div", "暂无数据"),
+            footer: () => h("div", { class: "dialog-footer" }, [h(ElButton, { onClick: () => (detailDialogVisible.value = false) }, () => "关闭")])
           }
         ),
         h(

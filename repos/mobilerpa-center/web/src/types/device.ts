@@ -6,6 +6,9 @@ export interface DeviceRecord {
   agent_uuid: string;
   device_name: string;
   physical_slot: string;
+  slot_zone_id: string;
+  slot_row_id: string;
+  slot_position_id: string;
   slot_zone: string;
   slot_row: string;
   slot_position: string;
@@ -17,6 +20,7 @@ export interface DeviceRecord {
   model: string;
   android_id: string;
   adb_serial: string;
+  device_link_sn: string;
   current_task_id: string;
   current_step: string;
   last_error: string;

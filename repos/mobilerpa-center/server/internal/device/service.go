@@ -68,6 +68,8 @@ type RegisterRequest struct {
 	AndroidID string `json:"android_id"`
 	// ADBSerial 是设备端可获取时上报的 ADB 序列号。
 	ADBSerial string `json:"adb_serial"`
+	// DeviceLinkSN 是设备发现阶段下发的稳定链路标识，通常为 mDNS 服务名。
+	DeviceLinkSN string `json:"device_link_sn"`
 }
 
 // 设备记录表示中心服务持久化并返回的设备信息。
@@ -82,6 +84,12 @@ type Device struct {
 	PhysicalSlot string `json:"physical_slot"`
 	// GroupName 是运维分配的设备逻辑分组。
 	GroupName string `json:"group_name"`
+	// SlotZoneID 是设备所在分区节点 ID。
+	SlotZoneID string `json:"slot_zone_id"`
+	// SlotRowID 是设备所在排号节点 ID。
+	SlotRowID string `json:"slot_row_id"`
+	// SlotPositionID 是设备所在槽位节点 ID。
+	SlotPositionID string `json:"slot_position_id"`
 	// SlotZone 是设备所在分区。
 	SlotZone string `json:"slot_zone"`
 	// SlotRow 是设备所在排号。
@@ -102,6 +110,8 @@ type Device struct {
 	AndroidID string `json:"android_id"`
 	// ADBSerial 是设备最近一次上报的 ADB 序列号。
 	ADBSerial string `json:"adb_serial"`
+	// DeviceLinkSN 是设备发现阶段下发并由 Agent 回传的链路标识。
+	DeviceLinkSN string `json:"device_link_sn"`
 	// CurrentTaskID 是当前关联到该设备的任务标识。
 	CurrentTaskID string `json:"current_task_id"`
 	// CurrentStep 是当前任务最近一次上报的执行步骤。
@@ -138,18 +148,18 @@ type RegisterResult struct {
 
 // LocationNode 表示位置树中的一个节点。
 type LocationNode struct {
-	NodeID     string `json:"node_id"`
-	ParentID   string `json:"parent_id"`
-	NodeType   string `json:"node_type"`
-	NodeName   string `json:"node_name"`
-	DeviceID   string `json:"device_id"`
-	SortOrder  int    `json:"sort_order"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
-	ZoneName   string `json:"zone_name"`
-	RowName    string `json:"row_name"`
-	SlotName   string `json:"slot_name"`
-	PathText   string `json:"path_text"`
+	NodeID    string `json:"node_id"`
+	ParentID  string `json:"parent_id"`
+	NodeType  string `json:"node_type"`
+	NodeName  string `json:"node_name"`
+	DeviceID  string `json:"device_id"`
+	SortOrder int    `json:"sort_order"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+	ZoneName  string `json:"zone_name"`
+	RowName   string `json:"row_name"`
+	SlotName  string `json:"slot_name"`
+	PathText  string `json:"path_text"`
 }
 
 // CreateLocationNodeRequest 描述创建位置节点的请求。
@@ -172,13 +182,19 @@ type BindLocationNodeRequest struct {
 	DeviceID string `json:"device_id"`
 }
 
+type DeviceListFilter struct {
+	SlotZoneID     string
+	SlotRowID      string
+	SlotPositionID string
+}
+
 // ExecutionProfile 表示设备端上报的执行前环境自检结果。
 type ExecutionProfile struct {
-	AccessibilityStatus             string `json:"accessibility_status"`
-	ForegroundServiceStatus         string `json:"foreground_service_status"`
+	AccessibilityStatus              string `json:"accessibility_status"`
+	ForegroundServiceStatus          string `json:"foreground_service_status"`
 	BatteryOptimizationIgnoredStatus string `json:"battery_optimization_ignored_status"`
-	CheckedAt                       string `json:"checked_at"`
-	Message                         string `json:"message"`
+	CheckedAt                        string `json:"checked_at"`
+	Message                          string `json:"message"`
 }
 
 // 创建设备服务会使用指定数据库连接作为存储后端。
@@ -229,15 +245,31 @@ func (s *Service) Register(ctx context.Context, req RegisterRequest, r *http.Req
 }
 
 // 查询设备列表会按创建时间返回所有已持久化的设备记录。
-func (s *Service) List(ctx context.Context) ([]Device, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Service) List(ctx context.Context, filter DeviceListFilter) ([]Device, error) {
+	query := `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
-       slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+       slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
+       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
-ORDER BY created_at ASC`)
+WHERE 1 = 1`
+	args := make([]any, 0, 3)
+	if value := strings.TrimSpace(filter.SlotZoneID); value != "" {
+		query += " AND slot_zone_id = ?"
+		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.SlotRowID); value != "" {
+		query += " AND slot_row_id = ?"
+		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.SlotPositionID); value != "" {
+		query += " AND slot_position_id = ?"
+		args = append(args, value)
+	}
+	query += " ORDER BY created_at ASC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query devices: %w", err)
 	}
@@ -248,8 +280,8 @@ ORDER BY created_at ASC`)
 		var d Device
 		if err := rows.Scan(
 			&d.DeviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
-			&d.SlotZone, &d.SlotRow, &d.SlotPosition,
-			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
+			&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
+			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
 			&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 			&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
@@ -265,8 +297,8 @@ ORDER BY created_at ASC`)
 func (s *Service) ListOnline(ctx context.Context) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
-       slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+       slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
+       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -282,8 +314,8 @@ ORDER BY created_at ASC`)
 		var d Device
 		if err := rows.Scan(
 			&d.DeviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
-			&d.SlotZone, &d.SlotRow, &d.SlotPosition,
-			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
+			&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
+			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
 			&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 			&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
@@ -304,8 +336,8 @@ func (s *Service) GetByID(ctx context.Context, deviceID string) (Device, error) 
 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
-       slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+       slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
+       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -479,6 +511,28 @@ WHERE id = ?`,
 	)
 	if err != nil {
 		return fmt.Errorf("update execution profile: %w", err)
+	}
+	return nil
+}
+
+// UpdateDeviceLinkSN 持久化设备发现链路标识。
+func (s *Service) UpdateDeviceLinkSN(ctx context.Context, deviceID string, deviceLinkSN string) error {
+	deviceID = strings.TrimSpace(deviceID)
+	deviceLinkSN = strings.TrimSpace(deviceLinkSN)
+	if deviceID == "" || deviceLinkSN == "" {
+		return nil
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+UPDATE devices
+SET device_link_sn = ?, updated_at = ?
+WHERE id = ?`,
+		deviceLinkSN,
+		time.Now().UTC().Format(time.RFC3339),
+		deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("update device_link_sn: %w", err)
 	}
 	return nil
 }
@@ -712,7 +766,7 @@ func (s *Service) DeleteLocationNode(ctx context.Context, nodeID string) error {
 		args = append([]any{now}, args...)
 		if _, err := tx.ExecContext(ctx, `
 UPDATE devices
-SET physical_slot = '', slot_zone = '', slot_row = '', slot_position = '', bind_status = 'pending', updated_at = ?
+SET physical_slot = '', slot_zone_id = '', slot_row_id = '', slot_position_id = '', slot_zone = '', slot_row = '', slot_position = '', bind_status = 'pending', updated_at = ?
 WHERE id IN (`+query+`)`,
 			args...,
 		); err != nil {
@@ -752,6 +806,20 @@ func (s *Service) BindDeviceToLocationNode(ctx context.Context, nodeID string, r
 	}
 	if node.DeviceID != "" && node.DeviceID != req.DeviceID {
 		return LocationNode{}, ErrLocationNodeOccupied
+	}
+	rowNode, err := s.GetLocationNodeByID(ctx, node.ParentID)
+	if err != nil {
+		return LocationNode{}, err
+	}
+	if rowNode.NodeType != "row" {
+		return LocationNode{}, ErrLocationNodeHierarchyInvalid
+	}
+	zoneNode, err := s.GetLocationNodeByID(ctx, rowNode.ParentID)
+	if err != nil {
+		return LocationNode{}, err
+	}
+	if zoneNode.NodeType != "zone" {
+		return LocationNode{}, ErrLocationNodeHierarchyInvalid
 	}
 
 	deviceItem, err := s.GetByID(ctx, req.DeviceID)
@@ -794,9 +862,12 @@ WHERE id = ?`,
 	physicalSlot := fmt.Sprintf("%s-%s-%s", node.ZoneName, node.RowName, node.SlotName)
 	if _, err := tx.ExecContext(ctx, `
 UPDATE devices
-SET physical_slot = ?, slot_zone = ?, slot_row = ?, slot_position = ?, bind_status = 'bound', updated_at = ?
+SET physical_slot = ?, slot_zone_id = ?, slot_row_id = ?, slot_position_id = ?, slot_zone = ?, slot_row = ?, slot_position = ?, bind_status = 'bound', updated_at = ?
 WHERE id = ?`,
 		physicalSlot,
+		zoneNode.NodeID,
+		rowNode.NodeID,
+		node.NodeID,
 		node.ZoneName,
 		node.RowName,
 		node.SlotName,
@@ -838,7 +909,7 @@ func (s *Service) UnbindLocationNode(ctx context.Context, nodeID string) (Locati
 	if node.DeviceID != "" {
 		if _, err := tx.ExecContext(ctx, `
 UPDATE devices
-SET physical_slot = '', slot_zone = '', slot_row = '', slot_position = '', bind_status = 'pending', updated_at = ?
+SET physical_slot = '', slot_zone_id = '', slot_row_id = '', slot_position_id = '', slot_zone = '', slot_row = '', slot_position = '', bind_status = 'pending', updated_at = ?
 WHERE id = ?`,
 			now,
 			node.DeviceID,
@@ -892,8 +963,8 @@ func (s *Service) EnsureExecutionReady(ctx context.Context, deviceID string) err
 func (s *Service) findByAgentUUID(ctx context.Context, agentUUID string) (*Device, error) {
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
-       slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+       slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
+       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -925,8 +996,8 @@ func scanDevice(scanner deviceScanner) (Device, error) {
 	)
 	err := scanner.Scan(
 		&deviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
-		&d.SlotZone, &d.SlotRow, &d.SlotPosition,
-		&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &currentTaskID, &d.CurrentStep, &d.LastError,
+		&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
+		&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &currentTaskID, &d.CurrentStep, &d.LastError,
 		&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 		&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 	)
@@ -1092,6 +1163,19 @@ func buildInClause(ids []string) (string, []any) {
 	return strings.Join(placeholders, ","), args
 }
 
+func findZoneIDByRowID(nodes []LocationNode, rowID string) string {
+	rowID = strings.TrimSpace(rowID)
+	if rowID == "" {
+		return ""
+	}
+	for _, item := range nodes {
+		if item.NodeID == rowID {
+			return strings.TrimSpace(item.ParentID)
+		}
+	}
+	return ""
+}
+
 func (s *Service) refreshLocationBindingsInTx(ctx context.Context, tx *sql.Tx, rootNodeIDs []string, now string) error {
 	if len(rootNodeIDs) == 0 {
 		return nil
@@ -1129,9 +1213,12 @@ func (s *Service) refreshLocationBindingsInTx(ctx context.Context, tx *sql.Tx, r
 		physicalSlot := fmt.Sprintf("%s-%s-%s", item.ZoneName, item.RowName, item.SlotName)
 		if _, err := tx.ExecContext(ctx, `
 UPDATE devices
-SET physical_slot = ?, slot_zone = ?, slot_row = ?, slot_position = ?, bind_status = 'bound', updated_at = ?
+SET physical_slot = ?, slot_zone_id = ?, slot_row_id = ?, slot_position_id = ?, slot_zone = ?, slot_row = ?, slot_position = ?, bind_status = 'bound', updated_at = ?
 WHERE id = ?`,
 			physicalSlot,
+			findZoneIDByRowID(hydratedNodes, item.ParentID),
+			item.ParentID,
+			item.NodeID,
 			item.ZoneName,
 			item.RowName,
 			item.SlotName,
@@ -1172,11 +1259,11 @@ func normalizeExecutionStatus(value string) string {
 func (s *Service) insertDevice(ctx context.Context, req RegisterRequest, ip string, now string) (string, error) {
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO devices (
-    agent_uuid, device_name, physical_slot, group_name, slot_zone, slot_row, slot_position, status, bind_status, ip,
-    brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+    agent_uuid, device_name, physical_slot, group_name, slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position, status, bind_status, ip,
+    brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
     accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
     last_heartbeat_at, created_at, updated_at
-) VALUES (?, ?, '', '', '', '', '', 'offline', 'pending', ?, ?, ?, ?, ?, 0, '', '', 'unknown', 'unknown', 'unknown', '', '', '', ?, ?)`,
+) VALUES (?, ?, '', '', '', '', '', '', '', '', 'offline', 'pending', ?, ?, ?, ?, ?, ?, 0, '', '', 'unknown', 'unknown', 'unknown', '', '', '', ?, ?)`,
 		req.AgentUUID,
 		req.DeviceName,
 		ip,
@@ -1184,6 +1271,7 @@ INSERT INTO devices (
 		req.Model,
 		req.AndroidID,
 		req.ADBSerial,
+		req.DeviceLinkSN,
 		now,
 		now,
 	)
@@ -1200,7 +1288,7 @@ INSERT INTO devices (
 func (s *Service) updateRegistration(ctx context.Context, deviceID string, req RegisterRequest, ip string, now string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE devices
-SET device_name = ?, ip = ?, brand = ?, model = ?, android_id = ?, adb_serial = ?, updated_at = ?
+SET device_name = ?, ip = ?, brand = ?, model = ?, android_id = ?, adb_serial = ?, device_link_sn = ?, updated_at = ?
 WHERE id = ?`,
 		req.DeviceName,
 		ip,
@@ -1208,6 +1296,7 @@ WHERE id = ?`,
 		req.Model,
 		req.AndroidID,
 		req.ADBSerial,
+		req.DeviceLinkSN,
 		now,
 		deviceID,
 	)

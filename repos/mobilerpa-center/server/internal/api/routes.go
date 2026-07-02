@@ -17,6 +17,7 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/plan"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/script"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/software"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 )
@@ -28,6 +29,7 @@ import (
 func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Service, dispatcher *dispatch.Service, discoveryService *discovery.Service, extras ...any) {
 	scripts := script.NewService(nil, "./data/scripts")
 	systemSettings := settings.NewService(nil)
+	softwareService := software.NewService(nil, "./data/software")
 	plans := plan.NewService(nil, nil, nil, nil, nil, nil)
 	workflows := workflow.NewService(nil, nil, nil, nil)
 	var wsHandler http.Handler
@@ -41,6 +43,10 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 		case *settings.Service:
 			if value != nil {
 				systemSettings = value
+			}
+		case *software.Service:
+			if value != nil {
+				softwareService = value
 			}
 		case *plan.Service:
 			if value != nil {
@@ -70,6 +76,8 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/discovery/devices", listDiscoveredDevices(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-deployments", deployAgents(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/agent-actions", controlAgent(discoveryService))
+	mux.HandleFunc("/api/v1/discovery/software-installs", installSoftware(discoveryService, softwareService))
+	mux.HandleFunc("/api/v1/discovery/software-installs/", softwareInstallSubResources(discoveryService))
 	mux.HandleFunc("/api/v1/discovery/pair", pairDevice(discoveryService))
 	mux.HandleFunc("/api/v1/settings/discovery", discoverySettings(systemSettings))
 	mux.HandleFunc("/api/v1/settings/plans/daily-retry", planDailyRetrySettings(systemSettings))
@@ -81,6 +89,8 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/scripts/upload", uploadScript(scripts))
 	mux.HandleFunc("/api/v1/scripts", listScripts(scripts))
 	mux.HandleFunc("/api/v1/scripts/", scriptsSubResources(scripts))
+	mux.HandleFunc("/api/v1/software", softwareCollection(softwareService))
+	mux.HandleFunc("/api/v1/software/", softwareSubResources(softwareService))
 	mux.HandleFunc("/api/v1/workflows", workflowsCollection(workflows))
 	mux.HandleFunc("/api/v1/workflows/", workflowSubResources(workflows))
 	mux.HandleFunc("/api/v1/device/upload", notImplemented("device upload"))
@@ -175,7 +185,10 @@ func plansCollection(plans *plan.Service) http.HandlerFunc {
 			defer cancel()
 
 			if strings.TrimSpace(r.URL.Query().Get("view")) == "runs" {
-				result, err := plans.ListRuns(ctx, "")
+				result, err := plans.ListRuns(ctx, plan.RunListFilter{
+					PlanDefID: strings.TrimSpace(r.URL.Query().Get("plan_def_id")),
+					PlanName:  strings.TrimSpace(r.URL.Query().Get("plan_name")),
+				})
 				if err != nil {
 					writePlanError(w, err)
 					return
@@ -187,7 +200,10 @@ func plansCollection(plans *plan.Service) http.HandlerFunc {
 				return
 			}
 
-			result, err := plans.ListDefinitions(ctx)
+			result, err := plans.ListDefinitions(ctx, plan.DefinitionListFilter{
+				TargetType:   strings.TrimSpace(r.URL.Query().Get("target_type")),
+				ScheduleType: strings.TrimSpace(r.URL.Query().Get("schedule_type")),
+			})
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -290,7 +306,7 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 		}
 
 		if len(parts) == 2 && parts[1] == "runs" && r.Method == http.MethodGet {
-			result, err := plans.ListRuns(ctx, planDefID)
+			result, err := plans.ListRuns(ctx, plan.RunListFilter{PlanDefID: planDefID})
 			if err != nil {
 				writePlanError(w, err)
 				return
@@ -708,7 +724,11 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
 
-		results, err := devices.List(ctx)
+		results, err := devices.List(ctx, device.DeviceListFilter{
+			SlotZoneID:     strings.TrimSpace(r.URL.Query().Get("slot_zone")),
+			SlotRowID:      strings.TrimSpace(r.URL.Query().Get("slot_row")),
+			SlotPositionID: strings.TrimSpace(r.URL.Query().Get("slot_position")),
+		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -722,6 +742,9 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 				"device_name":                         item.DeviceName,
 				"physical_slot":                       item.PhysicalSlot,
 				"group_name":                          item.GroupName,
+				"slot_zone_id":                        item.SlotZoneID,
+				"slot_row_id":                         item.SlotRowID,
+				"slot_position_id":                    item.SlotPositionID,
 				"slot_zone":                           item.SlotZone,
 				"slot_row":                            item.SlotRow,
 				"slot_position":                       item.SlotPosition,
@@ -732,6 +755,7 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 				"model":                               item.Model,
 				"android_id":                          item.AndroidID,
 				"adb_serial":                          item.ADBSerial,
+				"device_link_sn":                      item.DeviceLinkSN,
 				"current_task_id":                     item.CurrentTaskID,
 				"current_step":                        item.CurrentStep,
 				"last_error":                          item.LastError,
@@ -943,8 +967,8 @@ func locationNodeSubResources(devices *device.Service) http.HandlerFunc {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"status": "ok",
 				"data": map[string]any{
-					"node_id":  nodeID,
-					"deleted":  true,
+					"node_id": nodeID,
+					"deleted": true,
 				},
 			})
 			return
@@ -1060,6 +1084,74 @@ func controlAgent(discoveryService *discovery.Service) http.HandlerFunc {
 		defer cancel()
 
 		result, err := discoveryService.ControlAgent(ctx, req)
+		if err != nil {
+			writeDiscoveryError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data":   result,
+		})
+	}
+}
+
+func installSoftware(discoveryService *discovery.Service, softwareService *software.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+
+		var req discovery.SoftwareInstallRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+		defer cancel()
+
+		packages := make([]software.Package, 0, len(req.SoftwareIDs))
+		for _, softwareID := range req.SoftwareIDs {
+			pkg, err := softwareService.Get(ctx, softwareID)
+			if err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+			packages = append(packages, pkg)
+		}
+
+		result, err := discoveryService.StartSoftwareInstall(ctx, req, packages)
+		if err != nil {
+			writeDiscoveryError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data":   result,
+		})
+	}
+}
+
+func softwareInstallSubResources(discoveryService *discovery.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		jobID := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/discovery/software-installs/"), "/")
+		if jobID == "" || strings.Contains(jobID, "/") {
+			writeError(w, http.StatusNotFound, "software_install_job_not_found")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		result, err := discoveryService.GetSoftwareInstallJob(ctx, jobID)
 		if err != nil {
 			writeDiscoveryError(w, err)
 			return
@@ -1242,6 +1334,168 @@ func listScripts(scripts *script.Service) http.HandlerFunc {
 			"status": "ok",
 			"data":   paginateItems(result, page, pageSize),
 		})
+	}
+}
+
+func softwareCollection(softwareService *software.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+
+			page, pageSize, err := parsePagination(r)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			result, err := softwareService.List(ctx)
+			if err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   paginateItems(result, page, pageSize),
+			})
+
+		case http.MethodPost:
+			if err := r.ParseMultipartForm(128 << 20); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_multipart_form")
+				return
+			}
+
+			fileHeader, err := firstFileHeader(r.MultipartForm.File["file"])
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+
+			result, err := softwareService.Create(ctx, software.CreateRequest{
+				SoftwareName: r.FormValue("software_name"),
+				Description:  r.FormValue("description"),
+				FileHeader:   fileHeader,
+			})
+			if err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodGet, http.MethodPost},
+			})
+		}
+	}
+}
+
+func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/software/"), "/")
+		softwareID := trimmed
+		isDownload := false
+		if strings.HasSuffix(trimmed, "/download") {
+			softwareID = strings.TrimSuffix(trimmed, "/download")
+			isDownload = true
+		}
+		if softwareID == "" || strings.Contains(softwareID, "/") {
+			writeError(w, http.StatusNotFound, "software_not_found")
+			return
+		}
+
+		switch r.Method {
+		case http.MethodGet:
+			if !isDownload {
+				writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+					"status":           "method_not_allowed",
+					"expected_methods": []string{http.MethodGet, http.MethodPut, http.MethodDelete},
+				})
+				return
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+			defer cancel()
+
+			result, err := softwareService.Get(ctx, softwareID)
+			if err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", result.PackageFileName))
+			w.Header().Set("X-Software-ID", result.SoftwareID)
+			w.Header().Set("X-Software-Name", result.SoftwareName)
+			http.ServeFile(w, r, result.PackageStoragePath)
+
+		case http.MethodPut:
+			if isDownload {
+				methodNotAllowed(w, http.MethodGet)
+				return
+			}
+			if err := r.ParseMultipartForm(128 << 20); err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_multipart_form")
+				return
+			}
+
+			var fileHeader *multipart.FileHeader
+			if r.MultipartForm != nil && len(r.MultipartForm.File["file"]) > 0 {
+				fileHeader = r.MultipartForm.File["file"][0]
+			}
+
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+
+			result, err := softwareService.Update(ctx, softwareID, software.UpdateRequest{
+				SoftwareName: r.FormValue("software_name"),
+				Description:  r.FormValue("description"),
+				FileHeader:   fileHeader,
+			})
+			if err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data":   result,
+			})
+
+		case http.MethodDelete:
+			if isDownload {
+				methodNotAllowed(w, http.MethodGet)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			if err := softwareService.Delete(ctx, softwareID); err != nil {
+				writeSoftwareError(w, err)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"status": "ok",
+				"data": map[string]any{
+					"software_id": softwareID,
+					"deleted":     true,
+				},
+			})
+
+		default:
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodGet, http.MethodPut, http.MethodDelete},
+			})
+		}
 	}
 }
 
@@ -1592,6 +1846,10 @@ func writeDiscoveryError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusBadRequest, "pair_port_required")
 	case errors.Is(err, discovery.ErrPairCodeRequired):
 		writeError(w, http.StatusBadRequest, "pair_code_required")
+	case errors.Is(err, discovery.ErrSoftwareIDRequired):
+		writeError(w, http.StatusBadRequest, "software_id_required")
+	case errors.Is(err, discovery.ErrInstallJobNotFound):
+		writeError(w, http.StatusNotFound, "software_install_job_not_found")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
 	default:
@@ -1644,6 +1902,19 @@ func writeScriptError(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusServiceUnavailable, "script_repository_unavailable")
 	case errors.Is(err, context.DeadlineExceeded), errors.Is(err, context.Canceled):
 		writeError(w, http.StatusRequestTimeout, "request_timeout")
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
+}
+
+func writeSoftwareError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, software.ErrSoftwareNameRequired):
+		writeError(w, http.StatusBadRequest, "software_name_required")
+	case errors.Is(err, software.ErrSoftwareFileRequired):
+		writeError(w, http.StatusBadRequest, "software_file_required")
+	case errors.Is(err, software.ErrSoftwareNotFound):
+		writeError(w, http.StatusNotFound, "software_not_found")
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())
 	}

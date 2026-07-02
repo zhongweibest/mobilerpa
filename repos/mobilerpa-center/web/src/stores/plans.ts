@@ -9,10 +9,18 @@ export const usePlansStore = defineStore("plans", () => {
   const total = ref(0);
   const page = ref(1);
   const pageSize = ref(10);
+  const filters = ref({
+    target_type: "",
+    schedule_type: ""
+  });
   const runs = ref<PlanRunRecord[]>([]);
   const runsTotal = ref(0);
   const runsPage = ref(1);
   const runsPageSize = ref(10);
+  const runFilters = ref({
+    plan_def_id: "",
+    plan_name: ""
+  });
   const selectedEvents = ref<PlanEventRecord[]>([]);
   const loading = ref(false);
   const loadingRuns = ref(false);
@@ -32,7 +40,9 @@ export const usePlansStore = defineStore("plans", () => {
     try {
       const result = await fetchPlans({
         page: page.value,
-        page_size: pageSize.value
+        page_size: pageSize.value,
+        target_type: filters.value.target_type,
+        schedule_type: filters.value.schedule_type
       });
       plans.value = result.items;
       total.value = result.total;
@@ -52,7 +62,9 @@ export const usePlansStore = defineStore("plans", () => {
     try {
       const result = await fetchPlanRuns({
         page: runsPage.value,
-        page_size: runsPageSize.value
+        page_size: runsPageSize.value,
+        plan_def_id: runFilters.value.plan_def_id,
+        plan_name: runFilters.value.plan_name
       });
       runs.value = result.items;
       runsTotal.value = result.total;
@@ -242,6 +254,15 @@ export const usePlansStore = defineStore("plans", () => {
     await loadPlans();
   }
 
+  async function applyFilters(nextFilters: { target_type: string; schedule_type: string }) {
+    filters.value = {
+      target_type: nextFilters.target_type || "",
+      schedule_type: nextFilters.schedule_type || ""
+    };
+    page.value = 1;
+    await loadPlans();
+  }
+
   async function changeRunsPage(nextPage: number) {
     runsPage.value = nextPage;
     await loadRuns();
@@ -253,15 +274,26 @@ export const usePlansStore = defineStore("plans", () => {
     await loadRuns();
   }
 
+  async function applyRunFilters(nextFilters: { plan_def_id: string; plan_name: string }) {
+    runFilters.value = {
+      plan_def_id: nextFilters.plan_def_id || "",
+      plan_name: nextFilters.plan_name || ""
+    };
+    runsPage.value = 1;
+    await loadRuns();
+  }
+
   return {
     plans,
     total,
     page,
     pageSize,
+    filters,
     runs,
     runsTotal,
     runsPage,
     runsPageSize,
+    runFilters,
     selectedEvents,
     loading,
     loadingRuns,
@@ -275,6 +307,7 @@ export const usePlansStore = defineStore("plans", () => {
     mutatingStatusPlanID,
     errorMessage,
     loadPlans,
+    applyFilters,
     loadRuns,
     loadPlanEvents,
     submitPlan,
@@ -290,6 +323,7 @@ export const usePlansStore = defineStore("plans", () => {
     changePage,
     changePageSize,
     changeRunsPage,
-    changeRunsPageSize
+    changeRunsPageSize,
+    applyRunFilters
   };
 });

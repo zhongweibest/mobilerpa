@@ -1,9 +1,11 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
-import { controlAgent, deployAgents, fetchDiscoveredDevices, pairDevice } from "../api/discovery";
+import { controlAgent, deployAgents, fetchDiscoveredDevices, fetchSoftwareInstallJob, pairDevice, startSoftwareInstall } from "../api/discovery";
+import { fetchSoftware } from "../api/software";
 import { fetchDiscoverySettings, saveDiscoverySettings } from "../api/settings";
-import type { AgentActionResult, AgentDeploymentResult, DiscoveredDevice, PairDeviceResult } from "../types/discovery";
+import type { AgentActionResult, AgentDeploymentResult, DiscoveredDevice, PairDeviceResult, SoftwareInstallJob } from "../types/discovery";
+import type { SoftwarePackageRecord } from "../types/software";
 
 export const useDiscoveryStore = defineStore("discovery", () => {
   const devices = ref<DiscoveredDevice[]>([]);
@@ -23,8 +25,11 @@ export const useDiscoveryStore = defineStore("discovery", () => {
   const latestPairResult = ref<PairDeviceResult | null>(null);
   const savingSettings = ref(false);
   const pairing = ref(false);
+  const softwareOptions = ref<SoftwarePackageRecord[]>([]);
+  const installingSoftware = ref(false);
+  const softwareInstallJob = ref<SoftwareInstallJob | null>(null);
 
-  const selectableDevices = computed(() => devices.value.filter((item) => item.connectable));
+  const selectableDevices = computed(() => devices.value.filter((item) => item.connected && item.connectable));
   const connectedDevices = computed(() => devices.value.filter(isVisibleConnectedDevice));
 
   async function loadDiscoverySettings() {
@@ -34,6 +39,14 @@ export const useDiscoveryStore = defineStore("discovery", () => {
     } catch (_error) {
       // 配置加载失败不阻断设备发现页面主体功能。
     }
+  }
+
+  async function loadSoftwareOptions() {
+    const result = await fetchSoftware({
+      page: 1,
+      page_size: 100
+    });
+    softwareOptions.value = result.items;
   }
 
   async function persistDiscoverySettings() {
@@ -175,6 +188,37 @@ export const useDiscoveryStore = defineStore("discovery", () => {
     }
   }
 
+  async function submitSoftwareInstall(softwareIDs: string[]) {
+    installingSoftware.value = true;
+    errorMessage.value = "";
+    try {
+      softwareInstallJob.value = await startSoftwareInstall({
+        adb_endpoints: selectedEndpoints.value,
+        software_ids: softwareIDs
+      });
+      return softwareInstallJob.value;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "start_software_install_failed";
+      throw error;
+    } finally {
+      installingSoftware.value = false;
+    }
+  }
+
+  async function refreshSoftwareInstallJob(jobID?: string) {
+    const targetJobID = (jobID || softwareInstallJob.value?.job_id || "").trim();
+    if (!targetJobID) {
+      return null;
+    }
+    try {
+      softwareInstallJob.value = await fetchSoftwareInstallJob(targetJobID);
+      return softwareInstallJob.value;
+    } catch (error) {
+      errorMessage.value = error instanceof Error ? error.message : "load_software_install_job_failed";
+      throw error;
+    }
+  }
+
   return {
     devices,
     total,
@@ -193,19 +237,25 @@ export const useDiscoveryStore = defineStore("discovery", () => {
     latestPairResult,
     savingSettings,
     pairing,
+    softwareOptions,
+    installingSoftware,
+    softwareInstallJob,
     selectableDevices,
     connectedDevices,
     loadDevices,
     changePage,
     changePageSize,
     loadDiscoverySettings,
+    loadSoftwareOptions,
     persistDiscoverySettings,
     toggleSelection,
     toggleSelectAll,
     submitDeployment,
     submitSingleDeployment,
     submitAgentAction,
-    submitPairDevice
+    submitPairDevice,
+    submitSoftwareInstall,
+    refreshSoftwareInstallJob
   };
 });
 

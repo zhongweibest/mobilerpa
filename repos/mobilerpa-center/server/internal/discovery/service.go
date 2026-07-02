@@ -6,11 +6,17 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/mobilerpa/mobilerpa-center/server/internal/software"
 )
 
 // Device 表示一次局域网无线调试设备发现结果。
@@ -73,6 +79,40 @@ type PairResult struct {
 	Message     string `json:"message"`
 }
 
+type SoftwareInstallRequest struct {
+	ADBEndpoints []string `json:"adb_endpoints"`
+	SoftwareIDs  []string `json:"software_ids"`
+}
+
+type SoftwareInstallJob struct {
+	JobID             string                        `json:"job_id"`
+	SoftwareIDs       []string                      `json:"software_ids"`
+	SoftwareNames     []string                      `json:"software_names"`
+	Status            string                        `json:"status"`
+	CurrentEndpoint   string                        `json:"current_endpoint"`
+	CurrentSoftwareID string                        `json:"current_software_id"`
+	CurrentSoftware   string                        `json:"current_software"`
+	CurrentStage      string                        `json:"current_stage"`
+	OverallProgress   int                           `json:"overall_progress"`
+	CompletedCount    int                           `json:"completed_count"`
+	TotalCount        int                           `json:"total_count"`
+	Message           string                        `json:"message"`
+	DeviceInstallRows []SoftwareDeviceInstallResult `json:"device_install_rows"`
+	CreatedAt         string                        `json:"created_at"`
+	UpdatedAt         string                        `json:"updated_at"`
+}
+
+type SoftwareDeviceInstallResult struct {
+	ADBEndpoint     string `json:"adb_endpoint"`
+	SoftwareID      string `json:"software_id"`
+	SoftwareName    string `json:"software_name"`
+	PackageFileName string `json:"package_file_name"`
+	Status          string `json:"status"`
+	Stage           string `json:"stage"`
+	PushProgress    int    `json:"push_progress"`
+	Message         string `json:"message"`
+}
+
 type connectedDeviceInfo struct {
 	endpoint   string
 	deviceName string
@@ -88,6 +128,8 @@ var (
 	ErrPairHostRequired       = errors.New("pair_host_required")
 	ErrPairPortRequired       = errors.New("pair_port_required")
 	ErrPairCodeRequired       = errors.New("pair_code_required")
+	ErrSoftwareIDRequired     = errors.New("software_id_required")
+	ErrInstallJobNotFound     = errors.New("software_install_job_not_found")
 )
 
 // Service 封装局域网无线调试设备发现与网页触发下发能力。
@@ -98,6 +140,8 @@ type Service struct {
 	defaultCenterBaseURL string
 	toolkitPath          string
 	commandTimeout       time.Duration
+	installJobs          map[string]*SoftwareInstallJob
+	installJobsMu        sync.RWMutex
 }
 
 // NewService 创建设备发现服务。
@@ -109,6 +153,7 @@ func NewService(db *sql.DB, adbPath string, agentRootPath string, defaultCenterB
 		defaultCenterBaseURL: strings.TrimSpace(defaultCenterBaseURL),
 		toolkitPath:          strings.TrimSpace(toolkitPath),
 		commandTimeout:       45 * time.Second,
+		installJobs:          make(map[string]*SoftwareInstallJob),
 	}
 }
 
@@ -151,6 +196,18 @@ func (s *Service) DeployAgent(ctx context.Context, req DeployRequest) ([]DeployR
 	}
 
 	results := make([]DeployResult, 0, len(req.ADBEndpoints))
+	discoveredDevices, _ := s.ListDevices(ctx)
+	deviceLinkByEndpoint := make(map[string]string, len(discoveredDevices))
+	for _, item := range discoveredDevices {
+		endpoint := strings.TrimSpace(item.ADBEndpoint)
+		serviceName := strings.TrimSpace(item.ServiceName)
+		if endpoint == "" {
+			continue
+		}
+		if serviceName != "" {
+			deviceLinkByEndpoint[endpoint] = serviceName
+		}
+	}
 	for _, endpoint := range req.ADBEndpoints {
 		result := DeployResult{
 			ADBEndpoint: strings.TrimSpace(endpoint),
@@ -169,7 +226,11 @@ func (s *Service) DeployAgent(ctx context.Context, req DeployRequest) ([]DeployR
 		}
 		result.Connected = true
 
-		if _, err := s.pushViaToolkit(ctx, result.ADBEndpoint, centerBaseURL, req.ResetConfig, req.RunAgent); err != nil {
+		deviceLinkSN := strings.TrimSpace(deviceLinkByEndpoint[result.ADBEndpoint])
+		if deviceLinkSN == "" {
+			deviceLinkSN = result.ADBEndpoint
+		}
+		if _, err := s.pushViaToolkit(ctx, result.ADBEndpoint, deviceLinkSN, centerBaseURL, req.ResetConfig, req.RunAgent); err != nil {
 			result.Message = "toolkit_push_failed: " + err.Error()
 			results = append(results, result)
 			continue
@@ -291,7 +352,236 @@ func (s *Service) PairDevice(ctx context.Context, req PairRequest) (PairResult, 
 	return result, nil
 }
 
-func (s *Service) pushViaToolkit(ctx context.Context, endpoint string, centerBaseURL string, resetConfig bool, runAgent bool) (string, error) {
+func (s *Service) StartSoftwareInstall(ctx context.Context, req SoftwareInstallRequest, packages []software.Package) (SoftwareInstallJob, error) {
+	endpoints := normalizeEndpoints(req.ADBEndpoints)
+	if len(endpoints) == 0 {
+		return SoftwareInstallJob{}, ErrADBEndpointRequired
+	}
+	if len(req.SoftwareIDs) == 0 || len(packages) == 0 {
+		return SoftwareInstallJob{}, ErrSoftwareIDRequired
+	}
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	softwareIDs := make([]string, 0, len(packages))
+	softwareNames := make([]string, 0, len(packages))
+	totalCount := len(endpoints) * len(packages)
+	job := &SoftwareInstallJob{
+		JobID:         strconv.FormatInt(time.Now().UnixNano(), 36),
+		Status:        "running",
+		CurrentStage:  "pending",
+		TotalCount:    totalCount,
+		Message:       "软件安装任务已开始",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		SoftwareIDs:   []string{},
+		SoftwareNames: []string{},
+	}
+	job.DeviceInstallRows = make([]SoftwareDeviceInstallResult, 0, totalCount)
+	for _, pkg := range packages {
+		softwareIDs = append(softwareIDs, pkg.SoftwareID)
+		softwareNames = append(softwareNames, pkg.SoftwareName)
+	}
+	job.SoftwareIDs = softwareIDs
+	job.SoftwareNames = softwareNames
+	for _, endpoint := range endpoints {
+		for _, pkg := range packages {
+			job.DeviceInstallRows = append(job.DeviceInstallRows, SoftwareDeviceInstallResult{
+				ADBEndpoint:     endpoint,
+				SoftwareID:      pkg.SoftwareID,
+				SoftwareName:    pkg.SoftwareName,
+				PackageFileName: pkg.PackageFileName,
+				Status:          "pending",
+				Stage:           "pending",
+				Message:         "等待安装",
+			})
+		}
+	}
+
+	s.installJobsMu.Lock()
+	s.installJobs[job.JobID] = job
+	s.installJobsMu.Unlock()
+
+	go s.runSoftwareInstallJob(context.Background(), job.JobID, endpoints, packages)
+	return cloneSoftwareInstallJob(job), nil
+}
+
+func (s *Service) GetSoftwareInstallJob(_ context.Context, jobID string) (SoftwareInstallJob, error) {
+	s.installJobsMu.RLock()
+	defer s.installJobsMu.RUnlock()
+	job := s.installJobs[strings.TrimSpace(jobID)]
+	if job == nil {
+		return SoftwareInstallJob{}, ErrInstallJobNotFound
+	}
+	return cloneSoftwareInstallJob(job), nil
+}
+
+func (s *Service) runSoftwareInstallJob(ctx context.Context, jobID string, endpoints []string, packages []software.Package) {
+	rowIndex := 0
+	for _, endpoint := range endpoints {
+		for _, pkg := range packages {
+			remotePath := "/data/local/tmp/" + filepath.Base(pkg.PackageFileName)
+			if !strings.HasSuffix(strings.ToLower(remotePath), ".apk") {
+				remotePath = "/data/local/tmp/" + strings.TrimSuffix(filepath.Base(pkg.PackageFileName), filepath.Ext(pkg.PackageFileName)) + ".apk"
+			}
+
+			currentIndex := rowIndex
+			rowIndex += 1
+
+			s.updateSoftwareInstallDevice(jobID, currentIndex, func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult) {
+				job.CurrentEndpoint = endpoint
+				job.CurrentSoftwareID = pkg.SoftwareID
+				job.CurrentSoftware = pkg.SoftwareName
+				job.CurrentStage = "pushing"
+				job.Message = "正在推送软件"
+				row.Status = "running"
+				row.Stage = "pushing"
+				row.PushProgress = 0
+				row.Message = "正在推送软件"
+			})
+
+			pushErr := s.runADBPushWithProgress(ctx, endpoint, pkg.PackageStoragePath, remotePath, func(progress int) {
+				s.updateSoftwareInstallDevice(jobID, currentIndex, func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult) {
+					job.CurrentEndpoint = endpoint
+					job.CurrentSoftwareID = pkg.SoftwareID
+					job.CurrentSoftware = pkg.SoftwareName
+					job.CurrentStage = "pushing"
+					job.Message = fmt.Sprintf("正在推送软件：%d%%", progress)
+					row.PushProgress = progress
+					row.Message = job.Message
+				})
+			})
+			if pushErr != nil {
+				s.markSoftwareInstallDeviceFailed(jobID, currentIndex, "push_failed: "+pushErr.Error())
+				continue
+			}
+
+			s.updateSoftwareInstallDevice(jobID, currentIndex, func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult) {
+				job.CurrentEndpoint = endpoint
+				job.CurrentSoftwareID = pkg.SoftwareID
+				job.CurrentSoftware = pkg.SoftwareName
+				job.CurrentStage = "installing"
+				job.Message = "正在安装软件"
+				row.Stage = "installing"
+				row.PushProgress = 100
+				row.Message = "正在安装软件"
+			})
+
+			installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+			_, installErr := s.runCommand(installCtx, s.adbPath, "-s", endpoint, "shell", "pm", "install", "-r", remotePath)
+			cancel()
+			if installErr != nil {
+				s.markSoftwareInstallDeviceFailed(jobID, currentIndex, "install_failed: "+installErr.Error())
+				continue
+			}
+
+			s.updateSoftwareInstallDevice(jobID, currentIndex, func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult) {
+				row.Status = "success"
+				row.Stage = "success"
+				row.PushProgress = 100
+				row.Message = "安装完成"
+				job.CompletedCount += 1
+				job.Message = "安装完成"
+			})
+		}
+	}
+
+	s.installJobsMu.Lock()
+	if job := s.installJobs[jobID]; job != nil {
+		failed := 0
+		success := 0
+		for _, row := range job.DeviceInstallRows {
+			if row.Status == "success" {
+				success += 1
+			}
+			if row.Status == "error" {
+				failed += 1
+			}
+		}
+		job.CurrentEndpoint = ""
+		job.CurrentStage = "finished"
+		job.OverallProgress = 100
+		if failed > 0 {
+			job.Status = "failed"
+			job.Message = fmt.Sprintf("软件安装完成，成功 %d 台，失败 %d 台", success, failed)
+		} else {
+			job.Status = "success"
+			job.Message = fmt.Sprintf("软件安装完成，成功 %d 台", success)
+		}
+		job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	s.installJobsMu.Unlock()
+}
+
+func (s *Service) runADBPushWithProgress(ctx context.Context, endpoint string, localPath string, remotePath string, onProgress func(int)) error {
+	commandCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	cmd := exec.CommandContext(commandCtx, s.adbPath, "-s", endpoint, "push", localPath, remotePath)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+
+	var outputMu sync.Mutex
+	var output strings.Builder
+	readProgress := func(reader io.Reader) {
+		buffer := make([]byte, 1024)
+		progressPattern := regexp.MustCompile(`(\d{1,3})%`)
+		for {
+			n, readErr := reader.Read(buffer)
+			if n > 0 {
+				text := string(buffer[:n])
+				outputMu.Lock()
+				output.WriteString(text)
+				outputMu.Unlock()
+				matches := progressPattern.FindAllStringSubmatch(text, -1)
+				for _, match := range matches {
+					if len(match) < 2 {
+						continue
+					}
+					value, convErr := strconv.Atoi(match[1])
+					if convErr == nil {
+						onProgress(clampProgress(value))
+					}
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		readProgress(stdout)
+	}()
+	go func() {
+		defer wg.Done()
+		readProgress(stderr)
+	}()
+
+	err = cmd.Wait()
+	wg.Wait()
+	if err != nil {
+		outputText := strings.TrimSpace(output.String())
+		if outputText == "" {
+			outputText = err.Error()
+		}
+		return errors.New(outputText)
+	}
+	onProgress(100)
+	return nil
+}
+
+func (s *Service) pushViaToolkit(ctx context.Context, endpoint string, deviceLinkSN string, centerBaseURL string, resetConfig bool, runAgent bool) (string, error) {
 	toolkitPath := strings.TrimSpace(s.toolkitPath)
 	if toolkitPath == "" {
 		return "", fmt.Errorf("toolkit path not configured")
@@ -300,6 +590,7 @@ func (s *Service) pushViaToolkit(ctx context.Context, endpoint string, centerBas
 	args := []string{
 		"push-center",
 		"--device", endpoint,
+		"--device-link-sn", deviceLinkSN,
 		"--center-base-url", centerBaseURL,
 		"--agent-root", s.agentRootPath,
 		"--adb-path", s.adbPath,
@@ -666,27 +957,35 @@ func (s *Service) attachDeviceIDs(ctx context.Context, devices []Device) error {
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, adb_serial
+SELECT id, device_link_sn, adb_serial
 FROM devices
-WHERE adb_serial != ''`)
+WHERE device_link_sn != '' OR adb_serial != ''`)
 	if err != nil {
 		return fmt.Errorf("query device adb serials: %w", err)
 	}
 	defer rows.Close()
 
+	deviceByLinkSN := make(map[string]string)
 	deviceByADBSerial := make(map[string]string)
 	for rows.Next() {
 		var deviceID string
+		var deviceLinkSN string
 		var adbSerial string
-		if err := rows.Scan(&deviceID, &adbSerial); err != nil {
-			return fmt.Errorf("scan device adb serial: %w", err)
+		if err := rows.Scan(&deviceID, &deviceLinkSN, &adbSerial); err != nil {
+			return fmt.Errorf("scan device link identity: %w", err)
 		}
+		deviceLinkSN = strings.TrimSpace(deviceLinkSN)
 		adbSerial = strings.TrimSpace(adbSerial)
 		deviceID = strings.TrimSpace(deviceID)
-		if adbSerial == "" || deviceID == "" {
+		if deviceID == "" {
 			continue
 		}
-		deviceByADBSerial[adbSerial] = deviceID
+		if deviceLinkSN != "" {
+			deviceByLinkSN[deviceLinkSN] = deviceID
+		}
+		if adbSerial != "" {
+			deviceByADBSerial[adbSerial] = deviceID
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return fmt.Errorf("iterate device adb serials: %w", err)
@@ -694,11 +993,19 @@ WHERE adb_serial != ''`)
 
 	for index := range devices {
 		adbEndpoint := strings.TrimSpace(devices[index].ADBEndpoint)
-		if adbEndpoint == "" {
+		serviceName := strings.TrimSpace(devices[index].ServiceName)
+		if deviceID, exists := deviceByLinkSN[serviceName]; exists {
+			devices[index].DeviceID = deviceID
 			continue
 		}
-		if deviceID, exists := deviceByADBSerial[adbEndpoint]; exists {
+		if deviceID, exists := deviceByLinkSN[adbEndpoint]; exists {
 			devices[index].DeviceID = deviceID
+			continue
+		}
+		if adbEndpoint != "" {
+			if deviceID, exists := deviceByADBSerial[adbEndpoint]; exists {
+				devices[index].DeviceID = deviceID
+			}
 		}
 	}
 	return nil
@@ -737,4 +1044,83 @@ func (s *Service) runCommandWithEnv(ctx context.Context, name string, args []str
 	}
 
 	return stdout.String(), nil
+}
+
+func (s *Service) updateSoftwareInstallDevice(jobID string, index int, mutate func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult)) {
+	s.installJobsMu.Lock()
+	defer s.installJobsMu.Unlock()
+	job := s.installJobs[jobID]
+	if job == nil || index < 0 || index >= len(job.DeviceInstallRows) {
+		return
+	}
+	mutate(job, &job.DeviceInstallRows[index])
+	job.OverallProgress = computeSoftwareInstallProgress(job)
+	job.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+}
+
+func (s *Service) markSoftwareInstallDeviceFailed(jobID string, index int, message string) {
+	s.updateSoftwareInstallDevice(jobID, index, func(job *SoftwareInstallJob, row *SoftwareDeviceInstallResult) {
+		row.Status = "error"
+		row.Stage = "error"
+		row.Message = message
+		job.Message = message
+	})
+}
+
+func computeSoftwareInstallProgress(job *SoftwareInstallJob) int {
+	if job == nil || job.TotalCount <= 0 || len(job.DeviceInstallRows) == 0 {
+		return 0
+	}
+	total := 0
+	for _, row := range job.DeviceInstallRows {
+		switch row.Stage {
+		case "success":
+			total += 100
+		case "installing":
+			total += 90
+		case "pushing":
+			total += clampProgress(row.PushProgress)
+		case "error":
+			if row.PushProgress > 0 {
+				total += clampProgress(row.PushProgress)
+			}
+		}
+	}
+	return clampProgress(total / len(job.DeviceInstallRows))
+}
+
+func cloneSoftwareInstallJob(job *SoftwareInstallJob) SoftwareInstallJob {
+	if job == nil {
+		return SoftwareInstallJob{}
+	}
+	result := *job
+	result.DeviceInstallRows = append([]SoftwareDeviceInstallResult(nil), job.DeviceInstallRows...)
+	return result
+}
+
+func normalizeEndpoints(items []string) []string {
+	result := make([]string, 0, len(items))
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func clampProgress(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
 }

@@ -50,3 +50,37 @@ export interface PairDeviceResult {
   status: string;
   message: string;
 }
+
+export interface SoftwareInstallRequest {
+  adb_endpoints: string[];
+  software_ids: string[];
+}
+
+export interface SoftwareDeviceInstallResult {
+  adb_endpoint: string;
+  software_id: string;
+  software_name: string;
+  package_file_name: string;
+  status: string;
+  stage: string;
+  push_progress: number;
+  message: string;
+}
+
+export interface SoftwareInstallJob {
+  job_id: string;
+  software_ids: string[];
+  software_names: string[];
+  status: string;
+  current_endpoint: string;
+  current_software_id: string;
+  current_software: string;
+  current_stage: string;
+  overall_progress: number;
+  completed_count: number;
+  total_count: number;
+  message: string;
+  device_install_rows: SoftwareDeviceInstallResult[];
+  created_at: string;
+  updated_at: string;
+}

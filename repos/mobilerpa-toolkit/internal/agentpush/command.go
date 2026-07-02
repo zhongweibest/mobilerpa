@@ -20,6 +20,7 @@ type PushOptions struct {
 	AgentRoot       string
 	Device          string
 	CenterBaseURL   string
+	DeviceLinkSN    string
 	RemoteRoot      string
 	AutoJSComponent string
 	ResetConfig     bool
@@ -58,6 +59,7 @@ func ParseCenterCommand(args []string) (CenterCommand, error) {
 	options := defaultPushOptions()
 	device := fs.String("device", "", "ADB device serial or endpoint")
 	centerBaseURL := fs.String("center-base-url", "", "Center base URL")
+	deviceLinkSN := fs.String("device-link-sn", "", "Device link SN for runtime config")
 	agentRoot := fs.String("agent-root", "", "Agent root path")
 	adbPath := fs.String("adb-path", DefaultADBPath, "ADB executable path")
 	resetConfig := fs.Bool("reset-config", false, "Reset config.json on device")
@@ -69,6 +71,7 @@ func ParseCenterCommand(args []string) (CenterCommand, error) {
 
 	options.Device = strings.TrimSpace(*device)
 	options.CenterBaseURL = strings.TrimSpace(*centerBaseURL)
+	options.DeviceLinkSN = strings.TrimSpace(*deviceLinkSN)
 	options.AgentRoot = strings.TrimSpace(*agentRoot)
 	options.ADBPath = strings.TrimSpace(*adbPath)
 	options.ResetConfig = *resetConfig

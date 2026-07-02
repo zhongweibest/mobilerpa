@@ -57,14 +57,15 @@ function parseCLIArgs(args) {
  * @param {Object} deviceInfo 设备信息。
  * @returns {Object} 设备注册请求体。
  */
-function buildRegisterPayload(agentUUID, deviceInfo) {
+function buildRegisterPayload(agentUUID, deviceInfo, deviceLinkSN) {
     return {
         agent_uuid: agentUUID,
         device_name: deviceInfo.device_name,
         brand: deviceInfo.brand,
         model: deviceInfo.model,
         android_id: deviceInfo.android_id,
-        adb_serial: deviceInfo.adb_serial
+        adb_serial: deviceInfo.adb_serial,
+        device_link_sn: String(deviceLinkSN || "")
     };
 }
 
@@ -101,6 +102,9 @@ function mergeBootstrapConfig(config, bootstrap) {
 
     if (source.center_base_url) {
         nextConfig.center_base_url = source.center_base_url;
+    }
+    if (source.device_link_sn) {
+        nextConfig.device_link_sn = source.device_link_sn;
     }
 
     if (source.websocket) {
@@ -426,7 +430,7 @@ function main(cliOptions) {
 
         store.save(config);
 
-        var payload = buildRegisterPayload(config.agent_uuid, deviceInfo);
+        var payload = buildRegisterPayload(config.agent_uuid, deviceInfo, config.device_link_sn);
         logger.info("Agent 配置文件：" + store.configPath);
         logger.info("Agent 引导文件：" + store.bootstrapPath);
         logger.info("Agent 运行锁文件：" + runtimeLock.path);
@@ -482,11 +486,12 @@ function finishRegister(config, store, response, logger, options, runtimeLock) {
     logger.info("设备注册完成，device_id=" + nextConfig.device_id);
 
     if (shouldStartWebSocket(nextConfig, options)) {
-        websocketResult = wsClient.connect({
-            centerBaseURL: nextConfig.center_base_url,
-            deviceID: nextConfig.device_id,
-            agentUUID: nextConfig.agent_uuid,
-            heartbeatIntervalMS: getHeartbeatIntervalMS(nextConfig),
+            websocketResult = wsClient.connect({
+                centerBaseURL: nextConfig.center_base_url,
+                deviceID: nextConfig.device_id,
+                agentUUID: nextConfig.agent_uuid,
+                deviceLinkSN: nextConfig.device_link_sn || "",
+                heartbeatIntervalMS: getHeartbeatIntervalMS(nextConfig),
             reconnectEnabled: getReconnectEnabled(nextConfig),
             reconnectInitialDelayMS: getReconnectInitialDelayMS(nextConfig),
             reconnectMaxDelayMS: getReconnectMaxDelayMS(nextConfig),

@@ -16,6 +16,7 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/plan"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/script"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/software"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/storage"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
@@ -33,6 +34,7 @@ type App struct {
 	discovery      *discovery.Service
 	scripts        *script.Service
 	settings       *settings.Service
+	software       *software.Service
 	plans          *plan.Service
 	workflows      *workflow.Service
 	planStartQueue chan string
@@ -54,6 +56,7 @@ func New() (*App, error) {
 	discoveryService := discovery.NewService(db, cfg.ADBPath, cfg.AgentRootPath, cfg.CenterBaseURL, cfg.ToolkitPath)
 	scriptService := script.NewService(db, cfg.ScriptRootPath)
 	settingsService := settings.NewService(db)
+	softwareService := software.NewService(db, cfg.SoftwareRootPath)
 	workflowService := workflow.NewService(db, deviceService, taskService, dispatchService)
 	planService := plan.NewService(db, deviceService, taskService, dispatchService, workflowService, settingsService)
 	planService.SetStartFanout(cfg.PlanStartFanout)
@@ -61,7 +64,7 @@ func New() (*App, error) {
 	wsHandler := ws.NewHandler(deviceService, dispatchService, planService, workflowService)
 
 	mux := http.NewServeMux()
-	api.RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, settingsService, planService, workflowService, wsHandler)
+	api.RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, settingsService, softwareService, planService, workflowService, wsHandler)
 
 	srv := &http.Server{
 		Addr:    cfg.HTTPAddr,
@@ -78,6 +81,7 @@ func New() (*App, error) {
 		discovery:      discoveryService,
 		scripts:        scriptService,
 		settings:       settingsService,
+		software:       softwareService,
 		plans:          planService,
 		workflows:      workflowService,
 		planStartQueue: make(chan string, 256),
@@ -88,7 +92,7 @@ func New() (*App, error) {
 // Run 启动中心服务的 HTTP 服务。
 func (a *App) Run() error {
 	log.Printf(
-	"mobilerpa-center listening on %s with db %s, heartbeat_interval=%s, offline_timeout=%s, offline_scan_interval=%s, plan_scan_interval=%s",
+		"mobilerpa-center listening on %s with db %s, heartbeat_interval=%s, offline_timeout=%s, offline_scan_interval=%s, plan_scan_interval=%s",
 		a.cfg.HTTPAddr,
 		a.cfg.DBPath,
 		a.cfg.HeartbeatInterval,

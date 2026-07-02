@@ -348,7 +348,7 @@ func TestCreateAndListDefinitions(t *testing.T) {
 		t.Fatalf("unexpected rows: %#v", created.Rows)
 	}
 
-	items, err := service.ListDefinitions(ctx)
+	items, err := service.ListDefinitions(ctx, DefinitionListFilter{})
 	if err != nil {
 		t.Fatalf("list plan definitions: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestDeleteDefinitionAndUpdateRows(t *testing.T) {
 		t.Fatalf("delete plan definition: %v", err)
 	}
 
-	items, err := service.ListDefinitions(ctx)
+	items, err := service.ListDefinitions(ctx, DefinitionListFilter{})
 	if err != nil {
 		t.Fatalf("list plan definitions after delete: %v", err)
 	}
@@ -703,7 +703,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.Fatalf("unexpected busy details: %#v", busyErr.Details)
 	}
 
-	runs, err := planSvc.ListRuns(ctx, definition.PlanDefID)
+	runs, err := planSvc.ListRuns(ctx, RunListFilter{PlanDefID: definition.PlanDefID})
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}

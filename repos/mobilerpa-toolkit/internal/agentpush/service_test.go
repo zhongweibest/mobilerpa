@@ -44,7 +44,7 @@ func (f *fakeControllerExecutor) Run(_ context.Context, name string, args ...str
 func TestWriteBootstrapFile(t *testing.T) {
 	t.Parallel()
 
-	path, err := writeBootstrapFile("http://127.0.0.1:18080")
+	path, err := writeBootstrapFile("http://127.0.0.1:18080", "adb-AXREUT5612000490-b3B2d1._adb-tls-connect._tcp")
 	if err != nil {
 		t.Fatalf("writeBootstrapFile returned error: %v", err)
 	}
@@ -58,6 +58,9 @@ func TestWriteBootstrapFile(t *testing.T) {
 	text := string(content)
 	if !strings.Contains(text, `"center_base_url": "http://127.0.0.1:18080"`) {
 		t.Fatalf("bootstrap content missing center_base_url: %s", text)
+	}
+	if !strings.Contains(text, `"device_link_sn": "adb-AXREUT5612000490-b3B2d1._adb-tls-connect._tcp"`) {
+		t.Fatalf("bootstrap content missing device_link_sn: %s", text)
 	}
 	if !strings.Contains(text, `"heartbeat_interval_ms": 30000`) {
 		t.Fatalf("bootstrap content missing heartbeat interval: %s", text)

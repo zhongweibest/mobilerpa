@@ -2,7 +2,6 @@ import type { RouteRecordRaw } from "vue-router";
 
 import { AppShell } from "../layouts/AppShell";
 import { BindingsPage } from "../pages/bindings/BindingsPage";
-import { PlaceholderPage } from "../pages/common/PlaceholderPage";
 import { DevicesPage } from "../pages/devices/DevicesPage";
 import { DiscoveryPage } from "../pages/discovery/DiscoveryPage";
 import { HomePage } from "../pages/home/HomePage";
@@ -10,6 +9,7 @@ import { PlansPage } from "../pages/plans/PlansPage";
 import { PlanRunsPage } from "../pages/plans/PlanRunsPage";
 import { ScriptsPage } from "../pages/scripts/ScriptsPage";
 import { SettingsPage } from "../pages/settings/SettingsPage";
+import { SoftwarePage } from "../pages/software/SoftwarePage";
 import { WorkflowsPage } from "../pages/workflows/WorkflowsPage";
 
 type AppRouteMeta = {
@@ -130,9 +130,22 @@ export const appRoutes: RouteRecordRaw[] = [
           title: "系统配置",
           section: "运维配置",
           navGroup: "ops",
-          navOrder: 2,
+          navOrder: 3,
           navVisible: true,
           summary: "统一维护中心服务地址与后续系统级默认参数，作为全局配置入口。"
+        })
+      },
+      {
+        path: "software",
+        name: "software",
+        component: SoftwarePage,
+        meta: meta({
+          title: "软件管理",
+          section: "软件能力",
+          navGroup: "ops",
+          navOrder: 2,
+          navVisible: true,
+          summary: "维护软件名称、描述与安装包文件，支持新增、编辑和删除。"
         })
       },
       {
@@ -146,48 +159,6 @@ export const appRoutes: RouteRecordRaw[] = [
           navOrder: 4,
           navVisible: true,
           summary: "维护分区、排号、槽位号三级位置模型，并在槽位级别完成设备绑定。"
-        })
-      },
-      {
-        path: "alerts",
-        name: "alerts",
-        component: PlaceholderPage,
-        meta: meta({
-          title: "异常中心",
-          section: "运维配置",
-          navGroup: "ops",
-          navOrder: 3,
-          navVisible: true,
-          navBadge: "规划中",
-          summary: "后续统一查看设备异常、任务异常、工作流异常与人工关注项。"
-        })
-      },
-      {
-        path: "reports",
-        name: "reports",
-        component: PlaceholderPage,
-        meta: meta({
-          title: "报表中心",
-          section: "运维配置",
-          navGroup: "ops",
-          navOrder: 4,
-          navVisible: true,
-          navBadge: "规划中",
-          summary: "后续承接产出统计、成功率分析、设备利用率与日报数据。"
-        })
-      },
-      {
-        path: "feed",
-        name: "feed",
-        component: PlaceholderPage,
-        meta: meta({
-          title: "消息列表",
-          section: "运维配置",
-          navGroup: "ops",
-          navOrder: 5,
-          navVisible: true,
-          navBadge: "规划中",
-          summary: "后续汇总设备、任务、脚本、工作流与异常消息订阅流。"
         })
       }
     ]

@@ -243,6 +243,16 @@ type UpdateDefinitionStatusRequest struct {
 	Status string `json:"status"`
 }
 
+type DefinitionListFilter struct {
+	TargetType   string
+	ScheduleType string
+}
+
+type RunListFilter struct {
+	PlanDefID  string
+	PlanName   string
+}
+
 type effectiveRetryPolicy struct {
 	Enabled                   bool
 	Interval                  time.Duration
@@ -554,15 +564,26 @@ INSERT INTO plan_definition_rows (
 }
 
 // ListDefinitions 返回计划任务定义列表。
-func (s *Service) ListDefinitions(ctx context.Context) ([]Definition, error) {
-	rows, err := s.db.QueryContext(ctx, `
+func (s *Service) ListDefinitions(ctx context.Context, filter DefinitionListFilter) ([]Definition, error) {
+	query := `
 SELECT id AS plan_def_id, plan_name, description, target_type, target_script_name, target_script_version,
        target_workflow_def_id, schedule_type, daily_start_time, daily_deadline_time, status, status_updated_at,
        retry_policy_mode, daily_retry_enabled, daily_retry_interval_seconds, daily_retry_stop_before_deadline_minutes,
        created_at, updated_at
 FROM plan_defs
-WHERE deleted_at = ''
-ORDER BY id DESC`)
+WHERE deleted_at = ''`
+	args := make([]any, 0, 2)
+	if value := strings.TrimSpace(filter.TargetType); value != "" {
+		query += " AND target_type = ?"
+		args = append(args, value)
+	}
+	if value := strings.TrimSpace(filter.ScheduleType); value != "" {
+		query += " AND schedule_type = ?"
+		args = append(args, value)
+	}
+	query += " ORDER BY id DESC"
+
+	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query plan definitions: %w", err)
 	}
@@ -1290,19 +1311,26 @@ func (s *Service) retryPlanDeviceTarget(ctx context.Context, definition Definiti
 }
 
 // ListRuns 返回计划任务实例列表。
-func (s *Service) ListRuns(ctx context.Context, planDefID string) ([]Run, error) {
+func (s *Service) ListRuns(ctx context.Context, filter RunListFilter) ([]Run, error) {
 	query := `
 SELECT r.id AS plan_run_id, r.plan_def_id, COALESCE(d.plan_name, '') AS plan_name, r.target_type, r.target_ref_id, r.run_date, r.status,
        r.started_at, r.finished_at, r.created_at, r.updated_at
 FROM plan_runs r
 LEFT JOIN plan_defs d
   ON d.id = r.plan_def_id`
-	args := make([]any, 0, 1)
-	planDefID = strings.TrimSpace(planDefID)
-	if planDefID != "" {
-		query += `
-WHERE r.plan_def_id = ?`
+	args := make([]any, 0, 2)
+	whereClauses := make([]string, 0, 2)
+	if planDefID := strings.TrimSpace(filter.PlanDefID); planDefID != "" {
+		whereClauses = append(whereClauses, "r.plan_def_id = ?")
 		args = append(args, planDefID)
+	}
+	if planName := strings.TrimSpace(filter.PlanName); planName != "" {
+		whereClauses = append(whereClauses, "d.plan_name LIKE ?")
+		args = append(args, "%"+planName+"%")
+	}
+	if len(whereClauses) > 0 {
+		query += `
+WHERE ` + strings.Join(whereClauses, " AND ")
 	}
 	query += `
 ORDER BY r.id DESC`

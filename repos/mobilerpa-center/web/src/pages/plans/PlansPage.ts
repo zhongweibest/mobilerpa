@@ -251,7 +251,7 @@ export const PlansPage = defineComponent({
     const workflowsStore = useWorkflowsStore();
     const noticesStore = useNoticesStore();
 
-    const { plans, total, page, pageSize, loading, creating, deletingPlanID, startingPlanID, mutatingDevices, mutatingStatusPlanID, errorMessage } = storeToRefs(plansStore);
+    const { plans, total, page, pageSize, loading, creating, deletingPlanID, startingPlanID, mutatingDevices, mutatingStatusPlanID, errorMessage, filters } = storeToRefs(plansStore);
     const { scripts } = storeToRefs(scriptsStore);
     const { workflows } = storeToRefs(workflowsStore);
 
@@ -269,6 +269,10 @@ export const PlansPage = defineComponent({
     });
     const createRowsTableRef = ref();
     const updateRowsTableRef = ref();
+    const searchForm = reactive({
+      target_type: "",
+      schedule_type: ""
+    });
 
     const createForm = reactive({
       plan_name: "",
@@ -385,6 +389,8 @@ export const PlansPage = defineComponent({
     }
 
     onMounted(() => {
+      searchForm.target_type = filters.value.target_type || "";
+      searchForm.schedule_type = filters.value.schedule_type || "";
       void loadPageData();
     });
 
@@ -481,6 +487,13 @@ export const PlansPage = defineComponent({
     function openDetailDialog(planItem: PlanDefinitionRecord) {
       selectedPlan.value = planItem;
       detailDialogVisible.value = true;
+    }
+
+    async function handleSearch() {
+      await plansStore.applyFilters({
+        target_type: searchForm.target_type,
+        schedule_type: searchForm.schedule_type
+      });
     }
 
     function syncSelectedRows(tableInstance: any, rows: PlanRowBinding[]) {
@@ -594,6 +607,29 @@ export const PlansPage = defineComponent({
       h("section", { class: "app-page" }, [
         h("div", { class: "page-toolbar" }, [
           h(ElButton, { type: "primary", onClick: openCreateDialog }, () => "创建计划任务"),
+          h(
+            ElSelect,
+            {
+              modelValue: searchForm.target_type,
+              clearable: true,
+              placeholder: "目标类型",
+              style: { width: "140px" },
+              "onUpdate:modelValue": (value: string) => (searchForm.target_type = value || "")
+            },
+            () => [h(ElOption, { label: "脚本", value: "script" }), h(ElOption, { label: "工作流", value: "workflow" })]
+          ),
+          h(
+            ElSelect,
+            {
+              modelValue: searchForm.schedule_type,
+              clearable: true,
+              placeholder: "调度类型",
+              style: { width: "160px" },
+              "onUpdate:modelValue": (value: string) => (searchForm.schedule_type = value || "")
+            },
+            () => [h(ElOption, { label: "一次性", value: "once" }), h(ElOption, { label: "按天循环", value: "daily" })]
+          ),
+          h(ElButton, { type: "primary", loading: loading.value, onClick: () => void handleSearch() }, () => "搜索"),
           h(ElButton, { loading: loading.value, onClick: () => void loadPageData() }, () => "刷新")
         ]),
         h(

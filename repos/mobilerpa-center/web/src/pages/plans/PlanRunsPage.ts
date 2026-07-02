@@ -2,13 +2,17 @@
 import {
   ElButton,
   ElCard,
+  ElDescriptions,
+  ElDescriptionsItem,
   ElDialog,
   ElDropdown,
   ElDropdownItem,
   ElDropdownMenu,
   ElEmpty,
   ElMessageBox,
+  ElOption,
   ElPagination,
+  ElSelect,
   ElTable,
   ElTableColumn,
   ElTag
@@ -242,12 +246,13 @@ export const PlanRunsPage = defineComponent({
   setup() {
     const plansStore = usePlansStore();
     const noticesStore = useNoticesStore();
-    const { runs, runsTotal, runsPage, runsPageSize, selectedEvents, loadingRuns, loadingEvents, stoppingRunID, mutatingDevices, errorMessage } =
+    const { plans, runs, runsTotal, runsPage, runsPageSize, selectedEvents, loadingRuns, loadingEvents, stoppingRunID, mutatingDevices, errorMessage, runFilters } =
       storeToRefs(plansStore);
 
     const eventsDialogVisible = ref(false);
     const appendDialogVisible = ref(false);
     const devicesDialogVisible = ref(false);
+    const detailDialogVisible = ref(false);
     const selectedRun = ref<PlanRunRecord | null>(null);
     const locationNodes = ref<LocationNodeRecord[]>([]);
     const supportingDataWarning = ref("");
@@ -256,6 +261,10 @@ export const PlanRunsPage = defineComponent({
       rows: [] as PlanRowBinding[]
     });
     const deviceEventFilter = ref("");
+    const searchForm = reactive({
+      plan_def_id: "",
+      plan_name: ""
+    });
 
     const displayedEvents = computed(() => {
       if (!deviceEventFilter.value) {
@@ -268,7 +277,7 @@ export const PlanRunsPage = defineComponent({
     const runDeviceTree = computed(() => buildRunDeviceTree(selectedRun.value, locationNodes.value));
 
     async function loadPageData() {
-      await plansStore.loadRuns();
+      await Promise.all([plansStore.loadPlans(), plansStore.loadRuns()]);
       try {
         locationNodes.value = await fetchLocationNodes();
         supportingDataWarning.value = "";
@@ -278,6 +287,8 @@ export const PlanRunsPage = defineComponent({
     }
 
     onMounted(() => {
+      searchForm.plan_def_id = runFilters.value.plan_def_id || "";
+      searchForm.plan_name = runFilters.value.plan_name || "";
       void loadPageData();
     });
 
@@ -306,6 +317,11 @@ export const PlanRunsPage = defineComponent({
     function openDevicesDialog(run: PlanRunRecord) {
       selectedRun.value = run;
       devicesDialogVisible.value = true;
+    }
+
+    function openDetailDialog(run: PlanRunRecord) {
+      selectedRun.value = run;
+      detailDialogVisible.value = true;
     }
 
     async function stopDeviceRun(deviceRun: PlanDeviceRunRecord) {
@@ -443,9 +459,32 @@ export const PlanRunsPage = defineComponent({
       await removeRow(item);
     }
 
+    async function handleSearch() {
+      const selectedPlan = plans.value.find((item) => item.plan_def_id === searchForm.plan_def_id);
+      await plansStore.applyRunFilters({
+        plan_def_id: searchForm.plan_def_id,
+        plan_name: selectedPlan?.plan_name || ""
+      });
+    }
+
     return () =>
-      h("section", { class: "app-page" }, [
-        h("div", { class: "page-toolbar" }, [h(ElButton, { loading: loadingRuns.value, onClick: () => void loadPageData() }, () => "刷新")]),
+        h("section", { class: "app-page" }, [
+        h("div", { class: "page-toolbar" }, [
+          h(ElSelect, {
+            modelValue: searchForm.plan_def_id,
+            clearable: true,
+            filterable: true,
+            placeholder: "选择计划任务",
+            style: { width: "240px" },
+            "onUpdate:modelValue": (value: string) => {
+              searchForm.plan_def_id = value || "";
+              const selectedPlan = plans.value.find((item) => item.plan_def_id === (value || ""));
+              searchForm.plan_name = selectedPlan?.plan_name || "";
+            }
+          }, () => plans.value.map((item) => h(ElOption, { key: item.plan_def_id, label: item.plan_name, value: item.plan_def_id }))),
+          h(ElButton, { type: "primary", loading: loadingRuns.value, onClick: () => void handleSearch() }, () => "搜索"),
+          h(ElButton, { loading: loadingRuns.value, onClick: () => void loadPageData() }, () => "刷新")
+        ]),
         h("section", { class: "app-page__panel" }, [
           h(ElCard, { class: "page-card", shadow: "never" }, {
             default: () => [
@@ -515,6 +554,14 @@ export const PlanRunsPage = defineComponent({
                                     h(
                                       ElDropdownItem,
                                       {
+                                        key: "view_detail",
+                                        onClick: () => openDetailDialog(scope.row)
+                                      },
+                                      () => "查看"
+                                    ),
+                                    h(
+                                      ElDropdownItem,
+                                      {
                                         key: "view_events",
                                         onClick: () => openEventsDialog(scope.row)
                                       },
@@ -576,6 +623,41 @@ export const PlanRunsPage = defineComponent({
             ]
           })
         ]),
+        h(
+          ElDialog,
+          {
+            modelValue: detailDialogVisible.value,
+            "onUpdate:modelValue": (value: boolean) => (detailDialogVisible.value = value),
+            title: selectedRun.value ? `实例详情：${selectedRun.value.plan_run_id}` : "实例详情",
+            width: "820px"
+          },
+          {
+            default: () =>
+              selectedRun.value
+                ? h(
+                    ElDescriptions,
+                    {
+                      border: true,
+                      column: 2,
+                      class: "task-events-dialog__descriptions"
+                    },
+                    () => [
+                      h(ElDescriptionsItem, { label: "实例ID" }, () => selectedRun.value?.plan_run_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "计划任务ID" }, () => selectedRun.value?.plan_def_id || "暂无"),
+                      h(ElDescriptionsItem, { label: "计划任务名称" }, () => selectedRun.value?.plan_name || "暂无"),
+                      h(ElDescriptionsItem, { label: "目标类型" }, () => getTargetTypeLabel(selectedRun.value?.target_type || "")),
+                      h(ElDescriptionsItem, { label: "状态" }, () => selectedRun.value?.status || "暂无"),
+                      h(ElDescriptionsItem, { label: "设备数" }, () => String((selectedRun.value?.device_runs || []).length)),
+                      h(ElDescriptionsItem, { label: "开始时间" }, () => formatDateTime(selectedRun.value?.started_at)),
+                      h(ElDescriptionsItem, { label: "结束时间" }, () => formatDateTime(selectedRun.value?.finished_at)),
+                      h(ElDescriptionsItem, { label: "创建时间" }, () => formatDateTime(selectedRun.value?.created_at)),
+                      h(ElDescriptionsItem, { label: "更新时间" }, () => formatDateTime(selectedRun.value?.updated_at))
+                    ]
+                  )
+                : h("div", "暂无数据"),
+            footer: () => h(ElButton, { onClick: () => (detailDialogVisible.value = false) }, () => "关闭")
+          }
+        ),
         h(
           ElDialog,
           {

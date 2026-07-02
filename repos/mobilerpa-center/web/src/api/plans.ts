@@ -7,6 +7,12 @@ export function fetchPlans(query: PaginationQuery): Promise<PaginatedResult<Plan
     page: String(query.page),
     page_size: String(query.page_size)
   });
+  if (query.target_type?.trim()) {
+    searchParams.set("target_type", query.target_type.trim());
+  }
+  if (query.schedule_type?.trim()) {
+    searchParams.set("schedule_type", query.schedule_type.trim());
+  }
   return requestJSON<PaginatedResult<PlanDefinitionRecord>>(`/api/v1/plans?${searchParams.toString()}`);
 }
 
@@ -16,6 +22,12 @@ export function fetchPlanRuns(query: PaginationQuery): Promise<PaginatedResult<P
     page_size: String(query.page_size),
     view: "runs"
   });
+  if (query.plan_def_id?.trim()) {
+    searchParams.set("plan_def_id", query.plan_def_id.trim());
+  }
+  if (query.plan_name?.trim()) {
+    searchParams.set("plan_name", query.plan_name.trim());
+  }
   return requestJSON<PaginatedResult<PlanRunRecord>>(`/api/v1/plans?${searchParams.toString()}`);
 }
 

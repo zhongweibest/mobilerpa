@@ -62,7 +62,7 @@ func (s *Service) Push(ctx context.Context, options PushOptions) error {
 		}
 	}
 
-	bootstrapPath, err := writeBootstrapFile(options.CenterBaseURL)
+	bootstrapPath, err := writeBootstrapFile(options.CenterBaseURL, options.DeviceLinkSN)
 	if err != nil {
 		return err
 	}
@@ -116,18 +116,20 @@ func resolveAgentPaths(agentRoot string) (agentPaths, error) {
 	}, nil
 }
 
-func writeBootstrapFile(centerBaseURL string) (string, error) {
+func writeBootstrapFile(centerBaseURL string, deviceLinkSN string) (string, error) {
 	type websocketConfig struct {
 		Enabled             bool `json:"enabled"`
 		HeartbeatIntervalMS int  `json:"heartbeat_interval_ms"`
 	}
 	type bootstrapConfig struct {
 		CenterBaseURL string          `json:"center_base_url"`
+		DeviceLinkSN  string          `json:"device_link_sn"`
 		WebSocket     websocketConfig `json:"websocket"`
 	}
 
 	payload := bootstrapConfig{
 		CenterBaseURL: centerBaseURL,
+		DeviceLinkSN:  strings.TrimSpace(deviceLinkSN),
 		WebSocket: websocketConfig{
 			Enabled:             true,
 			HeartbeatIntervalMS: 30000,

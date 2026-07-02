@@ -19,6 +19,9 @@ CREATE TABLE IF NOT EXISTS devices (
     device_name TEXT NOT NULL DEFAULT '',
     physical_slot TEXT NOT NULL DEFAULT '',
     group_name TEXT NOT NULL DEFAULT '',
+    slot_zone_id TEXT NOT NULL DEFAULT '',
+    slot_row_id TEXT NOT NULL DEFAULT '',
+    slot_position_id TEXT NOT NULL DEFAULT '',
     slot_zone TEXT NOT NULL DEFAULT '',
     slot_row TEXT NOT NULL DEFAULT '',
     slot_position TEXT NOT NULL DEFAULT '',
@@ -29,6 +32,7 @@ CREATE TABLE IF NOT EXISTS devices (
     model TEXT NOT NULL DEFAULT '',
     android_id TEXT NOT NULL DEFAULT '',
     adb_serial TEXT NOT NULL DEFAULT '',
+    device_link_sn TEXT NOT NULL DEFAULT '',
     current_task_id INTEGER NOT NULL DEFAULT 0,
     current_step TEXT NOT NULL DEFAULT '',
     last_error TEXT NOT NULL DEFAULT '',
@@ -103,6 +107,17 @@ CREATE TABLE IF NOT EXISTS uploaded_files (
     file_type TEXT NOT NULL,
     file_path TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS software_packages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    software_name TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    package_file_name TEXT NOT NULL DEFAULT '',
+    package_storage_path TEXT NOT NULL DEFAULT '',
+    package_size INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS daily_reports (
@@ -337,13 +352,13 @@ func initSchema(ctx context.Context, db *sql.DB) error {
 }
 
 func ensureSchemaMigrations(ctx context.Context, db *sql.DB) error {
-    if _, err := db.ExecContext(ctx, `
+	if _, err := db.ExecContext(ctx, `
 INSERT OR IGNORE INTO script_names (script_name, created_at, updated_at)
 SELECT script_name, MIN(created_at), MAX(created_at)
 FROM script_versions
 GROUP BY script_name`); err != nil {
-        return fmt.Errorf("backfill script names: %w", err)
-    }
+		return fmt.Errorf("backfill script names: %w", err)
+	}
 	if err := ensureColumn(ctx, db, "plan_device_runs", "current_node_id", "ALTER TABLE plan_device_runs ADD COLUMN current_node_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
@@ -380,11 +395,42 @@ GROUP BY script_name`); err != nil {
 	if err := ensureColumn(ctx, db, "devices", "slot_zone", "ALTER TABLE devices ADD COLUMN slot_zone TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureColumn(ctx, db, "devices", "slot_zone_id", "ALTER TABLE devices ADD COLUMN slot_zone_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
 	if err := ensureColumn(ctx, db, "devices", "slot_row", "ALTER TABLE devices ADD COLUMN slot_row TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "devices", "slot_row_id", "ALTER TABLE devices ADD COLUMN slot_row_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	if err := ensureColumn(ctx, db, "devices", "slot_position", "ALTER TABLE devices ADD COLUMN slot_position TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
+	}
+	if err := ensureColumn(ctx, db, "devices", "slot_position_id", "ALTER TABLE devices ADD COLUMN slot_position_id TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureColumn(ctx, db, "devices", "device_link_sn", "ALTER TABLE devices ADD COLUMN device_link_sn TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if _, err := db.ExecContext(ctx, `
+UPDATE devices
+SET
+    slot_zone_id = CAST(zone_node.id AS TEXT),
+    slot_row_id = CAST(row_node.id AS TEXT),
+    slot_position_id = CAST(slot.id AS TEXT),
+    slot_zone = zone_node.node_name,
+    slot_row = row_node.node_name,
+    slot_position = slot.node_name,
+    physical_slot = zone_node.node_name || '-' || row_node.node_name || '-' || slot.node_name,
+    bind_status = 'bound'
+FROM location_nodes AS slot
+JOIN location_nodes AS row_node ON row_node.id = slot.parent_id AND row_node.node_type = 'row'
+JOIN location_nodes AS zone_node ON zone_node.id = row_node.parent_id AND zone_node.node_type = 'zone'
+WHERE slot.node_type = 'slot'
+  AND slot.device_id > 0
+  AND CAST(slot.device_id AS TEXT) = CAST(devices.id AS TEXT)`); err != nil {
+		return fmt.Errorf("backfill device slot ids: %w", err)
 	}
 	return nil
 }
