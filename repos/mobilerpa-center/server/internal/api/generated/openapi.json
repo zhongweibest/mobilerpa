@@ -1,0 +1,3789 @@
+{
+  "components": {
+    "schemas": {
+      "api.deployScriptAllRequest": {
+        "properties": {
+          "force": {
+            "type": "boolean"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "script_version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "api.deployScriptAllResponse": {
+        "properties": {
+          "failure_count": {
+            "type": "integer"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/api.deployScriptItemResult"
+            },
+            "type": "array"
+          },
+          "success_count": {
+            "type": "integer"
+          },
+          "total_online_devices": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
+      "api.deployScriptItemResult": {
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "api.deployScriptRequest": {
+        "properties": {
+          "device_id": {
+            "type": "string"
+          },
+          "force": {
+            "type": "boolean"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "script_version": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "device.Device": {
+        "properties": {
+          "accessibility_status": {
+            "description": "AccessibilityStatus 是无障碍状态。",
+            "type": "string"
+          },
+          "adb_serial": {
+            "description": "ADBSerial 是设备最近一次上报的 ADB 序列号。",
+            "type": "string"
+          },
+          "agent_uuid": {
+            "description": "AgentUUID 是设备端生成并持久保存的标识。",
+            "type": "string"
+          },
+          "android_id": {
+            "description": "AndroidID 是设备最近一次上报的 Android 标识。",
+            "type": "string"
+          },
+          "battery_optimization_ignored_status": {
+            "description": "BatteryOptimizationIgnoredStatus 是电量优化忽略状态。",
+            "type": "string"
+          },
+          "bind_status": {
+            "description": "BindStatus 表示设备是否已经在后台完成人工绑定。",
+            "type": "string"
+          },
+          "brand": {
+            "description": "Brand 是设备最近一次上报的品牌。",
+            "type": "string"
+          },
+          "created_at": {
+            "description": "CreatedAt 是设备记录创建时间。",
+            "type": "string"
+          },
+          "current_step": {
+            "description": "CurrentStep 是当前任务最近一次上报的执行步骤。",
+            "type": "string"
+          },
+          "current_task_id": {
+            "description": "CurrentTaskID 是当前关联到该设备的任务标识。",
+            "type": "string"
+          },
+          "device_id": {
+            "description": "DeviceID 是中心服务生成的稳定设备标识。",
+            "type": "string"
+          },
+          "device_link_sn": {
+            "description": "DeviceLinkSN 是设备发现阶段下发并由 Agent 回传的链路标识。",
+            "type": "string"
+          },
+          "device_name": {
+            "description": "DeviceName 是设备最近一次上报的可读设备名称。",
+            "type": "string"
+          },
+          "env_check_message": {
+            "description": "EnvCheckMessage 是最近一次环境自检摘要。",
+            "type": "string"
+          },
+          "env_checked_at": {
+            "description": "EnvCheckedAt 是最近一次环境自检时间。",
+            "type": "string"
+          },
+          "foreground_service_status": {
+            "description": "ForegroundServiceStatus 是前台服务或通知保活状态。",
+            "type": "string"
+          },
+          "group_name": {
+            "description": "GroupName 是运维分配的设备逻辑分组。",
+            "type": "string"
+          },
+          "ip": {
+            "description": "IP 是中心服务最近一次观察到的设备网络地址。",
+            "type": "string"
+          },
+          "last_error": {
+            "description": "LastError 是最近一次持久化的设备级错误摘要。",
+            "type": "string"
+          },
+          "last_heartbeat_at": {
+            "description": "LastHeartbeatAt 是最近一次持久化的心跳时间。",
+            "type": "string"
+          },
+          "model": {
+            "description": "Model 是设备最近一次上报的型号。",
+            "type": "string"
+          },
+          "physical_slot": {
+            "description": "PhysicalSlot 是运维维护的设备物理位置。",
+            "type": "string"
+          },
+          "slot_position": {
+            "description": "SlotPosition 是设备所在槽位号。",
+            "type": "string"
+          },
+          "slot_position_id": {
+            "description": "SlotPositionID 是设备所在槽位节点 ID。",
+            "type": "string"
+          },
+          "slot_row": {
+            "description": "SlotRow 是设备所在排号。",
+            "type": "string"
+          },
+          "slot_row_id": {
+            "description": "SlotRowID 是设备所在排号节点 ID。",
+            "type": "string"
+          },
+          "slot_zone": {
+            "description": "SlotZone 是设备所在分区。",
+            "type": "string"
+          },
+          "slot_zone_id": {
+            "description": "SlotZoneID 是设备所在分区节点 ID。",
+            "type": "string"
+          },
+          "status": {
+            "description": "Status 是设备当前的高层状态，例如在线或离线。",
+            "type": "string"
+          },
+          "updated_at": {
+            "description": "UpdatedAt 是设备记录最近更新时间。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "device.LocationNode": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "parent_id": {
+            "type": "string"
+          },
+          "path_text": {
+            "type": "string"
+          },
+          "row_name": {
+            "type": "string"
+          },
+          "slot_name": {
+            "type": "string"
+          },
+          "sort_order": {
+            "type": "integer"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "device.RegisterResult": {
+        "properties": {
+          "bind_status": {
+            "description": "BindStatus 是设备当前的人工绑定状态。",
+            "type": "string"
+          },
+          "device_id": {
+            "description": "DeviceID 是中心服务分配的稳定设备标识。",
+            "type": "string"
+          },
+          "status": {
+            "description": "Status 是返回给设备端的注册结果状态。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.AddRowsRequest": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/plan.PlanRowBinding"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "plan.Definition": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "daily_deadline_time": {
+            "type": "string"
+          },
+          "daily_retry_enabled": {
+            "type": "boolean"
+          },
+          "daily_retry_interval_seconds": {
+            "type": "integer"
+          },
+          "daily_retry_stop_before_deadline_minutes": {
+            "type": "integer"
+          },
+          "daily_start_time": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "plan_def_id": {
+            "type": "string"
+          },
+          "plan_name": {
+            "type": "string"
+          },
+          "retry_policy_mode": {
+            "type": "string"
+          },
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/plan.PlanRowBinding"
+            },
+            "type": "array"
+          },
+          "schedule_type": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "status_updated_at": {
+            "type": "string"
+          },
+          "target_script_name": {
+            "type": "string"
+          },
+          "target_script_version": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "target_workflow_def_id": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.DeviceRun": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "current_node_id": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "last_error": {
+            "type": "string"
+          },
+          "next_retry_at": {
+            "type": "string"
+          },
+          "plan_def_id": {
+            "type": "string"
+          },
+          "plan_device_run_id": {
+            "type": "string"
+          },
+          "plan_run_id": {
+            "type": "string"
+          },
+          "row_id": {
+            "type": "string"
+          },
+          "slot_id": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_ref_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "zone_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.Event": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "device_id": {
+            "type": "string"
+          },
+          "event_type": {
+            "type": "string"
+          },
+          "extra": {
+            "additionalProperties": {},
+            "type": "object"
+          },
+          "message": {
+            "type": "string"
+          },
+          "plan_def_id": {
+            "type": "string"
+          },
+          "plan_event_id": {
+            "type": "integer"
+          },
+          "plan_run_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.PlanRowBinding": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "plan_def_id": {
+            "type": "string"
+          },
+          "plan_definition_row_id": {
+            "type": "string"
+          },
+          "row_id": {
+            "type": "string"
+          },
+          "row_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "zone_id": {
+            "type": "string"
+          },
+          "zone_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.Run": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "device_runs": {
+            "items": {
+              "$ref": "#/components/schemas/plan.DeviceRun"
+            },
+            "type": "array"
+          },
+          "finished_at": {
+            "type": "string"
+          },
+          "plan_def_id": {
+            "type": "string"
+          },
+          "plan_name": {
+            "type": "string"
+          },
+          "plan_run_id": {
+            "type": "string"
+          },
+          "run_date": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "target_ref_id": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "plan.StartRequest": {
+        "type": "object"
+      },
+      "plan.UpdateDefinitionRowsRequest": {
+        "properties": {
+          "rows": {
+            "items": {
+              "$ref": "#/components/schemas/plan.PlanRowBinding"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "plan.UpdateDefinitionStatusRequest": {
+        "properties": {
+          "status": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "script.FileMeta": {
+        "properties": {
+          "checksum_sha256": {
+            "description": "ChecksumSHA256 是文件的 SHA-256 摘要。",
+            "type": "string"
+          },
+          "relative_path": {
+            "description": "RelativePath 是相对于脚本版本目录的相对路径。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "script.Manifest": {
+        "properties": {
+          "checksum_sha256": {
+            "description": "ChecksumSHA256 是入口文件的 SHA-256 摘要。",
+            "type": "string"
+          },
+          "download_url": {
+            "description": "DownloadURL 是脚本文件下载接口。",
+            "type": "string"
+          },
+          "entry_file": {
+            "description": "EntryFile 是脚本包内入口文件。",
+            "type": "string"
+          },
+          "files": {
+            "description": "Files 是脚本版本目录内的完整文件清单。",
+            "items": {
+              "$ref": "#/components/schemas/script.FileMeta"
+            },
+            "type": "array"
+          },
+          "script_name": {
+            "description": "ScriptName 是脚本名称。",
+            "type": "string"
+          },
+          "script_version": {
+            "description": "ScriptVersion 是脚本版本。",
+            "type": "string"
+          },
+          "source_type": {
+            "description": "SourceType 是原始上传来源类型。",
+            "type": "string"
+          },
+          "storage_type": {
+            "description": "StorageType 是中心内部存储类型。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "script.ScriptNameRecord": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "script.ScriptSummary": {
+        "properties": {
+          "script_name": {
+            "description": "ScriptName 是脚本名称。",
+            "type": "string"
+          },
+          "versions": {
+            "description": "Versions 是该脚本已维护的版本列表。",
+            "items": {
+              "$ref": "#/components/schemas/script.VersionSummary"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "script.UploadResult": {
+        "properties": {
+          "entry_file": {
+            "description": "EntryFile 是入口文件。",
+            "type": "string"
+          },
+          "script_name": {
+            "description": "ScriptName 是脚本名称。",
+            "type": "string"
+          },
+          "script_version": {
+            "description": "ScriptVersion 是脚本版本。",
+            "type": "string"
+          },
+          "source_type": {
+            "description": "SourceType 是原始来源类型。",
+            "type": "string"
+          },
+          "storage_type": {
+            "description": "StorageType 是中心存储类型。",
+            "type": "string"
+          },
+          "stored_path": {
+            "description": "StoredPath 是中心脚本库存储目录。",
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "script.VersionSummary": {
+        "properties": {
+          "created_at": {
+            "description": "CreatedAt 是创建时间。",
+            "type": "string"
+          },
+          "entry_file": {
+            "description": "EntryFile 是入口文件。",
+            "type": "string"
+          },
+          "script_name": {
+            "description": "ScriptName 是脚本名称。",
+            "type": "string"
+          },
+          "script_version": {
+            "description": "ScriptVersion 是脚本版本。",
+            "type": "string"
+          },
+          "source_type": {
+            "description": "SourceType 是上传来源类型。",
+            "type": "string"
+          },
+          "status": {
+            "description": "Status 是版本状态。",
+            "type": "string"
+          },
+          "storage_type": {
+            "description": "StorageType 是中心存储类型。",
+            "type": "string"
+          },
+          "workflow_references": {
+            "items": {
+              "$ref": "#/components/schemas/script.WorkflowReference"
+            },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
+      "script.WorkflowReference": {
+        "properties": {
+          "node_id": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "workflow_def_id": {
+            "type": "string"
+          },
+          "workflow_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "software.Package": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "package_file_name": {
+            "type": "string"
+          },
+          "package_size": {
+            "type": "integer"
+          },
+          "package_storage_path": {
+            "type": "string"
+          },
+          "software_id": {
+            "type": "string"
+          },
+          "software_name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workflow.Definition": {
+        "properties": {
+          "builder_segments_json": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/workflow.Edge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/workflow.Node"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workflow_def_id": {
+            "type": "string"
+          },
+          "workflow_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workflow.Edge": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "edge_type": {
+            "type": "string"
+          },
+          "from_node_id": {
+            "type": "string"
+          },
+          "to_node_id": {
+            "type": "string"
+          },
+          "workflow_def_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "workflow.Node": {
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "max_iterations": {
+            "type": "integer"
+          },
+          "node_id": {
+            "type": "string"
+          },
+          "node_name": {
+            "type": "string"
+          },
+          "node_type": {
+            "type": "string"
+          },
+          "position": {
+            "type": "integer"
+          },
+          "script_name": {
+            "type": "string"
+          },
+          "script_version": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "workflow_def_id": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "contact": {},
+    "description": "MobileRPA Center HTTP API 文档。",
+    "title": "MobileRPA Center API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.0.3",
+  "paths": {
+    "/api/v1/devices": {
+      "get": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分区 ID",
+            "in": "query",
+            "name": "slot_zone",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "排号 ID",
+            "in": "query",
+            "name": "slot_row",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "槽位 ID",
+            "in": "query",
+            "name": "slot_position",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/device.LocationNode"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取设备列表",
+        "tags": [
+          "Devices"
+        ]
+      }
+    },
+    "/api/v1/devices/all": {
+      "get": {
+        "parameters": [
+          {
+            "description": "分区 ID",
+            "in": "query",
+            "name": "slot_zone",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "排号 ID",
+            "in": "query",
+            "name": "slot_row",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "槽位 ID",
+            "in": "query",
+            "name": "slot_position",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取全量设备列表",
+        "tags": [
+          "Devices"
+        ]
+      }
+    },
+    "/api/v1/devices/{device_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "设备 ID",
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.Device"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取设备详情或删除离线设备",
+        "tags": [
+          "Devices"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "设备 ID",
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.Device"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取设备详情或删除离线设备",
+        "tags": [
+          "Devices"
+        ]
+      }
+    },
+    "/api/v1/devices/{device_id}/occupancy": {
+      "get": {
+        "parameters": [
+          {
+            "description": "设备 ID",
+            "in": "path",
+            "name": "device_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.Device"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取设备详情或删除离线设备",
+        "tags": [
+          "Devices"
+        ]
+      }
+    },
+    "/api/v1/location-nodes": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/device.LocationNode"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取或创建位置节点",
+        "tags": [
+          "Location"
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/device.LocationNode"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取或创建位置节点",
+        "tags": [
+          "Location"
+        ]
+      }
+    },
+    "/api/v1/location-nodes/{node_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "节点 ID",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "位置节点子资源",
+        "tags": [
+          "Location"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "节点 ID",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "位置节点子资源",
+        "tags": [
+          "Location"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "节点 ID",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "位置节点子资源",
+        "tags": [
+          "Location"
+        ]
+      }
+    },
+    "/api/v1/location-nodes/{node_id}/bind": {
+      "post": {
+        "parameters": [
+          {
+            "description": "节点 ID",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "位置节点子资源",
+        "tags": [
+          "Location"
+        ]
+      }
+    },
+    "/api/v1/location-nodes/{node_id}/unbind": {
+      "post": {
+        "parameters": [
+          {
+            "description": "节点 ID",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.LocationNode"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "位置节点子资源",
+        "tags": [
+          "Location"
+        ]
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "目标类型",
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "调度类型",
+            "in": "query",
+            "name": "schedule_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务定义 ID",
+            "in": "query",
+            "name": "plan_def_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务名称",
+            "in": "query",
+            "name": "plan_name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "当值为 runs 时返回实例列表",
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/plan.Definition"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或创建计划任务",
+        "tags": [
+          "Plans"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "目标类型",
+            "in": "query",
+            "name": "target_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "调度类型",
+            "in": "query",
+            "name": "schedule_type",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务定义 ID",
+            "in": "query",
+            "name": "plan_def_id",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务名称",
+            "in": "query",
+            "name": "plan_name",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "当值为 runs 时返回实例列表",
+            "in": "query",
+            "name": "view",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/plan.Definition"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或创建计划任务",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "删除计划任务定义",
+        "tags": [
+          "Plans"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取计划任务定义详情",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/rows": {
+      "put": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/plan.UpdateDefinitionRowsRequest"
+              }
+            }
+          },
+          "description": "默认排选择",
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "更新计划任务默认排选择",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs": {
+      "get": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/plan.Run"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取计划任务实例列表",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "删除计划任务实例",
+        "tags": [
+          "Plans"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取单个计划任务实例",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}/device-runs/{plan_device_run_id}/stop": {
+      "post": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务设备运行 ID",
+            "in": "path",
+            "name": "plan_device_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "停止计划任务实例中的单个设备",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}/events": {
+      "get": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/plan.Event"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取计划任务实例事件列表",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}/rows": {
+      "post": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/plan.AddRowsRequest"
+              }
+            }
+          },
+          "description": "追加排请求",
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "向计划任务实例追加排",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}/rows/{zone_id}/{row_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "分区 ID",
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "排号 ID",
+            "in": "path",
+            "name": "row_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "从计划任务实例移除排",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/runs/{plan_run_id}/stop": {
+      "post": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "计划任务实例 ID",
+            "in": "path",
+            "name": "plan_run_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "停止计划任务实例",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/start": {
+      "post": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/plan.StartRequest"
+              }
+            }
+          },
+          "description": "启动请求",
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Run"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "手动启动计划任务",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/plans/{plan_def_id}/status": {
+      "put": {
+        "parameters": [
+          {
+            "description": "计划任务定义 ID",
+            "in": "path",
+            "name": "plan_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/plan.UpdateDefinitionStatusRequest"
+              }
+            }
+          },
+          "description": "状态请求",
+          "required": true,
+          "x-originalParamName": "body"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/plan.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "更新计划任务启用状态",
+        "tags": [
+          "Plans"
+        ]
+      }
+    },
+    "/api/v1/script-names": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/script.ScriptNameRecord"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取或新增脚本名称",
+        "tags": [
+          "Scripts"
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/script.ScriptNameRecord"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取或新增脚本名称",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts": {
+      "get": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/script.ScriptSummary"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取脚本列表",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts/deploy": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.deployScriptRequest"
+              }
+            }
+          },
+          "description": "下发请求",
+          "required": true,
+          "x-originalParamName": "payload"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "向单台设备下发脚本版本",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts/deploy-all": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.deployScriptAllRequest"
+              }
+            }
+          },
+          "description": "批量下发请求",
+          "required": true,
+          "x-originalParamName": "payload"
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.deployScriptAllResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "向全部在线设备下发脚本版本",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts/upload": {
+      "post": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/script.UploadResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "上传脚本版本压缩包",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts/{script_name}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "脚本名称",
+            "in": "path",
+            "name": "script_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "删除脚本名称及其全部版本",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/scripts/{script_name}/versions/{script_version}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "脚本名称",
+            "in": "path",
+            "name": "script_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "脚本版本",
+            "in": "path",
+            "name": "script_version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "删除脚本版本",
+        "tags": [
+          "Scripts"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "脚本名称",
+            "in": "path",
+            "name": "script_name",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "脚本版本",
+            "in": "path",
+            "name": "script_version",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/script.Manifest"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取脚本版本详情",
+        "tags": [
+          "Scripts"
+        ]
+      }
+    },
+    "/api/v1/software": {
+      "get": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/software.Package"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或新增软件",
+        "tags": [
+          "Software"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/software.Package"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或新增软件",
+        "tags": [
+          "Software"
+        ]
+      }
+    },
+    "/api/v1/software/all": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/software.Package"
+                  },
+                  "type": "array"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "获取全量软件列表",
+        "tags": [
+          "Software"
+        ]
+      }
+    },
+    "/api/v1/software/{software_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "软件 ID",
+            "in": "path",
+            "name": "software_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/software.Package"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "软件详情、更新、删除与下载",
+        "tags": [
+          "Software"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "软件 ID",
+            "in": "path",
+            "name": "software_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/software.Package"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "软件详情、更新、删除与下载",
+        "tags": [
+          "Software"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "软件 ID",
+            "in": "path",
+            "name": "software_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/software.Package"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "软件详情、更新、删除与下载",
+        "tags": [
+          "Software"
+        ]
+      }
+    },
+    "/api/v1/software/{software_id}/download": {
+      "get": {
+        "parameters": [
+          {
+            "description": "软件 ID",
+            "in": "path",
+            "name": "software_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/software.Package"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "软件详情、更新、删除与下载",
+        "tags": [
+          "Software"
+        ]
+      }
+    },
+    "/api/v1/workflows": {
+      "get": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.RegisterResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或创建工作流定义",
+        "tags": [
+          "Workflows"
+        ]
+      },
+      "post": {
+        "parameters": [
+          {
+            "description": "页码",
+            "in": "query",
+            "name": "page",
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "分页大小",
+            "in": "query",
+            "name": "page_size",
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/device.RegisterResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "分页获取或创建工作流定义",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    },
+    "/api/v1/workflows/{workflow_def_id}": {
+      "delete": {
+        "parameters": [
+          {
+            "description": "工作流定义 ID",
+            "in": "path",
+            "name": "workflow_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workflow.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "工作流定义子资源",
+        "tags": [
+          "Workflows"
+        ]
+      },
+      "get": {
+        "parameters": [
+          {
+            "description": "工作流定义 ID",
+            "in": "path",
+            "name": "workflow_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workflow.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "工作流定义子资源",
+        "tags": [
+          "Workflows"
+        ]
+      },
+      "put": {
+        "parameters": [
+          {
+            "description": "工作流定义 ID",
+            "in": "path",
+            "name": "workflow_def_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/workflow.Definition"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "summary": "工作流定义子资源",
+        "tags": [
+          "Workflows"
+        ]
+      }
+    }
+  }
+}

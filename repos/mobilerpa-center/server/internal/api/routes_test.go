@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,6 +198,69 @@ func TestRegisterAndListDevices(t *testing.T) {
 
 	if missingPayload.Error != "device_not_found" {
 		t.Fatalf("unexpected missing device error: %s", missingPayload.Error)
+	}
+}
+
+func TestScalarDocsAndOpenAPIDocument(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-docs-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	openAPIResp, err := http.Get(server.URL + "/openapi.json")
+	if err != nil {
+		t.Fatalf("openapi request: %v", err)
+	}
+	defer openAPIResp.Body.Close()
+
+	if openAPIResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected openapi status: %d", openAPIResp.StatusCode)
+	}
+
+	var openAPIPayload map[string]any
+	if err := json.NewDecoder(openAPIResp.Body).Decode(&openAPIPayload); err != nil {
+		t.Fatalf("decode openapi response: %v", err)
+	}
+	if openAPIPayload["openapi"] != "3.0.3" {
+		t.Fatalf("unexpected openapi version: %#v", openAPIPayload["openapi"])
+	}
+
+	scalarResp, err := http.Get(server.URL + "/scalar")
+	if err != nil {
+		t.Fatalf("scalar request: %v", err)
+	}
+	defer scalarResp.Body.Close()
+
+	if scalarResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected scalar status: %d", scalarResp.StatusCode)
+	}
+
+	bodyBytes := new(bytes.Buffer)
+	if _, err := bodyBytes.ReadFrom(scalarResp.Body); err != nil {
+		t.Fatalf("read scalar response: %v", err)
+	}
+	body := bodyBytes.String()
+	if !strings.Contains(body, "@scalar/api-reference") {
+		t.Fatalf("scalar page should include scalar script")
+	}
+	if !strings.Contains(body, "/openapi.json") {
+		t.Fatalf("scalar page should reference openapi.json")
 	}
 }
 

@@ -22,6 +22,36 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
 )
 
+type createScriptNameRequest struct {
+	ScriptName string `json:"script_name"`
+}
+
+type deployScriptRequest struct {
+	DeviceID      string `json:"device_id"`
+	ScriptName    string `json:"script_name"`
+	ScriptVersion string `json:"script_version"`
+	Force         bool   `json:"force"`
+}
+
+type deployScriptAllRequest struct {
+	ScriptName    string `json:"script_name"`
+	ScriptVersion string `json:"script_version"`
+	Force         bool   `json:"force"`
+}
+
+type deployScriptItemResult struct {
+	DeviceID string `json:"device_id"`
+	Status   string `json:"status"`
+	Message  string `json:"message"`
+}
+
+type deployScriptAllResponse struct {
+	TotalOnlineDevices int                      `json:"total_online_devices"`
+	SuccessCount       int                      `json:"success_count"`
+	FailureCount       int                      `json:"failure_count"`
+	Results            []deployScriptItemResult `json:"results"`
+}
+
 // RegisterRoutes 注册中心服务当前可用的 HTTP 路由。
 // 为兼容历史测试调用，最后参数同时支持：
 // 1. 仅传入 wsHandler
@@ -68,6 +98,8 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	}
 
 	mux.HandleFunc("/healthz", healthz)
+	mux.HandleFunc("/openapi.json", openAPIDocument())
+	mux.HandleFunc("/scalar", scalarDocs())
 	mux.HandleFunc("/api/v1/device/register", registerDevice(devices))
 	mux.HandleFunc("/api/v1/devices", listDevices(devices, plans))
 	mux.HandleFunc("/api/v1/devices/all", listAllDevices(devices))
@@ -101,6 +133,18 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.Handle("/ws", wsHandler)
 }
 
+// workflowsCollection godoc
+// @Summary 分页获取或创建工作流定义
+// @Tags Workflows
+// @Accept json
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "分页大小"
+// @Success 200 {object} device.RegisterResult
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/workflows [get]
+// @Router /api/v1/workflows [post]
 func workflowsCollection(workflows *workflow.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -153,6 +197,23 @@ func workflowsCollection(workflows *workflow.Service) http.HandlerFunc {
 	}
 }
 
+// plansCollection godoc
+// @Summary 分页获取或创建计划任务
+// @Tags Plans
+// @Accept json
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "分页大小"
+// @Param target_type query string false "目标类型"
+// @Param schedule_type query string false "调度类型"
+// @Param plan_def_id query string false "计划任务定义 ID"
+// @Param plan_name query string false "计划任务名称"
+// @Param view query string false "当值为 runs 时返回实例列表"
+// @Success 200 {array} plan.Definition
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans [get]
+// @Router /api/v1/plans [post]
 func plansCollection(plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -244,197 +305,67 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 		defer cancel()
 
 		if len(parts) == 1 && r.Method == http.MethodGet {
-			result, err := plans.GetDefinition(ctx, planDefID)
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanDefinitionGet(ctx, w, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 1 && r.Method == http.MethodDelete {
-			if err := plans.DeleteDefinition(ctx, planDefID); err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"plan_def_id": planDefID,
-					"deleted":     true,
-				},
-			})
+			handlePlanDefinitionDelete(ctx, w, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 2 && parts[1] == "rows" && r.Method == http.MethodPut {
-			var req plan.UpdateDefinitionRowsRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			result, err := plans.UpdateDefinitionRows(ctx, planDefID, req)
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanDefinitionRowsUpdate(ctx, w, r, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 2 && parts[1] == "status" && r.Method == http.MethodPut {
-			var req plan.UpdateDefinitionStatusRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			result, err := plans.UpdateDefinitionStatus(ctx, planDefID, req)
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanDefinitionStatusUpdate(ctx, w, r, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 2 && parts[1] == "runs" && r.Method == http.MethodGet {
-			result, err := plans.ListRuns(ctx, plan.RunListFilter{PlanDefID: planDefID})
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunsList(ctx, w, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 2 && parts[1] == "start" && r.Method == http.MethodPost {
-			var req plan.StartRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			req.Manual = true
-			result, err := plans.Start(ctx, planDefID, req)
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanStart(ctx, w, r, plans, planDefID)
 			return
 		}
 
 		if len(parts) == 3 && parts[1] == "runs" && r.Method == http.MethodGet {
-			result, err := plans.GetRun(ctx, parts[2])
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunGet(ctx, w, plans, parts[2])
 			return
 		}
 
 		if len(parts) == 4 && parts[1] == "runs" && parts[3] == "events" && r.Method == http.MethodGet {
-			result, err := plans.ListEvents(ctx, parts[2])
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunEventsList(ctx, w, plans, parts[2])
 			return
 		}
 
 		if len(parts) == 4 && parts[1] == "runs" && parts[3] == "stop" && r.Method == http.MethodPost {
-			result, err := plans.StopRun(ctx, parts[2])
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunStop(ctx, w, plans, parts[2])
 			return
 		}
 
 		if len(parts) == 6 && parts[1] == "runs" && parts[3] == "device-runs" && parts[5] == "stop" && r.Method == http.MethodPost {
-			result, err := plans.StopDeviceRun(ctx, parts[2], parts[4])
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanDeviceRunStop(ctx, w, plans, parts[2], parts[4])
 			return
 		}
 
 		if len(parts) == 3 && parts[1] == "runs" && r.Method == http.MethodDelete {
-			if err := plans.DeleteRun(ctx, parts[2]); err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"plan_def_id": planDefID,
-					"plan_run_id": parts[2],
-					"deleted":     true,
-				},
-			})
+			handlePlanRunDelete(ctx, w, plans, planDefID, parts[2])
 			return
 		}
 
 		if len(parts) == 4 && parts[1] == "runs" && parts[3] == "rows" && r.Method == http.MethodPost {
-			var req plan.AddRowsRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			result, err := plans.AddRows(ctx, parts[2], req)
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunRowsAdd(ctx, w, r, plans, parts[2])
 			return
 		}
 
 		if len(parts) == 6 && parts[1] == "runs" && parts[3] == "rows" && r.Method == http.MethodDelete {
-			result, err := plans.RemoveRow(ctx, parts[2], parts[4], parts[5])
-			if err != nil {
-				writePlanError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handlePlanRunRowDelete(ctx, w, plans, parts[2], parts[4], parts[5])
 			return
 		}
 
@@ -442,6 +373,340 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 	}
 }
 
+// handlePlanDefinitionGet godoc
+// @Summary 获取计划任务定义详情
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Success 200 {object} plan.Definition
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id} [get]
+func handlePlanDefinitionGet(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planDefID string) {
+	result, err := plans.GetDefinition(ctx, planDefID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanDefinitionDelete godoc
+// @Summary 删除计划任务定义
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id} [delete]
+func handlePlanDefinitionDelete(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planDefID string) {
+	if err := plans.DeleteDefinition(ctx, planDefID); err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"plan_def_id": planDefID,
+			"deleted":     true,
+		},
+	})
+}
+
+// handlePlanDefinitionRowsUpdate godoc
+// @Summary 更新计划任务默认排选择
+// @Tags Plans
+// @Accept json
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param body body plan.UpdateDefinitionRowsRequest true "默认排选择"
+// @Success 200 {object} plan.Definition
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/rows [put]
+func handlePlanDefinitionRowsUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, plans *plan.Service, planDefID string) {
+	var req plan.UpdateDefinitionRowsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	result, err := plans.UpdateDefinitionRows(ctx, planDefID, req)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanDefinitionStatusUpdate godoc
+// @Summary 更新计划任务启用状态
+// @Tags Plans
+// @Accept json
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param body body plan.UpdateDefinitionStatusRequest true "状态请求"
+// @Success 200 {object} plan.Definition
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/status [put]
+func handlePlanDefinitionStatusUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, plans *plan.Service, planDefID string) {
+	var req plan.UpdateDefinitionStatusRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	result, err := plans.UpdateDefinitionStatus(ctx, planDefID, req)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunsList godoc
+// @Summary 获取计划任务实例列表
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Success 200 {array} plan.Run
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs [get]
+func handlePlanRunsList(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planDefID string) {
+	result, err := plans.ListRuns(ctx, plan.RunListFilter{PlanDefID: planDefID})
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanStart godoc
+// @Summary 手动启动计划任务
+// @Tags Plans
+// @Accept json
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param body body plan.StartRequest true "启动请求"
+// @Success 200 {object} plan.Run
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/start [post]
+func handlePlanStart(ctx context.Context, w http.ResponseWriter, r *http.Request, plans *plan.Service, planDefID string) {
+	var req plan.StartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	req.Manual = true
+	result, err := plans.Start(ctx, planDefID, req)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunGet godoc
+// @Summary 获取单个计划任务实例
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Success 200 {object} plan.Run
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id} [get]
+func handlePlanRunGet(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planRunID string) {
+	result, err := plans.GetRun(ctx, planRunID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunEventsList godoc
+// @Summary 获取计划任务实例事件列表
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Success 200 {array} plan.Event
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id}/events [get]
+func handlePlanRunEventsList(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planRunID string) {
+	result, err := plans.ListEvents(ctx, planRunID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunStop godoc
+// @Summary 停止计划任务实例
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Success 200 {object} plan.Run
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id}/stop [post]
+func handlePlanRunStop(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planRunID string) {
+	result, err := plans.StopRun(ctx, planRunID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanDeviceRunStop godoc
+// @Summary 停止计划任务实例中的单个设备
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Param plan_device_run_id path string true "计划任务设备运行 ID"
+// @Success 200 {object} plan.Run
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id}/device-runs/{plan_device_run_id}/stop [post]
+func handlePlanDeviceRunStop(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planRunID string, planDeviceRunID string) {
+	result, err := plans.StopDeviceRun(ctx, planRunID, planDeviceRunID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunDelete godoc
+// @Summary 删除计划任务实例
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id} [delete]
+func handlePlanRunDelete(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planDefID string, planRunID string) {
+	if err := plans.DeleteRun(ctx, planRunID); err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"plan_def_id": planDefID,
+			"plan_run_id": planRunID,
+			"deleted":     true,
+		},
+	})
+}
+
+// handlePlanRunRowsAdd godoc
+// @Summary 向计划任务实例追加排
+// @Tags Plans
+// @Accept json
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Param body body plan.AddRowsRequest true "追加排请求"
+// @Success 200 {object} plan.Run
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id}/rows [post]
+func handlePlanRunRowsAdd(ctx context.Context, w http.ResponseWriter, r *http.Request, plans *plan.Service, planRunID string) {
+	var req plan.AddRowsRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	result, err := plans.AddRows(ctx, planRunID, req)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handlePlanRunRowDelete godoc
+// @Summary 从计划任务实例移除排
+// @Tags Plans
+// @Produce json
+// @Param plan_def_id path string true "计划任务定义 ID"
+// @Param plan_run_id path string true "计划任务实例 ID"
+// @Param zone_id path string true "分区 ID"
+// @Param row_id path string true "排号 ID"
+// @Success 200 {object} plan.Run
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/plans/{plan_def_id}/runs/{plan_run_id}/rows/{zone_id}/{row_id} [delete]
+func handlePlanRunRowDelete(ctx context.Context, w http.ResponseWriter, plans *plan.Service, planRunID string, zoneID string, rowID string) {
+	result, err := plans.RemoveRow(ctx, planRunID, zoneID, rowID)
+	if err != nil {
+		writePlanError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// workflowSubResources godoc
+// @Summary 工作流定义子资源
+// @Tags Workflows
+// @Accept json
+// @Produce json
+// @Param workflow_def_id path string true "工作流定义 ID"
+// @Success 200 {object} workflow.Definition
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/workflows/{workflow_def_id} [get]
+// @Router /api/v1/workflows/{workflow_def_id} [put]
+// @Router /api/v1/workflows/{workflow_def_id} [delete]
 func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/workflows/")
@@ -517,11 +782,11 @@ func scriptsSubResources(scripts *script.Service) http.HandlerFunc {
 
 		parts := strings.Split(trimmed, "/")
 		if len(parts) == 1 {
-			deleteScript(scripts).ServeHTTP(w, r)
+			handleScriptDelete(scripts).ServeHTTP(w, r)
 			return
 		}
 
-		getScriptVersion(scripts).ServeHTTP(w, r)
+		handleScriptVersionSubResources(scripts).ServeHTTP(w, r)
 	}
 }
 
@@ -710,6 +975,19 @@ func registerDevice(devices *device.Service) http.HandlerFunc {
 	}
 }
 
+// listDevices godoc
+// @Summary 分页获取设备列表
+// @Tags Devices
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "分页大小"
+// @Param slot_zone query string false "分区 ID"
+// @Param slot_row query string false "排号 ID"
+// @Param slot_position query string false "槽位 ID"
+// @Success 200 {array} device.LocationNode
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/devices [get]
 func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -789,6 +1067,16 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 	}
 }
 
+// listAllDevices godoc
+// @Summary 获取全量设备列表
+// @Tags Devices
+// @Produce json
+// @Param slot_zone query string false "分区 ID"
+// @Param slot_row query string false "排号 ID"
+// @Param slot_position query string false "槽位 ID"
+// @Success 200 {object} device.LocationNode
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/devices/all [get]
 func listAllDevices(devices *device.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -853,6 +1141,17 @@ func listAllDevices(devices *device.Service) http.HandlerFunc {
 	}
 }
 
+// getDevice godoc
+// @Summary 获取设备详情或删除离线设备
+// @Tags Devices
+// @Produce json
+// @Param device_id path string true "设备 ID"
+// @Success 200 {object} device.Device
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/devices/{device_id} [get]
+// @Router /api/v1/devices/{device_id} [delete]
+// @Router /api/v1/devices/{device_id}/occupancy [get]
 func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow.Service, plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
@@ -940,6 +1239,16 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 	}
 }
 
+// locationNodesCollection godoc
+// @Summary 获取或创建位置节点
+// @Tags Location
+// @Accept json
+// @Produce json
+// @Success 200 {array} device.LocationNode
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/location-nodes [get]
+// @Router /api/v1/location-nodes [post]
 func locationNodesCollection(devices *device.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
@@ -980,6 +1289,21 @@ func locationNodesCollection(devices *device.Service) http.HandlerFunc {
 	}
 }
 
+// locationNodeSubResources godoc
+// @Summary 位置节点子资源
+// @Tags Location
+// @Accept json
+// @Produce json
+// @Param node_id path string true "节点 ID"
+// @Success 200 {object} device.LocationNode
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/location-nodes/{node_id} [get]
+// @Router /api/v1/location-nodes/{node_id} [put]
+// @Router /api/v1/location-nodes/{node_id} [delete]
+// @Router /api/v1/location-nodes/{node_id}/bind [post]
+// @Router /api/v1/location-nodes/{node_id}/unbind [post]
 func locationNodeSubResources(devices *device.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/location-nodes/")
@@ -1282,6 +1606,16 @@ func scriptManifest(scripts *script.Service) http.HandlerFunc {
 	}
 }
 
+// scriptNamesCollection godoc
+// @Summary 获取或新增脚本名称
+// @Tags Scripts
+// @Accept json
+// @Produce json
+// @Success 200 {array} script.ScriptNameRecord
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/script-names [get]
+// @Router /api/v1/script-names [post]
 func scriptNamesCollection(scripts *script.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -1298,9 +1632,7 @@ func scriptNamesCollection(scripts *script.Service) http.HandlerFunc {
 				"data":   result,
 			})
 		case http.MethodPost:
-			var req struct {
-				ScriptName string `json:"script_name"`
-			}
+			var req createScriptNameRequest
 			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 				writeError(w, http.StatusBadRequest, "invalid_json")
 				return
@@ -1325,6 +1657,58 @@ func scriptNamesCollection(scripts *script.Service) http.HandlerFunc {
 	}
 }
 
+// @Summary 向单台设备下发脚本版本
+// @Tags Scripts
+// @Accept json
+// @Produce json
+// @Param payload body deployScriptRequest true "下发请求"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/deploy [post]
+func deployScript(_ *script.Service, dispatcher *dispatch.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+
+		var req deployScriptRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		if err := dispatcher.SyncScript(ctx, req.DeviceID, req.ScriptName, req.ScriptVersion, req.Force); err != nil {
+			writeDiscoveryError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data": map[string]any{
+				"device_id":      strings.TrimSpace(req.DeviceID),
+				"script_name":    strings.TrimSpace(req.ScriptName),
+				"script_version": strings.TrimSpace(req.ScriptVersion),
+				"force":          req.Force,
+				"accepted":       true,
+			},
+		})
+	}
+}
+
+// uploadScript godoc
+// @Summary 上传脚本版本压缩包
+// @Tags Scripts
+// @Accept multipart/form-data
+// @Produce json
+// @Success 200 {object} script.UploadResult
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/upload [post]
 func uploadScript(scripts *script.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -1374,6 +1758,80 @@ func parseBooleanFormValue(value string) bool {
 	}
 }
 
+// @Summary 向全部在线设备下发脚本版本
+// @Tags Scripts
+// @Accept json
+// @Produce json
+// @Param payload body deployScriptAllRequest true "批量下发请求"
+// @Success 200 {object} deployScriptAllResponse
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/deploy-all [post]
+func deployScriptToAllOnlineDevices(deviceService *device.Service, dispatcher *dispatch.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			methodNotAllowed(w, http.MethodPost)
+			return
+		}
+
+		var req deployScriptAllRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_json")
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		devices, err := deviceService.ListOnline(ctx)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		results := make([]deployScriptItemResult, 0, len(devices))
+		successCount := 0
+
+		for _, item := range devices {
+			if err := dispatcher.SyncScript(ctx, item.DeviceID, req.ScriptName, req.ScriptVersion, req.Force); err != nil {
+				results = append(results, deployScriptItemResult{
+					DeviceID: item.DeviceID,
+					Status:   "error",
+					Message:  err.Error(),
+				})
+				continue
+			}
+
+			successCount += 1
+			results = append(results, deployScriptItemResult{
+				DeviceID: item.DeviceID,
+				Status:   "ok",
+				Message:  "sync_script_dispatched",
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data": deployScriptAllResponse{
+				TotalOnlineDevices: len(devices),
+				SuccessCount:       successCount,
+				FailureCount:       len(devices) - successCount,
+				Results:            results,
+			},
+		})
+	}
+}
+
+// listScripts godoc
+// @Summary 分页获取脚本列表
+// @Tags Scripts
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "分页大小"
+// @Success 200 {array} script.ScriptSummary
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts [get]
 func listScripts(scripts *script.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1403,6 +1861,18 @@ func listScripts(scripts *script.Service) http.HandlerFunc {
 	}
 }
 
+// softwareCollection godoc
+// @Summary 分页获取或新增软件
+// @Tags Software
+// @Accept multipart/form-data
+// @Produce json
+// @Param page query int false "页码"
+// @Param page_size query int false "分页大小"
+// @Success 200 {array} software.Package
+// @Failure 400 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software [get]
+// @Router /api/v1/software [post]
 func softwareCollection(softwareService *software.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
@@ -1465,6 +1935,13 @@ func softwareCollection(softwareService *software.Service) http.HandlerFunc {
 	}
 }
 
+// listAllSoftware godoc
+// @Summary 获取全量软件列表
+// @Tags Software
+// @Produce json
+// @Success 200 {array} software.Package
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/all [get]
 func listAllSoftware(softwareService *software.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -1488,6 +1965,20 @@ func listAllSoftware(softwareService *software.Service) http.HandlerFunc {
 	}
 }
 
+// softwareSubResources godoc
+// @Summary 软件详情、更新、删除与下载
+// @Tags Software
+// @Accept multipart/form-data
+// @Produce json
+// @Param software_id path string true "软件 ID"
+// @Success 200 {object} software.Package
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/{software_id} [get]
+// @Router /api/v1/software/{software_id} [put]
+// @Router /api/v1/software/{software_id} [delete]
+// @Router /api/v1/software/{software_id}/download [get]
 func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/software/"), "/")
@@ -1588,143 +2079,9 @@ func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 	}
 }
 
-func deleteScript(scripts *script.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodDelete {
-			methodNotAllowed(w, http.MethodDelete)
-			return
-		}
-
-		scriptName := strings.TrimPrefix(r.URL.Path, "/api/v1/scripts/")
-		scriptName = strings.Trim(scriptName, "/")
-		if scriptName == "" || strings.Contains(scriptName, "/") {
-			writeError(w, http.StatusNotFound, "script_resource_not_found")
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		if err := scripts.DeleteScript(ctx, scriptName); err != nil {
-			writeScriptError(w, err)
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"data": map[string]any{
-				"script_name": scriptName,
-				"deleted":     true,
-			},
-		})
-	}
-}
-
-func deployScript(_ *script.Service, dispatcher *dispatch.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, http.MethodPost)
-			return
-		}
-
-		var req struct {
-			DeviceID      string `json:"device_id"`
-			ScriptName    string `json:"script_name"`
-			ScriptVersion string `json:"script_version"`
-			Force         bool   `json:"force"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_json")
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-		defer cancel()
-
-		if err := dispatcher.SyncScript(ctx, req.DeviceID, req.ScriptName, req.ScriptVersion, req.Force); err != nil {
-			writeDiscoveryError(w, err)
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"data": map[string]any{
-				"device_id":      strings.TrimSpace(req.DeviceID),
-				"script_name":    strings.TrimSpace(req.ScriptName),
-				"script_version": strings.TrimSpace(req.ScriptVersion),
-				"force":          req.Force,
-				"accepted":       true,
-			},
-		})
-	}
-}
-
-func deployScriptToAllOnlineDevices(deviceService *device.Service, dispatcher *dispatch.Service) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, http.MethodPost)
-			return
-		}
-
-		var req struct {
-			ScriptName    string `json:"script_name"`
-			ScriptVersion string `json:"script_version"`
-			Force         bool   `json:"force"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid_json")
-			return
-		}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
-		defer cancel()
-
-		devices, err := deviceService.ListOnline(ctx)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		type itemResult struct {
-			DeviceID string `json:"device_id"`
-			Status   string `json:"status"`
-			Message  string `json:"message"`
-		}
-
-		results := make([]itemResult, 0, len(devices))
-		successCount := 0
-
-		for _, item := range devices {
-			if err := dispatcher.SyncScript(ctx, item.DeviceID, req.ScriptName, req.ScriptVersion, req.Force); err != nil {
-				results = append(results, itemResult{
-					DeviceID: item.DeviceID,
-					Status:   "error",
-					Message:  err.Error(),
-				})
-				continue
-			}
-
-			successCount += 1
-			results = append(results, itemResult{
-				DeviceID: item.DeviceID,
-				Status:   "ok",
-				Message:  "sync_script_dispatched",
-			})
-		}
-
-		writeJSON(w, http.StatusOK, map[string]any{
-			"status": "ok",
-			"data": map[string]any{
-				"total_online_devices": len(devices),
-				"success_count":        successCount,
-				"failure_count":        len(devices) - successCount,
-				"results":              results,
-			},
-		})
-	}
-}
-
-func getScriptVersion(scripts *script.Service) http.HandlerFunc {
+// handleScriptVersionSubResources godoc
+// @Summary 脚本版本子资源分发器
+func handleScriptVersionSubResources(scripts *script.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/scripts/")
 		trimmed = strings.Trim(trimmed, "/")
@@ -1739,30 +2096,9 @@ func getScriptVersion(scripts *script.Service) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
-			result, err := scripts.GetManifest(ctx, parts[0], parts[2])
-			if err != nil {
-				writeScriptError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handleScriptVersionGet(ctx, w, scripts, parts[0], parts[2])
 		case http.MethodDelete:
-			if err := scripts.DeleteVersion(ctx, parts[0], parts[2]); err != nil {
-				writeScriptError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"script_name":    parts[0],
-					"script_version": parts[2],
-					"deleted":        true,
-				},
-			})
+			handleScriptVersionDelete(ctx, w, scripts, parts[0], parts[2])
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
 				"status":           "method_not_allowed",
@@ -1770,6 +2106,96 @@ func getScriptVersion(scripts *script.Service) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// handleScriptDelete godoc
+// @Summary 删除脚本名称及其全部版本
+// @Tags Scripts
+// @Produce json
+// @Param script_name path string true "脚本名称"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/{script_name} [delete]
+func handleScriptDelete(scripts *script.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/scripts/")
+		scriptName := strings.Trim(trimmed, "/")
+		if scriptName == "" || strings.Contains(scriptName, "/") {
+			writeError(w, http.StatusNotFound, "script_resource_not_found")
+			return
+		}
+		if r.Method != http.MethodDelete {
+			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+				"status":           "method_not_allowed",
+				"expected_methods": []string{http.MethodDelete},
+			})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		if err := scripts.DeleteScript(ctx, scriptName); err != nil {
+			writeScriptError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data": map[string]any{
+				"script_name": scriptName,
+				"deleted":     true,
+			},
+		})
+	}
+}
+
+// handleScriptVersionGet godoc
+// @Summary 获取脚本版本详情
+// @Tags Scripts
+// @Produce json
+// @Param script_name path string true "脚本名称"
+// @Param script_version path string true "脚本版本"
+// @Success 200 {object} script.Manifest
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/{script_name}/versions/{script_version} [get]
+func handleScriptVersionGet(ctx context.Context, w http.ResponseWriter, scripts *script.Service, scriptName string, scriptVersion string) {
+	result, err := scripts.GetManifest(ctx, scriptName, scriptVersion)
+	if err != nil {
+		writeScriptError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handleScriptVersionDelete godoc
+// @Summary 删除脚本版本
+// @Tags Scripts
+// @Produce json
+// @Param script_name path string true "脚本名称"
+// @Param script_version path string true "脚本版本"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/scripts/{script_name}/versions/{script_version} [delete]
+func handleScriptVersionDelete(ctx context.Context, w http.ResponseWriter, scripts *script.Service, scriptName string, scriptVersion string) {
+	if err := scripts.DeleteVersion(ctx, scriptName, scriptVersion); err != nil {
+		writeScriptError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"script_name":    scriptName,
+			"script_version": scriptVersion,
+			"deleted":        true,
+		},
+	})
 }
 
 func scriptDownload(scripts *script.Service) http.HandlerFunc {
