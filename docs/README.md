@@ -30,8 +30,7 @@
 | `repos/mobilerpa-center/docs/web/前端开发约定.md` | 前端本地启动、环境配置和请求规则 |
 | `repos/mobilerpa-agent/docs/手机端与脚本架构.md` | Agent 与脚本架构 |
 | `repos/mobilerpa-agent/docs/手机端开发约定.md` | Agent 仓库开发规范 |
-| `repos/mobilerpa-agent/docs/手机端运行时最小契约.md` | Agent 与业务脚本运行契约 |
-| `repos/mobilerpa-agent/docs/新脚本接入模板清单.md` | 新脚本接入模板清单 |
+| `repos/mobilerpa-script/新脚本接入模板清单.md` | 新脚本接入模板清单 |
 
 ## 合并与归档方向
 
