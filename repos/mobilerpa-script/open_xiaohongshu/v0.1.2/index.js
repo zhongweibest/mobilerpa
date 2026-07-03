@@ -101,32 +101,32 @@ function launchAppByPackageWithCancel(packageName, timeoutMS, helpers, cancelMes
 }
 
 // src/index.ts
-var SCRIPT_NAME = "open_weichat";
-var SCRIPT_VERSION = "v0.1.0";
-var APP_NAME = "微信";
-var PACKAGE_NAME = "com.tencent.mm";
+var SCRIPT_NAME = "open_xiaohongshu";
+var SCRIPT_VERSION = "v0.1.2";
+var APP_NAME = "小红书";
+var PACKAGE_NAME = "com.xingin.xhs";
 var APP_START_TIMEOUT_MS = 15e3;
 function run(context, helpers) {
   const logger = helpers && helpers.logger ? helpers.logger : console;
   const reportProgress = helpers && typeof helpers.reportProgress === "function" ? helpers.reportProgress : noopReportProgress;
   const throwIfCancelled = helpers && typeof helpers.throwIfCancelled === "function" ? helpers.throwIfCancelled : noopThrowIfCancelled;
   logger.info && logger.info("开始执行脚本：" + SCRIPT_NAME + "@" + SCRIPT_VERSION);
-  reportProgress("OPEN_APP", "任务执行中：准备打开微信", "running", {
+  reportProgress("OPEN_APP", "任务执行中：准备打开小红书", "running", {
     app_name: APP_NAME,
     app_package: PACKAGE_NAME
   });
   try {
-    throwIfCancelled("任务已取消，停止打开微信");
-    launchAppByPackageWithCancel(PACKAGE_NAME, APP_START_TIMEOUT_MS, helpers, "任务已取消，停止等待微信启动");
-    logger.info && logger.info("脚本执行完成：微信已启动");
-    reportProgress("OPEN_APP", "任务执行中：微信已成功启动", "success", {
+    throwIfCancelled("任务已取消，停止打开小红书");
+    launchAppByPackageWithCancel(PACKAGE_NAME, APP_START_TIMEOUT_MS, helpers, "任务已取消，停止等待小红书启动");
+    logger.info && logger.info("脚本执行完成：小红书已启动");
+    reportProgress("OPEN_APP", "任务执行中：小红书已成功启动", "success", {
       app_name: APP_NAME,
       app_package: PACKAGE_NAME
     });
     return {
       status: "success",
       result_code: "OK",
-      result_message: "微信已启动",
+      result_message: "小红书已启动",
       step_name: "OPEN_APP",
       extra: buildOpenAppExtra(context, {
         scriptName: SCRIPT_NAME,
@@ -139,7 +139,7 @@ function run(context, helpers) {
   } catch (error) {
     const message = formatErrorMessage(error);
     logger.error && logger.error("脚本执行失败：" + message);
-    reportProgress("OPEN_APP", "任务执行中：微信启动失败", "failed", {
+    reportProgress("OPEN_APP", "任务执行中：小红书启动失败", "failed", {
       app_name: APP_NAME,
       app_package: PACKAGE_NAME,
       error_message: message

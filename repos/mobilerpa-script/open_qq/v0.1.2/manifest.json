@@ -1,0 +1,14 @@
+{
+  "entry_file": "index.js",
+  "files": [
+    {
+      "relative_path": "index.js"
+    },
+    {
+      "relative_path": "index_debug.js"
+    },
+    {
+      "relative_path": "manifest.json"
+    }
+  ]
+}

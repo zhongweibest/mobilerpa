@@ -102,7 +102,7 @@ function launchAppByPackageWithCancel(packageName, timeoutMS, helpers, cancelMes
 
 // src/index.ts
 var SCRIPT_NAME = "open_weichat";
-var SCRIPT_VERSION = "v0.1.0";
+var SCRIPT_VERSION = "v0.1.2";
 var APP_NAME = "微信";
 var PACKAGE_NAME = "com.tencent.mm";
 var APP_START_TIMEOUT_MS = 15e3;

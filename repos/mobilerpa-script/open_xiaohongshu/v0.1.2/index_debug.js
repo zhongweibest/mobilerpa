@@ -39,9 +39,9 @@ function writeLog(message) {
 
 function buildDebugContext() {
     return {
-        task_id: "debug_open_qq_v0_1_0",
-        script_name: "open_qq",
-        script_version: "v0.1.0",
+        task_id: "debug_open_xiaohongshu_v0_1_2",
+        script_name: "open_xiaohongshu",
+        script_version: "v0.1.2",
         priority: 3,
         params: {
   "debug": true
@@ -70,7 +70,7 @@ function main() {
     var context = buildDebugContext();
     var result = null;
 
-    logger.info("开始直接调试 open_qq@v0.1.0");
+    logger.info("开始直接调试 open_xiaohongshu@v0.1.2");
     logger.info("模拟任务上下文：" + JSON.stringify(context));
 
     try {

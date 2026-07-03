@@ -2,18 +2,6 @@
 
 var script = require("./index");
 
-/**
- * 当前文件用于在 AutoJs6 中直接调试 `shoppe_sync@v0.1.2`。
- *
- * 它会模拟 Agent 的 `task_runner` 调用方式，不依赖中心服务、WebSocket 或任务下发。
- * 调试时请在 AutoJs6 中直接运行本文件，而不是运行 `index.js`。
- */
-
-/**
- * 创建调试日志对象。
- *
- * @returns {{info: Function, warn: Function, error: Function}} 日志对象。
- */
 function createDebugLogger() {
     return {
         info: function (message) {
@@ -28,47 +16,27 @@ function createDebugLogger() {
     };
 }
 
-/**
- * 创建调试进度上报函数。
- *
- * 调试模式下不走中心服务，只把进度打印到控制台。
- *
- * @param {{info: Function}} logger 调试日志对象。
- * @returns {Function} 进度上报函数。
- */
 function createDebugProgressReporter(logger) {
     return function reportProgress(stepName, message, status, extra) {
-        var payload = {
+        logger.info("[PROGRESS] " + JSON.stringify({
             step_name: String(stepName || ""),
             message: String(message || ""),
             status: String(status || "running"),
             extra: extra || {}
-        };
-        logger.info("[PROGRESS] " + JSON.stringify(payload));
+        }));
     };
 }
 
-/**
- * 写入调试日志。
- *
- * @param {string} message 日志内容。
- */
 function writeLog(message) {
     if (typeof log === "function") {
         log(message);
         return;
     }
-
     if (typeof console !== "undefined" && console.log) {
         console.log(message);
     }
 }
 
-/**
- * 构造模拟任务上下文。
- *
- * @returns {Object} 模拟任务上下文。
- */
 function buildDebugContext() {
     return {
         task_id: "debug_shoppe_sync_v0_1_2",
@@ -76,39 +44,27 @@ function buildDebugContext() {
         script_version: "v0.1.2",
         priority: 3,
         params: {
-            debug: true
-        },
+  "debug": true
+},
         device_id: "debug_device",
         agent_uuid: "debug_agent",
         center_base_url: ""
     };
 }
 
-/**
- * 提取错误文本。
- *
- * @param {*} error 原始异常对象。
- * @returns {string} 错误文本。
- */
 function formatErrorMessage(error) {
     if (!error) {
         return "未知错误";
     }
-
     if (error.stack) {
         return String(error.stack);
     }
-
     if (error.message) {
         return String(error.message);
     }
-
     return String(error);
 }
 
-/**
- * 执行调试入口。
- */
 function main() {
     var logger = createDebugLogger();
     var context = buildDebugContext();
@@ -125,11 +81,14 @@ function main() {
         result = script.run(context, {
             logger: logger,
             runtime: {},
-            reportProgress: createDebugProgressReporter(logger)
+            reportProgress: createDebugProgressReporter(logger),
+            isCancelled: function () {
+                return false;
+            },
+            throwIfCancelled: function () {}
         });
 
         logger.info("调试执行结果：" + JSON.stringify(result));
-
         if (typeof toast === "function") {
             toast("调试完成：" + result.status + " / " + result.result_code);
         }
