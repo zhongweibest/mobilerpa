@@ -694,19 +694,6 @@ func handlePlanRunRowDelete(ctx context.Context, w http.ResponseWriter, plans *p
 	})
 }
 
-// workflowSubResources godoc
-// @Summary 工作流定义子资源
-// @Tags Workflows
-// @Accept json
-// @Produce json
-// @Param workflow_def_id path string true "工作流定义 ID"
-// @Success 200 {object} workflow.Definition
-// @Failure 400 {object} map[string]any
-// @Failure 404 {object} map[string]any
-// @Failure 500 {object} map[string]any
-// @Router /api/v1/workflows/{workflow_def_id} [get]
-// @Router /api/v1/workflows/{workflow_def_id} [put]
-// @Router /api/v1/workflows/{workflow_def_id} [delete]
 func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/workflows/")
@@ -722,53 +709,95 @@ func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 		defer cancel()
 
 		if len(parts) == 1 && r.Method == http.MethodGet {
-			result, err := workflows.GetDefinition(ctx, workflowDefID)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handleWorkflowDefinitionGet(ctx, w, workflows, workflowDefID)
 			return
 		}
 
 		if len(parts) == 1 && r.Method == http.MethodPut {
-			var req workflow.UpdateDefinitionRequest
-			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_json")
-				return
-			}
-			result, err := workflows.UpdateDefinition(ctx, workflowDefID, req)
-			if err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handleWorkflowDefinitionUpdate(ctx, w, r, workflows, workflowDefID)
 			return
 		}
 
 		if len(parts) == 1 && r.Method == http.MethodDelete {
-			if err := workflows.DeleteDefinition(ctx, workflowDefID); err != nil {
-				writeWorkflowError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"workflow_def_id": workflowDefID,
-					"deleted":         true,
-				},
-			})
+			handleWorkflowDefinitionDelete(ctx, w, workflows, workflowDefID)
 			return
 		}
 
 		writeError(w, http.StatusNotFound, "workflow_resource_not_found")
 	}
+}
+
+// handleWorkflowDefinitionGet godoc
+// @Summary 获取工作流定义详情
+// @Tags Workflows
+// @Produce json
+// @Param workflow_def_id path string true "工作流定义 ID"
+// @Success 200 {object} workflow.Definition
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/workflows/{workflow_def_id} [get]
+func handleWorkflowDefinitionGet(ctx context.Context, w http.ResponseWriter, workflows *workflow.Service, workflowDefID string) {
+	result, err := workflows.GetDefinition(ctx, workflowDefID)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handleWorkflowDefinitionUpdate godoc
+// @Summary 更新工作流定义
+// @Tags Workflows
+// @Accept json
+// @Produce json
+// @Param workflow_def_id path string true "工作流定义 ID"
+// @Param body body workflow.UpdateDefinitionRequest true "工作流定义更新请求"
+// @Success 200 {object} workflow.Definition
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/workflows/{workflow_def_id} [put]
+func handleWorkflowDefinitionUpdate(ctx context.Context, w http.ResponseWriter, r *http.Request, workflows *workflow.Service, workflowDefID string) {
+	var req workflow.UpdateDefinitionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_json")
+		return
+	}
+	result, err := workflows.UpdateDefinition(ctx, workflowDefID, req)
+	if err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handleWorkflowDefinitionDelete godoc
+// @Summary 删除工作流定义
+// @Tags Workflows
+// @Produce json
+// @Param workflow_def_id path string true "工作流定义 ID"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/workflows/{workflow_def_id} [delete]
+func handleWorkflowDefinitionDelete(ctx context.Context, w http.ResponseWriter, workflows *workflow.Service, workflowDefID string) {
+	if err := workflows.DeleteDefinition(ctx, workflowDefID); err != nil {
+		writeWorkflowError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"workflow_def_id": workflowDefID,
+			"deleted":         true,
+		},
+	})
 }
 
 func scriptsSubResources(scripts *script.Service) http.HandlerFunc {
@@ -1965,20 +1994,6 @@ func listAllSoftware(softwareService *software.Service) http.HandlerFunc {
 	}
 }
 
-// softwareSubResources godoc
-// @Summary 软件详情、更新、删除与下载
-// @Tags Software
-// @Accept multipart/form-data
-// @Produce json
-// @Param software_id path string true "软件 ID"
-// @Success 200 {object} software.Package
-// @Failure 400 {object} map[string]any
-// @Failure 404 {object} map[string]any
-// @Failure 500 {object} map[string]any
-// @Router /api/v1/software/{software_id} [get]
-// @Router /api/v1/software/{software_id} [put]
-// @Router /api/v1/software/{software_id} [delete]
-// @Router /api/v1/software/{software_id}/download [get]
 func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/software/"), "/")
@@ -1995,60 +2010,22 @@ func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 
 		switch r.Method {
 		case http.MethodGet:
-			if !isDownload {
-				writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
-					"status":           "method_not_allowed",
-					"expected_methods": []string{http.MethodGet, http.MethodPut, http.MethodDelete},
-				})
+			if isDownload {
+				ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+				defer cancel()
+				handleSoftwareDownload(ctx, w, r, softwareService, softwareID)
 				return
 			}
-
 			ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 			defer cancel()
-
-			result, err := softwareService.Get(ctx, softwareID)
-			if err != nil {
-				writeSoftwareError(w, err)
-				return
-			}
-
-			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", result.PackageFileName))
-			w.Header().Set("X-Software-ID", result.SoftwareID)
-			w.Header().Set("X-Software-Name", result.SoftwareName)
-			http.ServeFile(w, r, result.PackageStoragePath)
+			handleSoftwareGet(ctx, w, softwareService, softwareID)
 
 		case http.MethodPut:
 			if isDownload {
 				methodNotAllowed(w, http.MethodGet)
 				return
 			}
-			if err := r.ParseMultipartForm(128 << 20); err != nil {
-				writeError(w, http.StatusBadRequest, "invalid_multipart_form")
-				return
-			}
-
-			var fileHeader *multipart.FileHeader
-			if r.MultipartForm != nil && len(r.MultipartForm.File["file"]) > 0 {
-				fileHeader = r.MultipartForm.File["file"][0]
-			}
-
-			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-			defer cancel()
-
-			result, err := softwareService.Update(ctx, softwareID, software.UpdateRequest{
-				SoftwareName: r.FormValue("software_name"),
-				Description:  r.FormValue("description"),
-				FileHeader:   fileHeader,
-			})
-			if err != nil {
-				writeSoftwareError(w, err)
-				return
-			}
-
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data":   result,
-			})
+			handleSoftwareUpdate(w, r, softwareService, softwareID)
 
 		case http.MethodDelete:
 			if isDownload {
@@ -2057,18 +2034,7 @@ func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 			}
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
-
-			if err := softwareService.Delete(ctx, softwareID); err != nil {
-				writeSoftwareError(w, err)
-				return
-			}
-			writeJSON(w, http.StatusOK, map[string]any{
-				"status": "ok",
-				"data": map[string]any{
-					"software_id": softwareID,
-					"deleted":     true,
-				},
-			})
+			handleSoftwareDelete(ctx, w, softwareService, softwareID)
 
 		default:
 			writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
@@ -2077,6 +2043,116 @@ func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 			})
 		}
 	}
+}
+
+// handleSoftwareGet godoc
+// @Summary 获取软件详情
+// @Tags Software
+// @Produce json
+// @Param software_id path string true "软件 ID"
+// @Success 200 {object} software.Package
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/{software_id} [get]
+func handleSoftwareGet(ctx context.Context, w http.ResponseWriter, softwareService *software.Service, softwareID string) {
+	result, err := softwareService.Get(ctx, softwareID)
+	if err != nil {
+		writeSoftwareError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handleSoftwareUpdate godoc
+// @Summary 更新软件信息
+// @Tags Software
+// @Accept multipart/form-data
+// @Produce json
+// @Param software_id path string true "软件 ID"
+// @Param software_name formData string false "软件名称"
+// @Param description formData string false "软件描述"
+// @Param file formData file false "软件包文件"
+// @Success 200 {object} software.Package
+// @Failure 400 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/{software_id} [put]
+func handleSoftwareUpdate(w http.ResponseWriter, r *http.Request, softwareService *software.Service, softwareID string) {
+	if err := r.ParseMultipartForm(128 << 20); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_multipart_form")
+		return
+	}
+
+	var fileHeader *multipart.FileHeader
+	if r.MultipartForm != nil && len(r.MultipartForm.File["file"]) > 0 {
+		fileHeader = r.MultipartForm.File["file"][0]
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	result, err := softwareService.Update(ctx, softwareID, software.UpdateRequest{
+		SoftwareName: r.FormValue("software_name"),
+		Description:  r.FormValue("description"),
+		FileHeader:   fileHeader,
+	})
+	if err != nil {
+		writeSoftwareError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data":   result,
+	})
+}
+
+// handleSoftwareDelete godoc
+// @Summary 删除软件
+// @Tags Software
+// @Produce json
+// @Param software_id path string true "软件 ID"
+// @Success 200 {object} map[string]any
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/{software_id} [delete]
+func handleSoftwareDelete(ctx context.Context, w http.ResponseWriter, softwareService *software.Service, softwareID string) {
+	if err := softwareService.Delete(ctx, softwareID); err != nil {
+		writeSoftwareError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"status": "ok",
+		"data": map[string]any{
+			"software_id": softwareID,
+			"deleted":     true,
+		},
+	})
+}
+
+// handleSoftwareDownload godoc
+// @Summary 下载软件包
+// @Tags Software
+// @Produce application/octet-stream
+// @Param software_id path string true "软件 ID"
+// @Success 200 {file} binary
+// @Failure 404 {object} map[string]any
+// @Failure 500 {object} map[string]any
+// @Router /api/v1/software/{software_id}/download [get]
+func handleSoftwareDownload(ctx context.Context, w http.ResponseWriter, r *http.Request, softwareService *software.Service, softwareID string) {
+	result, err := softwareService.Get(ctx, softwareID)
+	if err != nil {
+		writeSoftwareError(w, err)
+		return
+	}
+
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", result.PackageFileName))
+	w.Header().Set("X-Software-ID", result.SoftwareID)
+	w.Header().Set("X-Software-Name", result.SoftwareName)
+	http.ServeFile(w, r, result.PackageStoragePath)
 }
 
 // handleScriptVersionSubResources godoc

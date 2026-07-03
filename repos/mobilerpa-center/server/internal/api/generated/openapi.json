@@ -795,6 +795,35 @@
           }
         },
         "type": "object"
+      },
+      "workflow.UpdateDefinitionRequest": {
+        "properties": {
+          "builder_segments_json": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/workflow.Edge"
+            },
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/workflow.Node"
+            },
+            "type": "array"
+          },
+          "status": {
+            "type": "string"
+          },
+          "workflow_name": {
+            "type": "string"
+          }
+        },
+        "type": "object"
       }
     }
   },
@@ -3245,22 +3274,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/software.Package"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
                   "additionalProperties": true,
                   "type": "object"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "OK"
           },
           "404": {
             "content": {
@@ -3285,7 +3304,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "软件详情、更新、删除与下载",
+        "summary": "删除软件",
         "tags": [
           "Software"
         ]
@@ -3313,17 +3332,6 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3347,7 +3355,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "软件详情、更新、删除与下载",
+        "summary": "获取软件详情",
         "tags": [
           "Software"
         ]
@@ -3364,6 +3372,33 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "properties": {
+                  "description": {
+                    "description": "软件描述",
+                    "type": "string",
+                    "x-formData-name": "description"
+                  },
+                  "file": {
+                    "description": "软件包文件",
+                    "format": "binary",
+                    "type": "string",
+                    "x-formData-name": "file"
+                  },
+                  "software_name": {
+                    "description": "软件名称",
+                    "type": "string",
+                    "x-formData-name": "software_name"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -3409,7 +3444,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "软件详情、更新、删除与下载",
+        "summary": "更新软件信息",
         "tags": [
           "Software"
         ]
@@ -3431,28 +3466,18 @@
         "responses": {
           "200": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
-                  "$ref": "#/components/schemas/software.Package"
+                  "format": "binary",
+                  "type": "string"
                 }
               }
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "404": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
                   "additionalProperties": true,
                   "type": "object"
@@ -3463,7 +3488,7 @@
           },
           "500": {
             "content": {
-              "application/json": {
+              "application/octet-stream": {
                 "schema": {
                   "additionalProperties": true,
                   "type": "object"
@@ -3473,7 +3498,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "软件详情、更新、删除与下载",
+        "summary": "下载软件包",
         "tags": [
           "Software"
         ]
@@ -3615,22 +3640,12 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/workflow.Definition"
-                }
-              }
-            },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
                   "additionalProperties": true,
                   "type": "object"
                 }
               }
             },
-            "description": "Bad Request"
+            "description": "OK"
           },
           "404": {
             "content": {
@@ -3655,7 +3670,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "工作流定义子资源",
+        "summary": "删除工作流定义",
         "tags": [
           "Workflows"
         ]
@@ -3683,17 +3698,6 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "404": {
             "content": {
               "application/json": {
@@ -3717,7 +3721,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "工作流定义子资源",
+        "summary": "获取工作流定义详情",
         "tags": [
           "Workflows"
         ]
@@ -3734,6 +3738,18 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/workflow.UpdateDefinitionRequest"
+              }
+            }
+          },
+          "description": "工作流定义更新请求",
+          "required": true,
+          "x-originalParamName": "body"
+        },
         "responses": {
           "200": {
             "content": {
@@ -3779,7 +3795,7 @@
             "description": "Internal Server Error"
           }
         },
-        "summary": "工作流定义子资源",
+        "summary": "更新工作流定义",
         "tags": [
           "Workflows"
         ]
