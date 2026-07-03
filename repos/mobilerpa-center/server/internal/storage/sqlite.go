@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS devices (
     brand TEXT NOT NULL DEFAULT '',
     model TEXT NOT NULL DEFAULT '',
     android_id TEXT NOT NULL DEFAULT '',
-    adb_serial TEXT NOT NULL DEFAULT '',
     device_link_sn TEXT NOT NULL DEFAULT '',
     current_task_id INTEGER NOT NULL DEFAULT 0,
     current_step TEXT NOT NULL DEFAULT '',
@@ -413,6 +412,9 @@ GROUP BY script_name`); err != nil {
 	if err := ensureColumn(ctx, db, "devices", "device_link_sn", "ALTER TABLE devices ADD COLUMN device_link_sn TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
+	if err := ensureColumnAbsent(ctx, db, "devices", "adb_serial"); err != nil {
+		return err
+	}
 	if _, err := db.ExecContext(ctx, `
 UPDATE devices
 SET
@@ -445,6 +447,20 @@ func ensureColumn(ctx context.Context, db *sql.DB, table string, column string, 
 	}
 	if _, err := db.ExecContext(ctx, alterSQL); err != nil {
 		return fmt.Errorf("add column %s.%s: %w", table, column, err)
+	}
+	return nil
+}
+
+func ensureColumnAbsent(ctx context.Context, db *sql.DB, table string, column string) error {
+	exists, err := columnExists(ctx, db, table, column)
+	if err != nil {
+		return fmt.Errorf("check column %s.%s: %w", table, column, err)
+	}
+	if !exists {
+		return nil
+	}
+	if _, err := db.ExecContext(ctx, "ALTER TABLE "+table+" DROP COLUMN "+column); err != nil {
+		return fmt.Errorf("drop column %s.%s: %w", table, column, err)
 	}
 	return nil
 }

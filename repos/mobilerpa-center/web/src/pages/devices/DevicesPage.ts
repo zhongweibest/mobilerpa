@@ -535,7 +535,6 @@ export const DevicesPage = defineComponent({
                       h(ElDescriptionsItem, { label: "品牌" }, () => selectedDevice.value?.brand || "暂无"),
                       h(ElDescriptionsItem, { label: "型号" }, () => selectedDevice.value?.model || "暂无"),
                       h(ElDescriptionsItem, { label: "Android ID" }, () => selectedDevice.value?.android_id || "暂无"),
-                      h(ElDescriptionsItem, { label: "ADB Serial" }, () => selectedDevice.value?.adb_serial || "暂无"),
                       h(ElDescriptionsItem, { label: "Device Link SN" }, () => selectedDevice.value?.device_link_sn || "暂无"),
                       h(ElDescriptionsItem, { label: "最近心跳" }, () => formatDateTime(selectedDevice.value?.last_heartbeat_at)),
                       h(ElDescriptionsItem, { label: "当前任务" }, () => selectedDevice.value?.current_task_id || "暂无"),

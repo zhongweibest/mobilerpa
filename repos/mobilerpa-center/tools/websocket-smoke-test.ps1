@@ -172,7 +172,6 @@ try {
         brand       = "Google"
         model       = "Pixel WS"
         android_id  = "android-ws-test-001"
-        adb_serial  = "adb-ws-test-001"
     }
     $deviceID = $register.data.device_id
 

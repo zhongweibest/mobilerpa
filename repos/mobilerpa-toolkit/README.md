@@ -57,7 +57,7 @@ D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe push-center `
 
 常用参数：
 
-- `--device`：ADB 序列号或无线调试地址。
+- `--device`：ADB 连接目标，例如 USB 连接设备标识或无线调试地址。
 - `--center-base-url`：写入设备 `bootstrap.json` 的中心服务地址。
 - `--agent-root`：Agent 根目录，内部至少需包含 `agent.js`。工具会递归推送根目录下实际存在的文件。
 - `--adb-path`：可选，默认为 `adb`。

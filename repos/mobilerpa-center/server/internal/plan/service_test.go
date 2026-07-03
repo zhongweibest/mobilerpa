@@ -56,10 +56,10 @@ func seedBoundRowDevice(t *testing.T, ctx context.Context, db *sql.DB, deviceSta
 	deviceResult, err := db.ExecContext(ctx, `
 INSERT INTO devices (
     agent_uuid, device_name, physical_slot, group_name, slot_zone, slot_row, slot_position, status, bind_status, ip,
-    brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+    brand, model, android_id, current_task_id, current_step, last_error,
     accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
     last_heartbeat_at, created_at, updated_at
-) VALUES (?, ?, '', '', '', '', '', ?, 'bound', '', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
+) VALUES (?, ?, '', '', '', '', '', ?, 'bound', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
 		"agent-"+strconv.FormatInt(time.Now().UnixNano(), 10),
 		"test-device",
 		deviceStatus,
@@ -1133,10 +1133,10 @@ func TestAddRowsToOnceRunMarksOfflineNewTargetsFailed(t *testing.T) {
 	offlineDeviceResult, err := db.ExecContext(ctx, `
 INSERT INTO devices (
     agent_uuid, device_name, physical_slot, group_name, slot_zone, slot_row, slot_position, status, bind_status, ip,
-    brand, model, android_id, adb_serial, current_task_id, current_step, last_error,
+    brand, model, android_id, current_task_id, current_step, last_error,
     accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
     last_heartbeat_at, created_at, updated_at
-) VALUES (?, ?, '', '', '', '', '', 'offline', 'bound', '', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
+) VALUES (?, ?, '', '', '', '', '', 'offline', 'bound', '', '', '', '', 0, '', '', 'enabled', 'enabled', 'enabled', ?, '', ?, ?, ?)`,
 		"agent-"+strconv.FormatInt(time.Now().UnixNano(), 10),
 		"test-device-offline",
 		now,

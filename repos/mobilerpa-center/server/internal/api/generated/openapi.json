@@ -86,10 +86,6 @@
             "description": "AccessibilityStatus 是无障碍状态。",
             "type": "string"
           },
-          "adb_serial": {
-            "description": "ADBSerial 是设备最近一次上报的 ADB 序列号。",
-            "type": "string"
-          },
           "agent_uuid": {
             "description": "AgentUUID 是设备端生成并持久保存的标识。",
             "type": "string"

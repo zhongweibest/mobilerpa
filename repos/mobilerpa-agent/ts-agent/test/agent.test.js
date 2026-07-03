@@ -25,8 +25,7 @@ test("buildRegisterPayload 会写入 device_link_sn", function () {
     device_name: "Pixel",
     brand: "Google",
     model: "Pixel 8",
-    android_id: "android-id-001",
-    adb_serial: "serial-a"
+    android_id: "android-id-001"
   }, "device-link-001");
 
   assert.equal(payload.agent_uuid, "agent_xxx");

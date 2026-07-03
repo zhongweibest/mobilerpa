@@ -713,8 +713,7 @@ function buildStableFingerprint(deviceInfo) {
         device_name: "",
         brand: "",
         model: "",
-        android_id: "",
-        adb_serial: ""
+        android_id: ""
     };
     return "android_id=" + String(info.android_id || "");
 }
@@ -750,9 +749,6 @@ function collectAutoJsDeviceInfo() {
         }, "unknown"),
         android_id: safeString(function getAndroidID() {
             return typeof device.getAndroidId === "function" ? device.getAndroidId() : "";
-        }, ""),
-        adb_serial: safeString(function getADBSerial() {
-            return device.serial || "";
         }, "")
     };
 }
@@ -762,8 +758,7 @@ function collectNodeDeviceInfo() {
         device_name: os.hostname() || "Node Agent",
         brand: "node",
         model: os.platform() + "-" + os.arch(),
-        android_id: "",
-        adb_serial: ""
+        android_id: ""
     };
 }
 function collectDeviceInfo(overrides) {
@@ -775,8 +770,7 @@ function collectDeviceInfo(overrides) {
         device_name: custom.device_name || detected.device_name,
         brand: custom.brand || detected.brand,
         model: custom.model || detected.model,
-        android_id: custom.android_id || detected.android_id,
-        adb_serial: custom.adb_serial || detected.adb_serial
+        android_id: custom.android_id || detected.android_id
     };
 }
 function fileExists(filePath) {
@@ -2929,7 +2923,6 @@ function buildRegisterPayload(agentUUID, deviceInfo, deviceLinkSN) {
         brand: deviceInfo.brand,
         model: deviceInfo.model,
         android_id: deviceInfo.android_id,
-        adb_serial: deviceInfo.adb_serial,
         device_link_sn: String(deviceLinkSN || "")
     };
 }

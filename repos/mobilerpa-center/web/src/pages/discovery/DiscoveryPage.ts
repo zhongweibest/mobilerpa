@@ -487,7 +487,6 @@ export const DiscoveryPage = defineComponent({
                         h(ElDescriptionsItem, { label: "品牌" }, () => selectedDeviceDetail.value?.brand || "暂无"),
                         h(ElDescriptionsItem, { label: "型号" }, () => selectedDeviceDetail.value?.model || "暂无"),
                         h(ElDescriptionsItem, { label: "Android ID" }, () => selectedDeviceDetail.value?.android_id || "暂无"),
-                        h(ElDescriptionsItem, { label: "ADB Serial" }, () => selectedDeviceDetail.value?.adb_serial || "暂无"),
                         h(ElDescriptionsItem, { label: "Device Link SN" }, () => selectedDeviceDetail.value?.device_link_sn || "暂无"),
                         h(ElDescriptionsItem, { label: "最近心跳" }, () => selectedDeviceDetail.value?.last_heartbeat_at || "暂无"),
                         h(ElDescriptionsItem, { label: "当前任务" }, () => selectedDeviceDetail.value?.current_task_id || "暂无"),

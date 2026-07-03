@@ -19,7 +19,6 @@ export interface DeviceRecord {
   brand: string;
   model: string;
   android_id: string;
-  adb_serial: string;
   device_link_sn: string;
   current_task_id: string;
   current_step: string;

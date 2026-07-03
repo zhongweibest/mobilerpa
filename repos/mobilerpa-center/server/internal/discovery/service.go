@@ -957,25 +957,22 @@ func (s *Service) attachDeviceIDs(ctx context.Context, devices []Device) error {
 	}
 
 	rows, err := s.db.QueryContext(ctx, `
-SELECT id, device_link_sn, adb_serial
+SELECT id, device_link_sn
 FROM devices
-WHERE device_link_sn != '' OR adb_serial != ''`)
+WHERE device_link_sn != ''`)
 	if err != nil {
-		return fmt.Errorf("query device adb serials: %w", err)
+		return fmt.Errorf("query device link identities: %w", err)
 	}
 	defer rows.Close()
 
 	deviceByLinkSN := make(map[string]string)
-	deviceByADBSerial := make(map[string]string)
 	for rows.Next() {
 		var deviceID string
 		var deviceLinkSN string
-		var adbSerial string
-		if err := rows.Scan(&deviceID, &deviceLinkSN, &adbSerial); err != nil {
+		if err := rows.Scan(&deviceID, &deviceLinkSN); err != nil {
 			return fmt.Errorf("scan device link identity: %w", err)
 		}
 		deviceLinkSN = strings.TrimSpace(deviceLinkSN)
-		adbSerial = strings.TrimSpace(adbSerial)
 		deviceID = strings.TrimSpace(deviceID)
 		if deviceID == "" {
 			continue
@@ -983,12 +980,9 @@ WHERE device_link_sn != '' OR adb_serial != ''`)
 		if deviceLinkSN != "" {
 			deviceByLinkSN[deviceLinkSN] = deviceID
 		}
-		if adbSerial != "" {
-			deviceByADBSerial[adbSerial] = deviceID
-		}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("iterate device adb serials: %w", err)
+		return fmt.Errorf("iterate device link identities: %w", err)
 	}
 
 	for index := range devices {
@@ -1001,11 +995,6 @@ WHERE device_link_sn != '' OR adb_serial != ''`)
 		if deviceID, exists := deviceByLinkSN[adbEndpoint]; exists {
 			devices[index].DeviceID = deviceID
 			continue
-		}
-		if adbEndpoint != "" {
-			if deviceID, exists := deviceByADBSerial[adbEndpoint]; exists {
-				devices[index].DeviceID = deviceID
-			}
 		}
 	}
 	return nil

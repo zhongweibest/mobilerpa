@@ -4,7 +4,6 @@ export interface RegisterPayload {
   brand: string;
   model: string;
   android_id: string;
-  adb_serial: string;
   device_link_sn: string;
 }
 

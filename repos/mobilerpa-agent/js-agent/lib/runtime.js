@@ -12,7 +12,6 @@
  * @property {string} brand 设备品牌。
  * @property {string} model 设备型号。
  * @property {string} android_id Android 标识。
- * @property {string} adb_serial ADB 序列号。
  */
 
 /**
@@ -159,14 +158,7 @@ function hashText(text) {
  */
 function buildStableFingerprint(deviceInfo) {
     var info = deviceInfo || {};
-    var parts = [
-        "android_id=" + String(info.android_id || ""),
-        "adb_serial=" + String(info.adb_serial || ""),
-        "brand=" + String(info.brand || ""),
-        "model=" + String(info.model || ""),
-        "device_name=" + String(info.device_name || "")
-    ];
-    return parts.join("|");
+    return "android_id=" + String(info.android_id || "");
 }
 
 /**
@@ -226,9 +218,6 @@ function collectAutoJsDeviceInfo() {
         }, "unknown"),
         android_id: safeString(function () {
             return typeof device.getAndroidId === "function" ? device.getAndroidId() : "";
-        }, ""),
-        adb_serial: safeString(function () {
-            return device.serial || "";
         }, "")
     };
 }
@@ -244,8 +233,7 @@ function collectNodeDeviceInfo() {
         device_name: os.hostname() || "Node Agent",
         brand: "node",
         model: os.platform() + "-" + os.arch(),
-        android_id: "",
-        adb_serial: ""
+        android_id: ""
     };
 }
 
@@ -265,8 +253,7 @@ function collectDeviceInfo(overrides) {
         device_name: custom.device_name || detected.device_name,
         brand: custom.brand || detected.brand,
         model: custom.model || detected.model,
-        android_id: custom.android_id || detected.android_id,
-        adb_serial: custom.adb_serial || detected.adb_serial
+        android_id: custom.android_id || detected.android_id
     };
 }
 

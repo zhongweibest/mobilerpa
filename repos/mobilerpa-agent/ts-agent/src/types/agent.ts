@@ -3,7 +3,6 @@ export interface DeviceInfo {
   brand: string;
   model: string;
   android_id: string;
-  adb_serial: string;
 }
 
 export interface WebSocketConfig {

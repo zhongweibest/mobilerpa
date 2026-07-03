@@ -93,7 +93,6 @@ try {
         brand       = "Google"
         model       = "Pixel 8"
         android_id  = "android-test-001"
-        adb_serial  = "adb-test-001"
     }
 
     $devices = Invoke-JsonGet -Uri "$baseUrl/api/v1/devices"

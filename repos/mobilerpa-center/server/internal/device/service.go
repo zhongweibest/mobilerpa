@@ -66,8 +66,6 @@ type RegisterRequest struct {
 	Model string `json:"model"`
 	// AndroidID 是设备端上报的 Android 标识，主要用于排障参考。
 	AndroidID string `json:"android_id"`
-	// ADBSerial 是设备端可获取时上报的 ADB 序列号。
-	ADBSerial string `json:"adb_serial"`
 	// DeviceLinkSN 是设备发现阶段下发的稳定链路标识，通常为 mDNS 服务名。
 	DeviceLinkSN string `json:"device_link_sn"`
 }
@@ -108,8 +106,6 @@ type Device struct {
 	Model string `json:"model"`
 	// AndroidID 是设备最近一次上报的 Android 标识。
 	AndroidID string `json:"android_id"`
-	// ADBSerial 是设备最近一次上报的 ADB 序列号。
-	ADBSerial string `json:"adb_serial"`
 	// DeviceLinkSN 是设备发现阶段下发并由 Agent 回传的链路标识。
 	DeviceLinkSN string `json:"device_link_sn"`
 	// CurrentTaskID 是当前关联到该设备的任务标识。
@@ -261,7 +257,7 @@ func (s *Service) List(ctx context.Context, filter DeviceListFilter) ([]Device, 
 	query := `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
        slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
+       brand, model, android_id, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -293,7 +289,7 @@ WHERE 1 = 1`
 		if err := rows.Scan(
 			&d.DeviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
 			&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
-			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
+			&d.Brand, &d.Model, &d.AndroidID, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
 			&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 			&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
@@ -310,7 +306,7 @@ func (s *Service) ListOnline(ctx context.Context) ([]Device, error) {
 	rows, err := s.db.QueryContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
        slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
+       brand, model, android_id, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -327,7 +323,7 @@ ORDER BY created_at ASC`)
 		if err := rows.Scan(
 			&d.DeviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
 			&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
-			&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
+			&d.Brand, &d.Model, &d.AndroidID, &d.DeviceLinkSN, &d.CurrentTaskID, &d.CurrentStep, &d.LastError,
 			&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 			&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 		); err != nil {
@@ -349,7 +345,7 @@ func (s *Service) GetByID(ctx context.Context, deviceID string) (Device, error) 
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
        slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
+       brand, model, android_id, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -1002,7 +998,7 @@ func (s *Service) findByAgentUUID(ctx context.Context, agentUUID string) (*Devic
 	row := s.db.QueryRowContext(ctx, `
 SELECT id, agent_uuid, device_name, physical_slot, group_name, status, bind_status, ip,
        slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position,
-       brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
+       brand, model, android_id, device_link_sn, current_task_id, current_step, last_error,
        accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
        last_heartbeat_at, created_at, updated_at
 FROM devices
@@ -1035,7 +1031,7 @@ func scanDevice(scanner deviceScanner) (Device, error) {
 	err := scanner.Scan(
 		&deviceID, &d.AgentUUID, &d.DeviceName, &d.PhysicalSlot, &d.GroupName, &d.Status, &d.BindStatus, &d.IP,
 		&d.SlotZoneID, &d.SlotRowID, &d.SlotPositionID, &d.SlotZone, &d.SlotRow, &d.SlotPosition,
-		&d.Brand, &d.Model, &d.AndroidID, &d.ADBSerial, &d.DeviceLinkSN, &currentTaskID, &d.CurrentStep, &d.LastError,
+		&d.Brand, &d.Model, &d.AndroidID, &d.DeviceLinkSN, &currentTaskID, &d.CurrentStep, &d.LastError,
 		&d.AccessibilityStatus, &d.ForegroundServiceStatus, &d.BatteryOptimizationIgnoredStatus, &d.EnvCheckedAt, &d.EnvCheckMessage,
 		&d.LastHeartbeatAt, &d.CreatedAt, &d.UpdatedAt,
 	)
@@ -1298,17 +1294,16 @@ func (s *Service) insertDevice(ctx context.Context, req RegisterRequest, ip stri
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO devices (
     agent_uuid, device_name, physical_slot, group_name, slot_zone_id, slot_row_id, slot_position_id, slot_zone, slot_row, slot_position, status, bind_status, ip,
-    brand, model, android_id, adb_serial, device_link_sn, current_task_id, current_step, last_error,
+    brand, model, android_id, device_link_sn, current_task_id, current_step, last_error,
     accessibility_status, foreground_service_status, battery_optimization_ignored_status, env_checked_at, env_check_message,
     last_heartbeat_at, created_at, updated_at
-) VALUES (?, ?, '', '', '', '', '', '', '', '', 'offline', 'pending', ?, ?, ?, ?, ?, ?, 0, '', '', 'unknown', 'unknown', 'unknown', '', '', '', ?, ?)`,
+) VALUES (?, ?, '', '', '', '', '', '', '', '', 'offline', 'pending', ?, ?, ?, ?, ?, 0, '', '', 'unknown', 'unknown', 'unknown', '', '', '', ?, ?)`,
 		req.AgentUUID,
 		req.DeviceName,
 		ip,
 		req.Brand,
 		req.Model,
 		req.AndroidID,
-		req.ADBSerial,
 		req.DeviceLinkSN,
 		now,
 		now,
@@ -1326,14 +1321,13 @@ INSERT INTO devices (
 func (s *Service) updateRegistration(ctx context.Context, deviceID string, req RegisterRequest, ip string, now string) error {
 	_, err := s.db.ExecContext(ctx, `
 UPDATE devices
-SET device_name = ?, ip = ?, brand = ?, model = ?, android_id = ?, adb_serial = ?, device_link_sn = ?, updated_at = ?
+SET device_name = ?, ip = ?, brand = ?, model = ?, android_id = ?, device_link_sn = ?, updated_at = ?
 WHERE id = ?`,
 		req.DeviceName,
 		ip,
 		req.Brand,
 		req.Model,
 		req.AndroidID,
-		req.ADBSerial,
 		req.DeviceLinkSN,
 		now,
 		deviceID,

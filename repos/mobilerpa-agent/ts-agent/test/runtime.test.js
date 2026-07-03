@@ -9,8 +9,7 @@ test("createStableAgentUUID 在相同 android_id 下保持稳定", function () {
     device_name: "Pixel",
     brand: "Google",
     model: "Pixel 8",
-    android_id: "android-id-001",
-    adb_serial: "serial-a"
+    android_id: "android-id-001"
   };
 
   const first = runtime.createStableAgentUUID(deviceInfo);
@@ -25,15 +24,13 @@ test("createStableAgentUUID 在不同 android_id 下生成不同结果", functio
     device_name: "A",
     brand: "B",
     model: "C",
-    android_id: "android-id-001",
-    adb_serial: "serial-a"
+    android_id: "android-id-001"
   });
   const second = runtime.createStableAgentUUID({
     device_name: "A",
     brand: "B",
     model: "C",
-    android_id: "android-id-002",
-    adb_serial: "serial-a"
+    android_id: "android-id-002"
   });
 
   assert.notEqual(first, second);

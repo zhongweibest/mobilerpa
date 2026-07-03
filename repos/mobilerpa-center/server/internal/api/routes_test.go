@@ -72,7 +72,6 @@ func TestRegisterAndListDevices(t *testing.T) {
 		"brand":       "Google",
 		"model":       "Pixel 8",
 		"android_id":  "android-test-001",
-		"adb_serial":  "adb-test-001",
 	}
 
 	bodyBytes, err := json.Marshal(registerBody)
