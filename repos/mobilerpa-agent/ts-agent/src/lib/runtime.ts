@@ -563,6 +563,7 @@ export {
   startInterval,
   runAsync,
   sleepMS,
+  getAndroidContext,
   collectExecutionProfile,
   exitProcess
 };

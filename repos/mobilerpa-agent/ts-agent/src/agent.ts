@@ -9,6 +9,7 @@ import type { IntervalHandle, LoggerLike } from "./types/runtime";
 
 const STOP_SIGNAL_CHECK_INTERVAL_MS = 2000;
 const RUNTIME_LOCK_STALE_MS = 2 * 60 * 1000;
+const FALLBACK_ENGINE_ID_PREFIX = "fallback-engine-";
 
 interface RuntimeLockState {
   engine_id?: string;
@@ -40,6 +41,10 @@ interface WebSocketLike {
 interface StopSignalMonitorHandle {
   path: string;
   close: () => void;
+}
+
+interface StopSignalCleanupHandle {
+  release?: () => void;
 }
 
 function parseCLIArgs(args: string[]): AgentCLIOptions {
@@ -93,6 +98,22 @@ function shallowCopy<T extends Record<string, any>>(input?: T): T {
   return output;
 }
 
+function normalizePreferredHeartbeatScheduler(config: AgentConfig, logger: LoggerLike): AgentConfig {
+  const nextConfig = shallowCopy(config);
+  const websocket = shallowCopy(nextConfig.websocket || {});
+  const currentMode = String(websocket.heartbeat_scheduler || "");
+
+  if (!currentMode || currentMode === "alarm_manager") {
+    websocket.heartbeat_scheduler = "executor";
+    nextConfig.websocket = websocket;
+    logger.info("已将心跳调度模式迁移为 executor。");
+    return nextConfig;
+  }
+
+  nextConfig.websocket = websocket;
+  return nextConfig;
+}
+
 function mergeBootstrapConfig(config: AgentConfig, bootstrap?: BootstrapConfig): AgentConfig {
   const nextConfig = shallowCopy(config);
   const source = bootstrap || {};
@@ -111,6 +132,9 @@ function mergeBootstrapConfig(config: AgentConfig, bootstrap?: BootstrapConfig):
     }
     if (source.websocket.heartbeat_interval_ms) {
       nextConfig.websocket.heartbeat_interval_ms = source.websocket.heartbeat_interval_ms;
+    }
+    if (source.websocket.heartbeat_scheduler) {
+      nextConfig.websocket.heartbeat_scheduler = source.websocket.heartbeat_scheduler;
     }
     if (Object.prototype.hasOwnProperty.call(source.websocket, "reconnect_enabled")) {
       nextConfig.websocket.reconnect_enabled = source.websocket.reconnect_enabled;
@@ -193,8 +217,20 @@ function getCurrentEngineID(): string {
   return "";
 }
 
+function createFallbackEngineID(): string {
+  return FALLBACK_ENGINE_ID_PREFIX + Date.now().toString(36) + "-" + Math.floor(Math.random() * 100000).toString(36);
+}
+
+function isFallbackEngineID(engineID: string): boolean {
+  return String(engineID || "").indexOf(FALLBACK_ENGINE_ID_PREFIX) === 0;
+}
+
 function isEngineAlive(engineID: string): boolean {
   if (!engineID) {
+    return false;
+  }
+
+  if (isFallbackEngineID(engineID)) {
     return false;
   }
 
@@ -218,13 +254,16 @@ function isEngineAlive(engineID: string): boolean {
 
 function acquireRuntimeLock(store: ConfigStoreLike, logger: LoggerLike): RuntimeLockHandle {
   const lockPath = getRuntimeLockPath(store as unknown as { runtimeLockPath?: string });
-  const currentEngineID = getCurrentEngineID();
+  const currentEngineID = getCurrentEngineID() || createFallbackEngineID();
   const nowISO = runtime.nowISOString();
   const existing = parseRuntimeLock(runtime.readTextFile(lockPath));
   const existingUpdatedAt = Date.parse(existing.updated_at || "");
   const isStale = !existingUpdatedAt || (Date.now() - existingUpdatedAt) > RUNTIME_LOCK_STALE_MS;
+  const hasExistingLock = !!(existing.engine_id || existing.acquired_at || existing.updated_at);
+  const shouldBlockByExistingLock = hasExistingLock && !isStale;
 
-  if (existing.engine_id && existing.engine_id !== currentEngineID && isEngineAlive(existing.engine_id) && !isStale) {
+  if (shouldBlockByExistingLock) {
+    logger.warn("检测到未过期的 Agent 运行锁，当前实例不再重复启动：" + lockPath);
     return {
       alreadyRunning: true,
       path: lockPath,
@@ -266,6 +305,7 @@ function startStopSignalMonitor(options?: {
   store?: ConfigStoreLike;
   websocket?: WebSocketLike | null;
   logger?: LoggerLike;
+  cleanup?: StopSignalCleanupHandle | null;
 }): StopSignalMonitorHandle | null {
   if (runtime.isNodeRuntime()) {
     return null;
@@ -274,6 +314,7 @@ function startStopSignalMonitor(options?: {
   const monitorOptions = options || {};
   const logger = monitorOptions.logger || runtime.createLogger();
   const websocket = monitorOptions.websocket;
+  const cleanup = monitorOptions.cleanup || null;
   const stopSignalPath = getStopSignalPath(monitorOptions.store);
   let monitor: IntervalHandle | null = null;
   let stopped = false;
@@ -296,7 +337,12 @@ function startStopSignalMonitor(options?: {
       websocket.close();
     }
 
+    if (cleanup && typeof cleanup.release === "function") {
+      cleanup.release();
+    }
+
     logger.info("Agent 已停止心跳与重连，准备退出当前脚本。");
+    runtime.sleepMS(300);
     runtime.exitProcess(0);
   }
 
@@ -350,6 +396,8 @@ function main(cliOptions?: Partial<AgentCLIOptions>): Record<string, unknown> | 
     if (options.center) {
       config.center_base_url = options.center;
     }
+
+    config = normalizePreferredHeartbeatScheduler(config, logger);
 
     const deviceInfo = runtime.collectDeviceInfo(config.device);
     config.device = deviceInfo;
@@ -418,7 +466,12 @@ function finishRegister(
       deviceID: nextConfig.device_id,
       agentUUID: nextConfig.agent_uuid,
       deviceLinkSN: nextConfig.device_link_sn || "",
+      heartbeatLeasePath: configStore.defaultHeartbeatLeasePath(),
       heartbeatIntervalMS: getHeartbeatIntervalMS(nextConfig),
+      heartbeatScheduler: getHeartbeatScheduler(nextConfig),
+      pingIntervalMS: getPingIntervalMS(nextConfig),
+      watchdogIntervalMS: getWSWatchdogIntervalMS(nextConfig),
+      silenceTimeoutMS: getWSSilenceTimeoutMS(nextConfig),
       reconnectEnabled: getReconnectEnabled(nextConfig),
       reconnectInitialDelayMS: getReconnectInitialDelayMS(nextConfig),
       reconnectMaxDelayMS: getReconnectMaxDelayMS(nextConfig),
@@ -432,7 +485,12 @@ function finishRegister(
     stopSignalMonitor = startStopSignalMonitor({
       store,
       websocket: websocketResult,
-      logger
+      logger,
+      cleanup: {
+        release(): void {
+          runtimeLock.release();
+        }
+      }
     });
   } else {
     logger.info("已跳过 WebSocket 连接。");
@@ -476,6 +534,34 @@ function getHeartbeatIntervalMS(config: AgentConfig): number {
     return 30000;
   }
   return interval;
+}
+
+function getHeartbeatScheduler(config: AgentConfig): string {
+  const websocketConfig = config.websocket || {};
+  return String(websocketConfig.heartbeat_scheduler || "executor");
+}
+
+function getPingIntervalMS(config: AgentConfig): number {
+  const heartbeatIntervalMS = getHeartbeatIntervalMS(config);
+  return Math.max(5000, Math.min(heartbeatIntervalMS, 20000));
+}
+
+function getWSWatchdogIntervalMS(config: AgentConfig): number {
+  const keepAliveConfig = config.keep_alive || {};
+  const intervalSeconds = Number(keepAliveConfig.ws_watchdog_interval_seconds || 20);
+  if (!intervalSeconds || intervalSeconds < 5) {
+    return 20000;
+  }
+  return intervalSeconds * 1000;
+}
+
+function getWSSilenceTimeoutMS(config: AgentConfig): number {
+  const keepAliveConfig = config.keep_alive || {};
+  const timeoutSeconds = Number(keepAliveConfig.ws_silence_timeout_seconds || 120);
+  if (!timeoutSeconds || timeoutSeconds < 10) {
+    return 120000;
+  }
+  return timeoutSeconds * 1000;
 }
 
 function getReconnectEnabled(config: AgentConfig): boolean {
@@ -567,6 +653,15 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     main,
     parseCLIArgs,
-    buildRegisterPayload
+    buildRegisterPayload,
+    mergeBootstrapConfig,
+    mergeRegisterResult,
+    acquireRuntimeLock,
+    getHeartbeatIntervalMS,
+    getReconnectEnabled,
+    getReconnectInitialDelayMS,
+    getReconnectMaxDelayMS,
+    getReconnectBackoffMultiplier,
+    createFallbackEngineID
   };
 }

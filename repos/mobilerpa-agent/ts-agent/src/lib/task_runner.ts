@@ -11,6 +11,7 @@ interface TaskRunnerOptions {
   logger?: LoggerLike;
   onProgress?: (progress: TaskProgress) => void;
   force?: boolean;
+  isCancelled?: () => boolean;
 }
 
 interface ResolvedScriptModule {
@@ -39,6 +40,8 @@ interface ScriptModule {
       runtime: typeof runtime;
       logger: LoggerLike;
       reportProgress: (stepName: string, message: string, status?: string, extra?: Record<string, unknown>) => void;
+      isCancelled: () => boolean;
+      throwIfCancelled: (message?: string) => void;
     }
   ) => TaskResult;
   __load_error__?: unknown;
@@ -456,6 +459,9 @@ function runTask(taskSummary: TaskSummary, options?: TaskRunnerOptions): TaskRes
   const context = buildContext(taskSummary, options);
   const progressReporter = buildProgressReporter(taskSummary, options, logger);
   const reportProgress = progressReporter.reportProgress;
+  const isCancelled = options && typeof options.isCancelled === "function"
+    ? options.isCancelled
+    : function neverCancelled(): boolean { return false; };
   const loaded = loadScriptModule(context, logger);
   const scriptModule = loaded.scriptModule;
 
@@ -505,10 +511,41 @@ function runTask(taskSummary: TaskSummary, options?: TaskRunnerOptions): TaskRes
     downloaded: loaded.downloadResult.downloaded
   });
 
+  if (isCancelled()) {
+    reportProgress("RUN_SCRIPT_ENTRY", "任务执行中：任务已取消，跳过脚本执行", "stopped", {
+      entry_file: loaded.entryLabel
+    });
+    return {
+      status: "stopped",
+      result_code: "TASK_CANCELLED",
+      result_message: "任务已取消",
+      step_name: "RUN_SCRIPT_ENTRY",
+      extra: {
+        mode: "script_file",
+        entry_file: loaded.entryLabel
+      }
+    };
+  }
+
+  function throwIfCancelled(message?: string): void {
+    if (!isCancelled()) {
+      return;
+    }
+    const error = new Error(String(message || "任务已取消")) as Error & {
+      code?: string;
+      isCancelled?: boolean;
+    };
+    error.code = "TASK_CANCELLED";
+    error.isCancelled = true;
+    throw error;
+  }
+
   const result = scriptModule.run(context, {
     runtime,
     logger,
-    reportProgress
+    reportProgress,
+    isCancelled,
+    throwIfCancelled
   });
 
   const lastProgress = progressReporter.getLastProgress();
@@ -563,5 +600,9 @@ function syncScriptVersion(scriptName: string, scriptVersion: string, options?: 
 export {
   runTask,
   syncScriptVersion,
-  ensureScriptVersion
+  ensureScriptVersion,
+  buildContext,
+  resolveScriptModule,
+  isSafeRelativePath,
+  normalizeModulePath
 };

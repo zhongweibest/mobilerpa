@@ -23,6 +23,14 @@ interface WorkflowRunnerOptions {
   isCancelled?: () => boolean;
 }
 
+interface WorkflowRunState {
+  status: string;
+  result_code: string;
+  result_message: string;
+  workflow_node_id: string;
+  extra?: Record<string, unknown>;
+}
+
 function sleepMilliseconds(durationMS: number): void {
   const startedAt = new Date().getTime();
 
@@ -75,6 +83,7 @@ function syncSessionScripts(sessionPayload: WorkflowSessionPayload, options?: Wo
   const logger = options && options.logger ? options.logger : runtime.createLogger();
   const sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function noop(): void {};
   const centerBaseURL = String((options && options.centerBaseURL) || "");
+  const isCancelled = options && typeof options.isCancelled === "function" ? options.isCancelled : function neverCancelled(): boolean { return false; };
   const refs = buildSessionRefs(sessionPayload);
 
   if (!centerBaseURL || manifests.length === 0) {
@@ -82,6 +91,10 @@ function syncSessionScripts(sessionPayload: WorkflowSessionPayload, options?: Wo
   }
 
   for (let index = 0; index < manifests.length; index += 1) {
+    if (isCancelled()) {
+      return;
+    }
+
     const item = manifests[index] || {};
     sendEvent({
       plan_run_id: refs.plan_run_id,
@@ -153,12 +166,7 @@ function runScriptNode(
   sessionPayload: WorkflowSessionPayload,
   node: WorkflowNode,
   options?: WorkflowRunnerOptions
-): TaskResult | {
-  status: string;
-  result_code: string;
-  result_message: string;
-  workflow_node_id: string;
-} {
+): TaskResult | WorkflowRunState {
   const config = options || {};
   const logger = config.logger || runtime.createLogger();
   const sendEvent = typeof config.sendEvent === "function" ? config.sendEvent : function noop(): void {};
@@ -195,6 +203,7 @@ function runScriptNode(
     agentUUID: String(config.agentUUID || ""),
     centerBaseURL: String(config.centerBaseURL || ""),
     logger,
+    isCancelled,
     onProgress(progress) {
       sendEvent({
         plan_run_id: refs.plan_run_id,
@@ -208,6 +217,43 @@ function runScriptNode(
       });
     }
   });
+
+  if (isCancelled()) {
+    const actualStatus = String((result && result.status) || "");
+    const actualResultCode = String((result && result.result_code) || "");
+    const actualResultMessage = String((result && result.result_message) || "");
+    const actualStepName = String((result && result.step_name) || "");
+    const stoppedMessage = actualStatus === "success"
+      ? "工作流会话已停止，脚本在停止后实际执行成功"
+      : "工作流会话已停止，脚本在停止后实际执行失败";
+
+    sendEvent({
+      plan_run_id: refs.plan_run_id,
+      plan_device_run_id: refs.plan_device_run_id,
+      workflow_node_id: String(node.node_id || ""),
+      event_type: "workflow_step_stopped",
+      status: "stopped",
+      step_name: actualStepName || "STOPPED",
+      message: stoppedMessage,
+      extra: {
+        actual_status: actualStatus,
+        actual_result_code: actualResultCode,
+        actual_result_message: actualResultMessage
+      }
+    });
+
+    return {
+      status: "stopped",
+      result_code: "WORKFLOW_SESSION_STOPPED",
+      result_message: stoppedMessage,
+      workflow_node_id: String(node.node_id || ""),
+      extra: {
+        actual_status: actualStatus,
+        actual_result_code: actualResultCode,
+        actual_result_message: actualResultMessage
+      }
+    };
+  }
 
   if (result && String(result.status || "") === "success") {
     sendEvent({
@@ -240,12 +286,7 @@ function runScriptNode(
   return result;
 }
 
-function runSession(sessionPayload: WorkflowSessionPayload, options?: WorkflowRunnerOptions): {
-  status: string;
-  result_code: string;
-  result_message: string;
-  workflow_node_id: string;
-} {
+function runSession(sessionPayload: WorkflowSessionPayload, options?: WorkflowRunnerOptions): WorkflowRunState {
   const snapshot = sessionPayload && sessionPayload.definition_snapshot ? sessionPayload.definition_snapshot : {};
   const nodeMap = buildNodeMap(snapshot);
   const edgeMap = buildEdgeMap(snapshot);
@@ -272,8 +313,18 @@ function runSession(sessionPayload: WorkflowSessionPayload, options?: WorkflowRu
   syncSessionScripts(sessionPayload, {
     centerBaseURL: options && options.centerBaseURL,
     logger,
-    sendEvent
+    sendEvent,
+    isCancelled
   });
+
+  if (isCancelled()) {
+    return {
+      status: "stopped",
+      result_code: "WORKFLOW_SESSION_STOPPED",
+      result_message: "工作流会话已停止",
+      workflow_node_id: currentNodeID
+    };
+  }
 
   while (currentNodeID) {
     if (isCancelled()) {

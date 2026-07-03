@@ -1,8 +1,10 @@
 import * as runtime from "./runtime";
 import * as taskRunner from "./task_runner";
 import * as workflowSessionRunner from "./workflow_session_runner";
+import * as heartbeatScheduler from "./heartbeat_scheduler";
 
 import type { LoggerLike } from "../types/runtime";
+import type { HeartbeatSchedulerHandle } from "./heartbeat_scheduler";
 import type {
   AckPayload,
   TaskProgress,
@@ -19,7 +21,12 @@ interface WSClientOptions {
   deviceID: string;
   agentUUID?: string;
   deviceLinkSN?: string;
+  heartbeatLeasePath?: string;
   heartbeatIntervalMS?: number;
+  heartbeatScheduler?: string;
+  pingIntervalMS?: number;
+  watchdogIntervalMS?: number;
+  silenceTimeoutMS?: number;
   reconnectEnabled?: boolean;
   reconnectInitialDelayMS?: number;
   reconnectMaxDelayMS?: number;
@@ -41,6 +48,12 @@ type GenericMessage = WebSocketEnvelope<Record<string, unknown>> & {
 interface ProgressDedupState {
   key: string;
   at: number;
+}
+
+interface SessionFlagStore {
+  put(key: string): void;
+  remove(key: string): void;
+  has(key: string): boolean;
 }
 
 function trimBaseURL(baseURL: string): string {
@@ -120,6 +133,41 @@ function createRunnable(runCallback: () => void): any {
   });
 }
 
+function createSessionFlagStore(): SessionFlagStore {
+  if (typeof java !== "undefined") {
+    try {
+      const ConcurrentHashMap = javaType("java.util.concurrent.ConcurrentHashMap");
+      const map = new ConcurrentHashMap();
+      return {
+        put(key: string): void {
+          map.put(String(key || ""), true);
+        },
+        remove(key: string): void {
+          map.remove(String(key || ""));
+        },
+        has(key: string): boolean {
+          return map.containsKey(String(key || ""));
+        }
+      };
+    } catch (_error) {
+      // 回退到普通对象存储。
+    }
+  }
+
+  const state: Record<string, boolean> = {};
+  return {
+    put(key: string): void {
+      state[String(key || "")] = true;
+    },
+    remove(key: string): void {
+      delete state[String(key || "")];
+    },
+    has(key: string): boolean {
+      return state[String(key || "")] === true;
+    }
+  };
+}
+
 function buildTaskSummary(taskPayload?: Record<string, unknown>): TaskSummary {
   const payload = taskPayload || {};
   return {
@@ -145,12 +193,16 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
   const Request = javaType("okhttp3.Request");
   const TimeUnit = javaType("java.util.concurrent.TimeUnit");
   const Executors = javaType("java.util.concurrent.Executors");
-  let heartbeatExecutor: any = null;
-  let heartbeatFuture: any = null;
+  let heartbeatHandle: HeartbeatSchedulerHandle | null = null;
   let reconnectExecutor: any = null;
   let reconnectFuture: any = null;
   const wsURL = buildWebSocketURL(options.centerBaseURL);
   const heartbeatIntervalMS = Number(options.heartbeatIntervalMS || 30000);
+  const heartbeatSchedulerMode = String(options.heartbeatScheduler || "executor");
+  const heartbeatLeasePath = String(options.heartbeatLeasePath || "");
+  const pingIntervalMS = Number(options.pingIntervalMS || Math.min(heartbeatIntervalMS, 20000));
+  const watchdogIntervalMS = Number(options.watchdogIntervalMS || 20000);
+  const silenceTimeoutMS = Number(options.silenceTimeoutMS || 120000);
   const reconnectEnabled = options.reconnectEnabled !== false;
   let reconnectInitialDelayMS = Number(options.reconnectInitialDelayMS || 3000);
   let reconnectMaxDelayMS = Number(options.reconnectMaxDelayMS || 60000);
@@ -161,20 +213,30 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
   const onAssignTask = typeof options.onAssignTask === "function" ? options.onAssignTask : null;
   let heartbeatStarted = false;
   let heartbeatGeneration = 0;
+  let heartbeatLeaseToken = "";
   let reconnectAttempt = 0;
+  let reconnectScheduledGeneration = 0;
   let connectGeneration = 0;
   let closedGeneration = 0;
   let intentionallyClosed = false;
+  let lastReceiveAt = Date.now();
+  let lastSendAt = Date.now();
   let taskExecuting = false;
   let workflowSessionExecuting = false;
-  const workflowStopFlags: Record<string, boolean> = {};
+  const workflowStopFlags = createSessionFlagStore();
+  const workflowResultSentFlags = createSessionFlagStore();
   let currentWorkflowRunID = "";
   let lastTaskProgressState: ProgressDedupState | null = null;
   let lastWorkflowEventState: ProgressDedupState | null = null;
+  let watchdogExecutor: any = null;
+  let watchdogFuture: any = null;
+  logger.info("WebSocket 心跳调度模式：" + heartbeatSchedulerMode);
   const client = new OkHttpClient.Builder()
     .readTimeout(0, TimeUnit.MILLISECONDS)
+    .pingInterval(Math.max(5000, pingIntervalMS), TimeUnit.MILLISECONDS)
     .build();
   let socket: any = null;
+  const activeHeartbeatScheduler = heartbeatScheduler.createHeartbeatScheduler(heartbeatSchedulerMode, logger);
 
   function shouldSkipDuplicateEvent(
     cache: ProgressDedupState | null,
@@ -197,9 +259,64 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (socket.send(text) === false) {
       throw new Error("websocket_send_failed");
     }
+    lastSendAt = Date.now();
   }
 
-  function sendHeartbeat(): void {
+  function readHeartbeatLeaseToken(): string {
+    if (!heartbeatLeasePath) {
+      return "";
+    }
+
+    try {
+      const text = runtime.readTextFile(heartbeatLeasePath);
+      if (!text || !String(text).trim()) {
+        return "";
+      }
+      const payload = JSON.parse(String(text)) as { token?: string };
+      return String(payload.token || "");
+    } catch (_error) {
+      return "";
+    }
+  }
+
+  function writeHeartbeatLeaseToken(token: string): void {
+    if (!heartbeatLeasePath) {
+      return;
+    }
+
+    runtime.writeTextFile(heartbeatLeasePath, JSON.stringify({
+      token: String(token || ""),
+      updated_at: runtime.nowISOString()
+    }, null, 2));
+  }
+
+  function clearHeartbeatLeaseToken(token: string): void {
+    if (!heartbeatLeasePath) {
+      return;
+    }
+
+    const currentToken = readHeartbeatLeaseToken();
+    if (!currentToken || currentToken === String(token || "")) {
+      runtime.removeFileIfExists(heartbeatLeasePath);
+    }
+  }
+
+  function isHeartbeatLeaseActive(token: string): boolean {
+    if (!heartbeatLeasePath) {
+      return true;
+    }
+    return readHeartbeatLeaseToken() === String(token || "");
+  }
+
+  function sendHeartbeat(source: string): void {
+    logger.info(
+      "准备发送心跳，source="
+      + String(source || "")
+      + "，connect_generation="
+      + connectGeneration
+      + "，heartbeat_generation="
+      + heartbeatGeneration
+    );
     send("heartbeat", createRequestID("agent-heartbeat"), {
       agent_uuid: agentUUID,
       device_link_sn: deviceLinkSN,
@@ -332,6 +449,16 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
       message: String(payload.message || ""),
       extra: payload.extra || {}
     });
+    logger.info(
+      "已发送 workflow_session_event："
+      + String(refs.plan_device_run_id || "")
+      + " -> "
+      + String(payload.event_type || "")
+      + " / "
+      + String(payload.status || "running")
+      + " / "
+      + String(payload.message || "")
+    );
     lastWorkflowEventState = {
       key: eventKey,
       at: Date.now()
@@ -341,6 +468,13 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
   function sendWorkflowSessionResult(resultPayload: Partial<WorkflowSessionResult> & Record<string, unknown>): void {
     const payload = resultPayload || {};
     const refs = buildWorkflowSessionRefs(payload);
+    const sessionKey = String(refs.plan_device_run_id || "");
+
+    if (sessionKey && workflowResultSentFlags.has(sessionKey)) {
+      logger.warn("工作流结果已发送，忽略重复 workflow_session_result：" + sessionKey + " -> " + String(payload.status || "failed"));
+      return;
+    }
+
     send("workflow_session_result", createRequestID("agent-workflow-session-result"), {
       plan_run_id: refs.plan_run_id,
       plan_device_run_id: refs.plan_device_run_id,
@@ -350,7 +484,20 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
       result_message: String(payload.result_message || ""),
       extra: payload.extra || {}
     });
-    logger.info("已发送 workflow_session_result：" + String(refs.plan_device_run_id || "") + " -> " + String(payload.status || "failed"));
+    logger.info(
+      "已发送 workflow_session_result："
+      + String(refs.plan_device_run_id || "")
+      + " -> "
+      + String(payload.status || "failed")
+      + " / "
+      + String(payload.result_message || "")
+      + " / extra="
+      + JSON.stringify(payload.extra || {})
+    );
+
+    if (sessionKey) {
+      workflowResultSentFlags.put(sessionKey);
+    }
   }
 
   function markWorkflowStopRequested(sessionKey: string): void {
@@ -358,7 +505,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (!nextKey) {
       return;
     }
-    workflowStopFlags[nextKey] = true;
+    workflowStopFlags.put(nextKey);
   }
 
   function clearWorkflowStopRequested(sessionKey: string): void {
@@ -366,7 +513,15 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (!nextKey) {
       return;
     }
-    delete workflowStopFlags[nextKey];
+    workflowStopFlags.remove(nextKey);
+  }
+
+  function clearWorkflowResultSent(sessionKey: string): void {
+    const nextKey = String(sessionKey || "").trim();
+    if (!nextKey) {
+      return;
+    }
+    workflowResultSentFlags.remove(nextKey);
   }
 
   function isWorkflowStopRequested(sessionKey: string): boolean {
@@ -374,19 +529,25 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (!nextKey) {
       return false;
     }
-    return workflowStopFlags[nextKey] === true;
+    return workflowStopFlags.has(nextKey);
   }
 
   function stopHeartbeat(): void {
     heartbeatGeneration += 1;
-    if (heartbeatFuture) {
-      heartbeatFuture.cancel(false);
-      heartbeatFuture = null;
+    if (heartbeatHandle) {
+      logger.info(
+        "停止心跳调度器，mode="
+        + heartbeatHandle.kind
+        + "，scheduler_id="
+        + heartbeatHandle.schedulerID
+        + "，next_generation="
+        + heartbeatGeneration
+      );
+      heartbeatHandle.cancel();
+      heartbeatHandle = null;
     }
-    if (heartbeatExecutor) {
-      heartbeatExecutor.shutdownNow();
-      heartbeatExecutor = null;
-    }
+    clearHeartbeatLeaseToken(heartbeatLeaseToken);
+    heartbeatLeaseToken = "";
     heartbeatStarted = false;
   }
 
@@ -398,6 +559,18 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (reconnectExecutor) {
       reconnectExecutor.shutdownNow();
       reconnectExecutor = null;
+    }
+    reconnectScheduledGeneration = 0;
+  }
+
+  function stopWatchdog(): void {
+    if (watchdogFuture) {
+      watchdogFuture.cancel(false);
+      watchdogFuture = null;
+    }
+    if (watchdogExecutor) {
+      watchdogExecutor.shutdownNow();
+      watchdogExecutor = null;
     }
   }
 
@@ -447,6 +620,43 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     }
   }
 
+  function startWatchdog(): void {
+    const safeWatchdogIntervalMS = Math.max(5000, watchdogIntervalMS);
+    const safeSilenceTimeoutMS = Math.max(safeWatchdogIntervalMS * 2, silenceTimeoutMS);
+
+    stopWatchdog();
+    watchdogExecutor = Executors.newSingleThreadScheduledExecutor();
+    watchdogFuture = watchdogExecutor.scheduleAtFixedRate(createRunnable(function watchdogTask() {
+      if (intentionallyClosed) {
+        return;
+      }
+
+      const now = Date.now();
+      const silenceMS = now - Math.max(lastReceiveAt, lastSendAt);
+
+      if (!socket) {
+        logger.warn("WebSocket watchdog 检测到连接对象缺失，准备触发重连。");
+        scheduleReconnect("watchdog_missing_socket");
+        return;
+      }
+
+      if (silenceMS >= safeSilenceTimeoutMS) {
+        logger.warn("WebSocket watchdog 检测到连接静默超时，准备主动重连，silence_ms=" + silenceMS);
+        closeSocketQuietly(1001, "watchdog silence timeout");
+        handleSocketClosed(connectGeneration, "watchdog_silence_timeout " + silenceMS);
+      }
+    }), safeWatchdogIntervalMS, safeWatchdogIntervalMS, TimeUnit.MILLISECONDS);
+
+    logger.info(
+      "已启动 WebSocket watchdog，interval_ms="
+      + safeWatchdogIntervalMS
+      + "，silence_timeout_ms="
+      + safeSilenceTimeoutMS
+      + "，ping_interval_ms="
+      + Math.max(5000, pingIntervalMS)
+    );
+  }
+
   function scheduleReconnect(reason: string): void {
     if (!reconnectEnabled) {
       logger.warn("WebSocket 自动重连已禁用，原因：" + String(reason || ""));
@@ -459,9 +669,14 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     if (reconnectFuture) {
       return;
     }
+    if (reconnectScheduledGeneration === connectGeneration) {
+      return;
+    }
 
+    reconnectScheduledGeneration = connectGeneration;
     reconnectAttempt += 1;
     const delayMS = getReconnectDelayMS(reconnectAttempt);
+    const scheduledGeneration = connectGeneration;
     logger.warn("WebSocket 连接中断，准备第 " + reconnectAttempt + " 次重连，delay=" + delayMS + "ms，原因：" + String(reason || ""));
 
     reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
@@ -473,6 +688,10 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
       }
       if (intentionallyClosed) {
         logger.info("WebSocket 在重连等待期间被主动关闭，取消重连。");
+        return;
+      }
+      if (scheduledGeneration !== connectGeneration) {
+        logger.info("WebSocket 重连任务代际已过期，取消执行：scheduled_generation=" + scheduledGeneration + "，current_generation=" + connectGeneration);
         return;
       }
       logger.info("WebSocket 开始执行第 " + reconnectAttempt + " 次重连：" + wsURL);
@@ -500,20 +719,65 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     heartbeatStarted = true;
     heartbeatGeneration += 1;
     const currentHeartbeatGeneration = heartbeatGeneration;
-    sendHeartbeat();
-    heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
-    heartbeatFuture = heartbeatExecutor.scheduleAtFixedRate(createRunnable(function heartbeatTask() {
+    heartbeatLeaseToken = String(connectGeneration) + ":" + String(currentHeartbeatGeneration) + ":" + String(Date.now());
+    writeHeartbeatLeaseToken(heartbeatLeaseToken);
+    sendHeartbeat("hello_ack");
+    heartbeatHandle = activeHeartbeatScheduler.start({
+      intervalMS: heartbeatIntervalMS,
+      logger,
+      onTick: function heartbeatTask() {
+      logger.info(
+        "心跳调度器触发，mode="
+        + (heartbeatHandle ? heartbeatHandle.kind : activeHeartbeatScheduler.kind)
+        + "，scheduler_id="
+        + (heartbeatHandle ? heartbeatHandle.schedulerID : "")
+        + "，connect_generation="
+        + connectGeneration
+        + "，expected_generation="
+        + expectedGeneration
+        + "，heartbeat_generation="
+        + currentHeartbeatGeneration
+      );
       if (!heartbeatStarted || currentHeartbeatGeneration !== heartbeatGeneration || expectedGeneration !== connectGeneration) {
         return;
       }
+      if (!isHeartbeatLeaseActive(heartbeatLeaseToken)) {
+        logger.warn(
+          "检测到心跳租约已失效，停止旧心跳链路，scheduler_id="
+          + (heartbeatHandle ? heartbeatHandle.schedulerID : "")
+          + "，connect_generation="
+          + connectGeneration
+          + "，heartbeat_generation="
+          + currentHeartbeatGeneration
+        );
+        stopHeartbeat();
+        return;
+      }
       try {
-        sendHeartbeat();
+        sendHeartbeat("scheduler_tick");
       } catch (error) {
         logger.error("WebSocket heartbeat 发送失败：" + String(error));
         closeSocketQuietly(1001, "heartbeat send failed");
         handleSocketClosed(expectedGeneration, "heartbeat_send_failed " + String(error));
       }
-    }), heartbeatIntervalMS, heartbeatIntervalMS, TimeUnit.MILLISECONDS);
+      }
+    });
+    logger.info(
+      "已启动心跳调度器，requested_mode="
+      + heartbeatSchedulerMode
+      + "，actual_mode="
+      + heartbeatHandle.kind
+      + "，scheduler_id="
+      + heartbeatHandle.schedulerID
+      + "，lease_token="
+      + heartbeatLeaseToken
+      + "，connect_generation="
+      + connectGeneration
+      + "，heartbeat_generation="
+      + currentHeartbeatGeneration
+      + "，interval_ms="
+      + heartbeatIntervalMS
+    );
   }
 
   function executeTask(taskSummary: TaskSummary): void {
@@ -602,6 +866,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     workflowSessionExecuting = true;
     currentWorkflowRunID = sessionKey;
     clearWorkflowStopRequested(sessionKey);
+    clearWorkflowResultSent(sessionKey);
     try {
       const result = workflowSessionRunner.runSession(payload, {
         deviceID,
@@ -622,7 +887,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
         status: String((result && result.status) || "failed"),
         result_code: String((result && result.result_code) || ""),
         result_message: String((result && result.result_message) || ""),
-        extra: {}
+        extra: (result && result.extra) || {}
       });
     } catch (error) {
       logger.error("本地工作流会话执行失败：" + String(error));
@@ -730,6 +995,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
         }
         socket = _webSocket;
         closedGeneration = 0;
+        lastReceiveAt = Date.now();
         logger.info("WebSocket 已连接：" + wsURL);
         try {
           send("hello", createRequestID("agent-hello"), {
@@ -747,6 +1013,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
         if (expectedGeneration !== connectGeneration) {
           return;
         }
+        lastReceiveAt = Date.now();
         logger.info("收到 WebSocket 消息：" + String(text));
         try {
           const message = JSON.parse(String(text)) as GenericMessage;
@@ -814,10 +1081,13 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
     connectGeneration += 1;
     closedGeneration = 0;
     socket = null;
-    logger.info("开始连接 WebSocket：" + wsURL);
+    lastReceiveAt = Date.now();
+    lastSendAt = Date.now();
+    logger.info("开始连接 WebSocket：" + wsURL + "，connect_generation=" + connectGeneration);
     client.newWebSocket(request, createListener(connectGeneration));
   }
 
+  startWatchdog();
   openSocket();
 
   return {
@@ -826,6 +1096,7 @@ function connectAutoJs(options: WSClientOptions): WebSocketHandle {
       intentionallyClosed = true;
       stopHeartbeat();
       stopReconnect();
+      stopWatchdog();
       if (socket) {
         socket.close(1000, "agent close");
       }
@@ -856,5 +1127,8 @@ function connect(options: WSClientOptions): WebSocketHandle {
 export {
   buildWebSocketURL,
   createEnvelope,
-  connect
+  connect,
+  createSessionFlagStore,
+  buildTaskSummary,
+  buildWorkflowSessionRefs
 };

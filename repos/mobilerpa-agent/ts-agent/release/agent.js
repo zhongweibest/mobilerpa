@@ -271,6 +271,7 @@ module.exports.defaultConfigPath = defaultConfigPath;
 module.exports.defaultBootstrapPath = defaultBootstrapPath;
 module.exports.defaultStopSignalPath = defaultStopSignalPath;
 module.exports.defaultRuntimeLockPath = defaultRuntimeLockPath;
+module.exports.defaultHeartbeatLeasePath = defaultHeartbeatLeasePath;
 module.exports.createConfigStore = createConfigStore;
 var runtime = __bundleRequire("./lib/runtime");
 function isNodeRuntime() {
@@ -352,7 +353,18 @@ function defaultStopSignalPath() {
     return joinPath(root, "runtime", "stop.signal");
 }
 function defaultRuntimeLockPath() {
-    return joinPath(resolveAgentRootPath(), "runtime", "agent.lock.json");
+    return joinPath(resolveRuntimeStateRootPath(), "agent.lock.json");
+}
+function defaultHeartbeatLeasePath() {
+    return joinPath(resolveRuntimeStateRootPath(), "heartbeat.lease.json");
+}
+function resolveRuntimeStateRootPath() {
+    if (isNodeRuntime()) {
+        return joinPath(resolveAgentRootPath(), "runtime");
+    }
+    var agentRoot = resolveAgentRootPath();
+    var parentRoot = dirname(agentRoot);
+    return joinPath(parentRoot, ".mobilerpa-agent-runtime");
 }
 function exists(filePath) {
     if (isNodeRuntime()) {
@@ -391,10 +403,17 @@ function createEmptyConfig() {
         websocket: {
             enabled: true,
             heartbeat_interval_ms: 30000,
+            heartbeat_scheduler: "executor",
             reconnect_enabled: true,
             reconnect_initial_delay_ms: 3000,
             reconnect_max_delay_ms: 60000,
             reconnect_backoff_multiplier: 2
+        },
+        keep_alive: {
+            wake_screen_before_task: true,
+            wake_screen_cooldown_seconds: 30,
+            ws_watchdog_interval_seconds: 20,
+            ws_silence_timeout_seconds: 120
         },
         last_register: {},
         created_at: now,
@@ -407,6 +426,7 @@ function normalizeWebSocketConfig(input, fallback) {
     return {
         enabled: source.enabled === false ? false : base.enabled !== false,
         heartbeat_interval_ms: source.heartbeat_interval_ms || base.heartbeat_interval_ms || 30000,
+        heartbeat_scheduler: source.heartbeat_scheduler || base.heartbeat_scheduler || "executor",
         reconnect_enabled: source.reconnect_enabled === false ? false : base.reconnect_enabled !== false,
         reconnect_initial_delay_ms: source.reconnect_initial_delay_ms || base.reconnect_initial_delay_ms || 3000,
         reconnect_max_delay_ms: source.reconnect_max_delay_ms || base.reconnect_max_delay_ms || 60000,
@@ -423,6 +443,12 @@ function normalizeConfig(raw) {
         device_link_sn: input.device_link_sn || "",
         device: input.device || {},
         websocket: normalizeWebSocketConfig(input.websocket, base.websocket),
+        keep_alive: {
+            wake_screen_before_task: input.keep_alive && input.keep_alive.wake_screen_before_task === false ? false : base.keep_alive && base.keep_alive.wake_screen_before_task !== false,
+            wake_screen_cooldown_seconds: Number((input.keep_alive && input.keep_alive.wake_screen_cooldown_seconds) || (base.keep_alive && base.keep_alive.wake_screen_cooldown_seconds) || 30),
+            ws_watchdog_interval_seconds: Number((input.keep_alive && input.keep_alive.ws_watchdog_interval_seconds) || (base.keep_alive && base.keep_alive.ws_watchdog_interval_seconds) || 20),
+            ws_silence_timeout_seconds: Number((input.keep_alive && input.keep_alive.ws_silence_timeout_seconds) || (base.keep_alive && base.keep_alive.ws_silence_timeout_seconds) || 120)
+        },
         last_register: input.last_register || {},
         created_at: input.created_at || base.created_at,
         updated_at: input.updated_at || base.updated_at
@@ -471,6 +497,97 @@ function createConfigStore(options) {
 }
 
   },
+  "./lib/heartbeat_scheduler": function(module, exports, __bundleRequire) {
+"use strict";
+module.exports.createHeartbeatScheduler = createHeartbeatScheduler;
+module.exports.normalizeSchedulerMode = normalizeSchedulerMode;
+var runtime = __bundleRequire("./lib/runtime");
+function javaType(name) {
+    if (typeof Java !== "undefined" && typeof Java.type === "function") {
+        return Java.type(name);
+    }
+    var parts = String(name || "").split(".");
+    var current = Packages;
+    for (var index = 0; index < parts.length; index += 1) {
+        current = current[parts[index]];
+    }
+    return current;
+}
+function createRunnable(runCallback) {
+    var Runnable = javaType("java.lang.Runnable");
+    if (typeof JavaAdapter === "function") {
+        return new JavaAdapter(Runnable, {
+            run: runCallback
+        });
+    }
+    return new Runnable({
+        run: runCallback
+    });
+}
+function createSchedulerID(prefix) {
+    return String(prefix || "scheduler") + "-" + Date.now().toString(36) + "-" + Math.floor(Math.random() * 100000).toString(36);
+}
+function createIntervalHeartbeatScheduler() {
+    return {
+        kind: "interval",
+        start: function (options) {
+            var intervalMS = Math.max(1000, Number(options.intervalMS || 30000));
+            var handle = runtime.startInterval(function onHeartbeatTick() {
+                options.onTick();
+            }, intervalMS);
+            var schedulerID = createSchedulerID("interval");
+            return {
+                kind: "interval",
+                schedulerID: schedulerID,
+                cancel: function () {
+                    handle.cancel();
+                }
+            };
+        }
+    };
+}
+function createExecutorHeartbeatScheduler() {
+    return {
+        kind: "executor",
+        start: function (options) {
+            if (!runtime.isAutoJsRuntime()) {
+                return createIntervalHeartbeatScheduler().start(options);
+            }
+            var TimeUnit = javaType("java.util.concurrent.TimeUnit");
+            var Executors = javaType("java.util.concurrent.Executors");
+            var intervalMS = Math.max(1000, Number(options.intervalMS || 30000));
+            var executor = Executors.newSingleThreadScheduledExecutor();
+            var future = executor.scheduleAtFixedRate(createRunnable(function heartbeatTick() {
+                options.onTick();
+            }), intervalMS, intervalMS, TimeUnit.MILLISECONDS);
+            var schedulerID = createSchedulerID("executor");
+            return {
+                kind: "executor",
+                schedulerID: schedulerID,
+                cancel: function () {
+                    future.cancel(false);
+                    executor.shutdownNow();
+                }
+            };
+        }
+    };
+}
+function normalizeSchedulerMode(mode) {
+    var nextMode = String(mode || "").toLowerCase();
+    if (nextMode === "interval") {
+        return "interval";
+    }
+    return "executor";
+}
+function createHeartbeatScheduler(mode, logger) {
+    var normalizedMode = normalizeSchedulerMode(mode);
+    if (normalizedMode === "interval") {
+        return createIntervalHeartbeatScheduler();
+    }
+    return createExecutorHeartbeatScheduler();
+}
+
+  },
   "./lib/runtime": function(module, exports, __bundleRequire) {
 "use strict";
 module.exports.isNodeRuntime = isNodeRuntime;
@@ -490,6 +607,7 @@ module.exports.removeFileIfExists = removeFileIfExists;
 module.exports.startInterval = startInterval;
 module.exports.runAsync = runAsync;
 module.exports.sleepMS = sleepMS;
+module.exports.getAndroidContext = getAndroidContext;
 module.exports.collectExecutionProfile = collectExecutionProfile;
 module.exports.exitProcess = exitProcess;
 function isNodeRuntime() {
@@ -970,6 +1088,10 @@ function exitProcess(code) {
 module.exports.runTask = runTask;
 module.exports.syncScriptVersion = syncScriptVersion;
 module.exports.ensureScriptVersion = ensureScriptVersion;
+module.exports.buildContext = buildContext;
+module.exports.resolveScriptModule = resolveScriptModule;
+module.exports.isSafeRelativePath = isSafeRelativePath;
+module.exports.normalizeModulePath = normalizeModulePath;
 var runtime = __bundleRequire("./lib/runtime");
 var centerClient = __bundleRequire("./lib/center_client");
 function joinPath() {
@@ -1297,6 +1419,9 @@ function runTask(taskSummary, options) {
     var context = buildContext(taskSummary, options);
     var progressReporter = buildProgressReporter(taskSummary, options, logger);
     var reportProgress = progressReporter.reportProgress;
+    var isCancelled = options && typeof options.isCancelled === "function"
+        ? options.isCancelled
+        : function neverCancelled() { return false; };
     var loaded = loadScriptModule(context, logger);
     var scriptModule = loaded.scriptModule;
     reportProgress("LOAD_SCRIPT_ENTRY", "任务执行中：准备加载脚本入口", "running", {
@@ -1341,10 +1466,36 @@ function runTask(taskSummary, options) {
         entry_file: loaded.entryLabel,
         downloaded: loaded.downloadResult.downloaded
     });
+    if (isCancelled()) {
+        reportProgress("RUN_SCRIPT_ENTRY", "任务执行中：任务已取消，跳过脚本执行", "stopped", {
+            entry_file: loaded.entryLabel
+        });
+        return {
+            status: "stopped",
+            result_code: "TASK_CANCELLED",
+            result_message: "任务已取消",
+            step_name: "RUN_SCRIPT_ENTRY",
+            extra: {
+                mode: "script_file",
+                entry_file: loaded.entryLabel
+            }
+        };
+    }
+    function throwIfCancelled(message) {
+        if (!isCancelled()) {
+            return;
+        }
+        var error = new Error(String(message || "任务已取消"));
+        error.code = "TASK_CANCELLED";
+        error.isCancelled = true;
+        throw error;
+    }
     var result = scriptModule.run(context, {
         runtime: runtime,
         logger: logger,
-        reportProgress: reportProgress
+        reportProgress: reportProgress,
+        isCancelled: isCancelled,
+        throwIfCancelled: throwIfCancelled
     });
     var lastProgress = progressReporter.getLastProgress();
     var expectedStepName = String((result && result.step_name) || "COMPLETE");
@@ -1426,11 +1577,15 @@ function syncSessionScripts(sessionPayload, options) {
     var logger = options && options.logger ? options.logger : runtime.createLogger();
     var sendEvent = options && typeof options.sendEvent === "function" ? options.sendEvent : function noop() { };
     var centerBaseURL = String((options && options.centerBaseURL) || "");
+    var isCancelled = options && typeof options.isCancelled === "function" ? options.isCancelled : function neverCancelled() { return false; };
     var refs = buildSessionRefs(sessionPayload);
     if (!centerBaseURL || manifests.length === 0) {
         return;
     }
     for (var index = 0; index < manifests.length; index += 1) {
+        if (isCancelled()) {
+            return;
+        }
         var item = manifests[index] || {};
         sendEvent({
             plan_run_id: refs.plan_run_id,
@@ -1522,6 +1677,7 @@ function runScriptNode(sessionPayload, node, options) {
         agentUUID: String(config.agentUUID || ""),
         centerBaseURL: String(config.centerBaseURL || ""),
         logger: logger,
+        isCancelled: isCancelled,
         onProgress: function (progress) {
             sendEvent({
                 plan_run_id: refs.plan_run_id,
@@ -1535,6 +1691,40 @@ function runScriptNode(sessionPayload, node, options) {
             });
         }
     });
+    if (isCancelled()) {
+        var actualStatus = String((result && result.status) || "");
+        var actualResultCode = String((result && result.result_code) || "");
+        var actualResultMessage = String((result && result.result_message) || "");
+        var actualStepName = String((result && result.step_name) || "");
+        var stoppedMessage = actualStatus === "success"
+            ? "工作流会话已停止，脚本在停止后实际执行成功"
+            : "工作流会话已停止，脚本在停止后实际执行失败";
+        sendEvent({
+            plan_run_id: refs.plan_run_id,
+            plan_device_run_id: refs.plan_device_run_id,
+            workflow_node_id: String(node.node_id || ""),
+            event_type: "workflow_step_stopped",
+            status: "stopped",
+            step_name: actualStepName || "STOPPED",
+            message: stoppedMessage,
+            extra: {
+                actual_status: actualStatus,
+                actual_result_code: actualResultCode,
+                actual_result_message: actualResultMessage
+            }
+        });
+        return {
+            status: "stopped",
+            result_code: "WORKFLOW_SESSION_STOPPED",
+            result_message: stoppedMessage,
+            workflow_node_id: String(node.node_id || ""),
+            extra: {
+                actual_status: actualStatus,
+                actual_result_code: actualResultCode,
+                actual_result_message: actualResultMessage
+            }
+        };
+    }
     if (result && String(result.status || "") === "success") {
         sendEvent({
             plan_run_id: refs.plan_run_id,
@@ -1589,8 +1779,17 @@ function runSession(sessionPayload, options) {
     syncSessionScripts(sessionPayload, {
         centerBaseURL: options && options.centerBaseURL,
         logger: logger,
-        sendEvent: sendEvent
+        sendEvent: sendEvent,
+        isCancelled: isCancelled
     });
+    if (isCancelled()) {
+        return {
+            status: "stopped",
+            result_code: "WORKFLOW_SESSION_STOPPED",
+            result_message: "工作流会话已停止",
+            workflow_node_id: currentNodeID
+        };
+    }
     while (currentNodeID) {
         if (isCancelled()) {
             return {
@@ -1697,9 +1896,13 @@ function runSession(sessionPayload, options) {
 module.exports.buildWebSocketURL = buildWebSocketURL;
 module.exports.createEnvelope = createEnvelope;
 module.exports.connect = connect;
+module.exports.createSessionFlagStore = createSessionFlagStore;
+module.exports.buildTaskSummary = buildTaskSummary;
+module.exports.buildWorkflowSessionRefs = buildWorkflowSessionRefs;
 var runtime = __bundleRequire("./lib/runtime");
 var taskRunner = __bundleRequire("./lib/task_runner");
 var workflowSessionRunner = __bundleRequire("./lib/workflow_session_runner");
+var heartbeatScheduler = __bundleRequire("./lib/heartbeat_scheduler");
 function trimBaseURL(baseURL) {
     return String(baseURL || "").replace(/\/+$/, "");
 }
@@ -1764,6 +1967,40 @@ function createRunnable(runCallback) {
         run: runCallback
     });
 }
+function createSessionFlagStore() {
+    if (typeof java !== "undefined") {
+        try {
+            var ConcurrentHashMap = javaType("java.util.concurrent.ConcurrentHashMap");
+            var map_1 = new ConcurrentHashMap();
+            return {
+                put: function (key) {
+                    map_1.put(String(key || ""), true);
+                },
+                remove: function (key) {
+                    map_1.remove(String(key || ""));
+                },
+                has: function (key) {
+                    return map_1.containsKey(String(key || ""));
+                }
+            };
+        }
+        catch (_error) {
+            // 回退到普通对象存储。
+        }
+    }
+    var state = {};
+    return {
+        put: function (key) {
+            state[String(key || "")] = true;
+        },
+        remove: function (key) {
+            delete state[String(key || "")];
+        },
+        has: function (key) {
+            return state[String(key || "")] === true;
+        }
+    };
+}
 function buildTaskSummary(taskPayload) {
     var payload = taskPayload || {};
     return {
@@ -1787,12 +2024,16 @@ function connectAutoJs(options) {
     var Request = javaType("okhttp3.Request");
     var TimeUnit = javaType("java.util.concurrent.TimeUnit");
     var Executors = javaType("java.util.concurrent.Executors");
-    var heartbeatExecutor = null;
-    var heartbeatFuture = null;
+    var heartbeatHandle = null;
     var reconnectExecutor = null;
     var reconnectFuture = null;
     var wsURL = buildWebSocketURL(options.centerBaseURL);
     var heartbeatIntervalMS = Number(options.heartbeatIntervalMS || 30000);
+    var heartbeatSchedulerMode = String(options.heartbeatScheduler || "executor");
+    var heartbeatLeasePath = String(options.heartbeatLeasePath || "");
+    var pingIntervalMS = Number(options.pingIntervalMS || Math.min(heartbeatIntervalMS, 20000));
+    var watchdogIntervalMS = Number(options.watchdogIntervalMS || 20000);
+    var silenceTimeoutMS = Number(options.silenceTimeoutMS || 120000);
     var reconnectEnabled = options.reconnectEnabled !== false;
     var reconnectInitialDelayMS = Number(options.reconnectInitialDelayMS || 3000);
     var reconnectMaxDelayMS = Number(options.reconnectMaxDelayMS || 60000);
@@ -1803,20 +2044,30 @@ function connectAutoJs(options) {
     var onAssignTask = typeof options.onAssignTask === "function" ? options.onAssignTask : null;
     var heartbeatStarted = false;
     var heartbeatGeneration = 0;
+    var heartbeatLeaseToken = "";
     var reconnectAttempt = 0;
+    var reconnectScheduledGeneration = 0;
     var connectGeneration = 0;
     var closedGeneration = 0;
     var intentionallyClosed = false;
+    var lastReceiveAt = Date.now();
+    var lastSendAt = Date.now();
     var taskExecuting = false;
     var workflowSessionExecuting = false;
-    var workflowStopFlags = {};
+    var workflowStopFlags = createSessionFlagStore();
+    var workflowResultSentFlags = createSessionFlagStore();
     var currentWorkflowRunID = "";
     var lastTaskProgressState = null;
     var lastWorkflowEventState = null;
+    var watchdogExecutor = null;
+    var watchdogFuture = null;
+    logger.info("WebSocket 心跳调度模式：" + heartbeatSchedulerMode);
     var client = new OkHttpClient.Builder()
         .readTimeout(0, TimeUnit.MILLISECONDS)
+        .pingInterval(Math.max(5000, pingIntervalMS), TimeUnit.MILLISECONDS)
         .build();
     var socket = null;
+    var activeHeartbeatScheduler = heartbeatScheduler.createHeartbeatScheduler(heartbeatSchedulerMode, logger);
     function shouldSkipDuplicateEvent(cache, key, dedupWindowMS) {
         if (!cache) {
             return false;
@@ -1833,8 +2084,55 @@ function connectAutoJs(options) {
         if (socket.send(text) === false) {
             throw new Error("websocket_send_failed");
         }
+        lastSendAt = Date.now();
     }
-    function sendHeartbeat() {
+    function readHeartbeatLeaseToken() {
+        if (!heartbeatLeasePath) {
+            return "";
+        }
+        try {
+            var text = runtime.readTextFile(heartbeatLeasePath);
+            if (!text || !String(text).trim()) {
+                return "";
+            }
+            var payload = JSON.parse(String(text));
+            return String(payload.token || "");
+        }
+        catch (_error) {
+            return "";
+        }
+    }
+    function writeHeartbeatLeaseToken(token) {
+        if (!heartbeatLeasePath) {
+            return;
+        }
+        runtime.writeTextFile(heartbeatLeasePath, JSON.stringify({
+            token: String(token || ""),
+            updated_at: runtime.nowISOString()
+        }, null, 2));
+    }
+    function clearHeartbeatLeaseToken(token) {
+        if (!heartbeatLeasePath) {
+            return;
+        }
+        var currentToken = readHeartbeatLeaseToken();
+        if (!currentToken || currentToken === String(token || "")) {
+            runtime.removeFileIfExists(heartbeatLeasePath);
+        }
+    }
+    function isHeartbeatLeaseActive(token) {
+        if (!heartbeatLeasePath) {
+            return true;
+        }
+        return readHeartbeatLeaseToken() === String(token || "");
+    }
+    function sendHeartbeat(source) {
+        logger.info("准备发送心跳，source="
+            + String(source || "")
+            + "，connect_generation="
+            + connectGeneration
+            + "，heartbeat_generation="
+            + heartbeatGeneration);
         send("heartbeat", createRequestID("agent-heartbeat"), {
             agent_uuid: agentUUID,
             device_link_sn: deviceLinkSN,
@@ -1955,6 +2253,14 @@ function connectAutoJs(options) {
             message: String(payload.message || ""),
             extra: payload.extra || {}
         });
+        logger.info("已发送 workflow_session_event："
+            + String(refs.plan_device_run_id || "")
+            + " -> "
+            + String(payload.event_type || "")
+            + " / "
+            + String(payload.status || "running")
+            + " / "
+            + String(payload.message || ""));
         lastWorkflowEventState = {
             key: eventKey,
             at: Date.now()
@@ -1963,6 +2269,11 @@ function connectAutoJs(options) {
     function sendWorkflowSessionResult(resultPayload) {
         var payload = resultPayload || {};
         var refs = buildWorkflowSessionRefs(payload);
+        var sessionKey = String(refs.plan_device_run_id || "");
+        if (sessionKey && workflowResultSentFlags.has(sessionKey)) {
+            logger.warn("工作流结果已发送，忽略重复 workflow_session_result：" + sessionKey + " -> " + String(payload.status || "failed"));
+            return;
+        }
         send("workflow_session_result", createRequestID("agent-workflow-session-result"), {
             plan_run_id: refs.plan_run_id,
             plan_device_run_id: refs.plan_device_run_id,
@@ -1972,39 +2283,60 @@ function connectAutoJs(options) {
             result_message: String(payload.result_message || ""),
             extra: payload.extra || {}
         });
-        logger.info("已发送 workflow_session_result：" + String(refs.plan_device_run_id || "") + " -> " + String(payload.status || "failed"));
+        logger.info("已发送 workflow_session_result："
+            + String(refs.plan_device_run_id || "")
+            + " -> "
+            + String(payload.status || "failed")
+            + " / "
+            + String(payload.result_message || "")
+            + " / extra="
+            + JSON.stringify(payload.extra || {}));
+        if (sessionKey) {
+            workflowResultSentFlags.put(sessionKey);
+        }
     }
     function markWorkflowStopRequested(sessionKey) {
         var nextKey = String(sessionKey || "").trim();
         if (!nextKey) {
             return;
         }
-        workflowStopFlags[nextKey] = true;
+        workflowStopFlags.put(nextKey);
     }
     function clearWorkflowStopRequested(sessionKey) {
         var nextKey = String(sessionKey || "").trim();
         if (!nextKey) {
             return;
         }
-        delete workflowStopFlags[nextKey];
+        workflowStopFlags.remove(nextKey);
+    }
+    function clearWorkflowResultSent(sessionKey) {
+        var nextKey = String(sessionKey || "").trim();
+        if (!nextKey) {
+            return;
+        }
+        workflowResultSentFlags.remove(nextKey);
     }
     function isWorkflowStopRequested(sessionKey) {
         var nextKey = String(sessionKey || "").trim();
         if (!nextKey) {
             return false;
         }
-        return workflowStopFlags[nextKey] === true;
+        return workflowStopFlags.has(nextKey);
     }
     function stopHeartbeat() {
         heartbeatGeneration += 1;
-        if (heartbeatFuture) {
-            heartbeatFuture.cancel(false);
-            heartbeatFuture = null;
+        if (heartbeatHandle) {
+            logger.info("停止心跳调度器，mode="
+                + heartbeatHandle.kind
+                + "，scheduler_id="
+                + heartbeatHandle.schedulerID
+                + "，next_generation="
+                + heartbeatGeneration);
+            heartbeatHandle.cancel();
+            heartbeatHandle = null;
         }
-        if (heartbeatExecutor) {
-            heartbeatExecutor.shutdownNow();
-            heartbeatExecutor = null;
-        }
+        clearHeartbeatLeaseToken(heartbeatLeaseToken);
+        heartbeatLeaseToken = "";
         heartbeatStarted = false;
     }
     function stopReconnect() {
@@ -2015,6 +2347,17 @@ function connectAutoJs(options) {
         if (reconnectExecutor) {
             reconnectExecutor.shutdownNow();
             reconnectExecutor = null;
+        }
+        reconnectScheduledGeneration = 0;
+    }
+    function stopWatchdog() {
+        if (watchdogFuture) {
+            watchdogFuture.cancel(false);
+            watchdogFuture = null;
+        }
+        if (watchdogExecutor) {
+            watchdogExecutor.shutdownNow();
+            watchdogExecutor = null;
         }
     }
     function resetReconnectState() {
@@ -2057,6 +2400,35 @@ function connectAutoJs(options) {
             logger.warn("WebSocket 关闭时出现异常：" + String(error));
         }
     }
+    function startWatchdog() {
+        var safeWatchdogIntervalMS = Math.max(5000, watchdogIntervalMS);
+        var safeSilenceTimeoutMS = Math.max(safeWatchdogIntervalMS * 2, silenceTimeoutMS);
+        stopWatchdog();
+        watchdogExecutor = Executors.newSingleThreadScheduledExecutor();
+        watchdogFuture = watchdogExecutor.scheduleAtFixedRate(createRunnable(function watchdogTask() {
+            if (intentionallyClosed) {
+                return;
+            }
+            var now = Date.now();
+            var silenceMS = now - Math.max(lastReceiveAt, lastSendAt);
+            if (!socket) {
+                logger.warn("WebSocket watchdog 检测到连接对象缺失，准备触发重连。");
+                scheduleReconnect("watchdog_missing_socket");
+                return;
+            }
+            if (silenceMS >= safeSilenceTimeoutMS) {
+                logger.warn("WebSocket watchdog 检测到连接静默超时，准备主动重连，silence_ms=" + silenceMS);
+                closeSocketQuietly(1001, "watchdog silence timeout");
+                handleSocketClosed(connectGeneration, "watchdog_silence_timeout " + silenceMS);
+            }
+        }), safeWatchdogIntervalMS, safeWatchdogIntervalMS, TimeUnit.MILLISECONDS);
+        logger.info("已启动 WebSocket watchdog，interval_ms="
+            + safeWatchdogIntervalMS
+            + "，silence_timeout_ms="
+            + safeSilenceTimeoutMS
+            + "，ping_interval_ms="
+            + Math.max(5000, pingIntervalMS));
+    }
     function scheduleReconnect(reason) {
         if (!reconnectEnabled) {
             logger.warn("WebSocket 自动重连已禁用，原因：" + String(reason || ""));
@@ -2069,8 +2441,13 @@ function connectAutoJs(options) {
         if (reconnectFuture) {
             return;
         }
+        if (reconnectScheduledGeneration === connectGeneration) {
+            return;
+        }
+        reconnectScheduledGeneration = connectGeneration;
         reconnectAttempt += 1;
         var delayMS = getReconnectDelayMS(reconnectAttempt);
+        var scheduledGeneration = connectGeneration;
         logger.warn("WebSocket 连接中断，准备第 " + reconnectAttempt + " 次重连，delay=" + delayMS + "ms，原因：" + String(reason || ""));
         reconnectExecutor = Executors.newSingleThreadScheduledExecutor();
         reconnectFuture = reconnectExecutor.schedule(createRunnable(function reconnectTask() {
@@ -2081,6 +2458,10 @@ function connectAutoJs(options) {
             }
             if (intentionallyClosed) {
                 logger.info("WebSocket 在重连等待期间被主动关闭，取消重连。");
+                return;
+            }
+            if (scheduledGeneration !== connectGeneration) {
+                logger.info("WebSocket 重连任务代际已过期，取消执行：scheduled_generation=" + scheduledGeneration + "，current_generation=" + connectGeneration);
                 return;
             }
             logger.info("WebSocket 开始执行第 " + reconnectAttempt + " 次重连：" + wsURL);
@@ -2106,21 +2487,60 @@ function connectAutoJs(options) {
         heartbeatStarted = true;
         heartbeatGeneration += 1;
         var currentHeartbeatGeneration = heartbeatGeneration;
-        sendHeartbeat();
-        heartbeatExecutor = Executors.newSingleThreadScheduledExecutor();
-        heartbeatFuture = heartbeatExecutor.scheduleAtFixedRate(createRunnable(function heartbeatTask() {
-            if (!heartbeatStarted || currentHeartbeatGeneration !== heartbeatGeneration || expectedGeneration !== connectGeneration) {
-                return;
+        heartbeatLeaseToken = String(connectGeneration) + ":" + String(currentHeartbeatGeneration) + ":" + String(Date.now());
+        writeHeartbeatLeaseToken(heartbeatLeaseToken);
+        sendHeartbeat("hello_ack");
+        heartbeatHandle = activeHeartbeatScheduler.start({
+            intervalMS: heartbeatIntervalMS,
+            logger: logger,
+            onTick: function heartbeatTask() {
+                logger.info("心跳调度器触发，mode="
+                    + (heartbeatHandle ? heartbeatHandle.kind : activeHeartbeatScheduler.kind)
+                    + "，scheduler_id="
+                    + (heartbeatHandle ? heartbeatHandle.schedulerID : "")
+                    + "，connect_generation="
+                    + connectGeneration
+                    + "，expected_generation="
+                    + expectedGeneration
+                    + "，heartbeat_generation="
+                    + currentHeartbeatGeneration);
+                if (!heartbeatStarted || currentHeartbeatGeneration !== heartbeatGeneration || expectedGeneration !== connectGeneration) {
+                    return;
+                }
+                if (!isHeartbeatLeaseActive(heartbeatLeaseToken)) {
+                    logger.warn("检测到心跳租约已失效，停止旧心跳链路，scheduler_id="
+                        + (heartbeatHandle ? heartbeatHandle.schedulerID : "")
+                        + "，connect_generation="
+                        + connectGeneration
+                        + "，heartbeat_generation="
+                        + currentHeartbeatGeneration);
+                    stopHeartbeat();
+                    return;
+                }
+                try {
+                    sendHeartbeat("scheduler_tick");
+                }
+                catch (error) {
+                    logger.error("WebSocket heartbeat 发送失败：" + String(error));
+                    closeSocketQuietly(1001, "heartbeat send failed");
+                    handleSocketClosed(expectedGeneration, "heartbeat_send_failed " + String(error));
+                }
             }
-            try {
-                sendHeartbeat();
-            }
-            catch (error) {
-                logger.error("WebSocket heartbeat 发送失败：" + String(error));
-                closeSocketQuietly(1001, "heartbeat send failed");
-                handleSocketClosed(expectedGeneration, "heartbeat_send_failed " + String(error));
-            }
-        }), heartbeatIntervalMS, heartbeatIntervalMS, TimeUnit.MILLISECONDS);
+        });
+        logger.info("已启动心跳调度器，requested_mode="
+            + heartbeatSchedulerMode
+            + "，actual_mode="
+            + heartbeatHandle.kind
+            + "，scheduler_id="
+            + heartbeatHandle.schedulerID
+            + "，lease_token="
+            + heartbeatLeaseToken
+            + "，connect_generation="
+            + connectGeneration
+            + "，heartbeat_generation="
+            + currentHeartbeatGeneration
+            + "，interval_ms="
+            + heartbeatIntervalMS);
     }
     function executeTask(taskSummary) {
         if (taskExecuting) {
@@ -2205,6 +2625,7 @@ function connectAutoJs(options) {
         workflowSessionExecuting = true;
         currentWorkflowRunID = sessionKey;
         clearWorkflowStopRequested(sessionKey);
+        clearWorkflowResultSent(sessionKey);
         try {
             var result = workflowSessionRunner.runSession(payload, {
                 deviceID: deviceID,
@@ -2225,7 +2646,7 @@ function connectAutoJs(options) {
                 status: String((result && result.status) || "failed"),
                 result_code: String((result && result.result_code) || ""),
                 result_message: String((result && result.result_message) || ""),
-                extra: {}
+                extra: (result && result.extra) || {}
             });
         }
         catch (error) {
@@ -2328,6 +2749,7 @@ function connectAutoJs(options) {
                 }
                 socket = _webSocket;
                 closedGeneration = 0;
+                lastReceiveAt = Date.now();
                 logger.info("WebSocket 已连接：" + wsURL);
                 try {
                     send("hello", createRequestID("agent-hello"), {
@@ -2346,6 +2768,7 @@ function connectAutoJs(options) {
                 if (expectedGeneration !== connectGeneration) {
                     return;
                 }
+                lastReceiveAt = Date.now();
                 logger.info("收到 WebSocket 消息：" + String(text));
                 try {
                     var message = JSON.parse(String(text));
@@ -2426,9 +2849,12 @@ function connectAutoJs(options) {
         connectGeneration += 1;
         closedGeneration = 0;
         socket = null;
-        logger.info("开始连接 WebSocket：" + wsURL);
+        lastReceiveAt = Date.now();
+        lastSendAt = Date.now();
+        logger.info("开始连接 WebSocket：" + wsURL + "，connect_generation=" + connectGeneration);
         client.newWebSocket(request, createListener(connectGeneration));
     }
+    startWatchdog();
     openSocket();
     return {
         url: wsURL,
@@ -2436,6 +2862,7 @@ function connectAutoJs(options) {
             intentionallyClosed = true;
             stopHeartbeat();
             stopReconnect();
+            stopWatchdog();
             if (socket) {
                 socket.close(1000, "agent close");
             }
@@ -2468,6 +2895,7 @@ var centerClient = __bundleRequire("./lib/center_client");
 var wsClient = __bundleRequire("./lib/ws_client");
 var STOP_SIGNAL_CHECK_INTERVAL_MS = 2000;
 var RUNTIME_LOCK_STALE_MS = 2 * 60 * 1000;
+var FALLBACK_ENGINE_ID_PREFIX = "fallback-engine-";
 function parseCLIArgs(args) {
     var result = {
         center: "",
@@ -2515,6 +2943,19 @@ function shallowCopy(input) {
     }
     return output;
 }
+function normalizePreferredHeartbeatScheduler(config, logger) {
+    var nextConfig = shallowCopy(config);
+    var websocket = shallowCopy(nextConfig.websocket || {});
+    var currentMode = String(websocket.heartbeat_scheduler || "");
+    if (!currentMode || currentMode === "alarm_manager") {
+        websocket.heartbeat_scheduler = "executor";
+        nextConfig.websocket = websocket;
+        logger.info("已将心跳调度模式迁移为 executor。");
+        return nextConfig;
+    }
+    nextConfig.websocket = websocket;
+    return nextConfig;
+}
 function mergeBootstrapConfig(config, bootstrap) {
     var nextConfig = shallowCopy(config);
     var source = bootstrap || {};
@@ -2531,6 +2972,9 @@ function mergeBootstrapConfig(config, bootstrap) {
         }
         if (source.websocket.heartbeat_interval_ms) {
             nextConfig.websocket.heartbeat_interval_ms = source.websocket.heartbeat_interval_ms;
+        }
+        if (source.websocket.heartbeat_scheduler) {
+            nextConfig.websocket.heartbeat_scheduler = source.websocket.heartbeat_scheduler;
         }
         if (Object.prototype.hasOwnProperty.call(source.websocket, "reconnect_enabled")) {
             nextConfig.websocket.reconnect_enabled = source.websocket.reconnect_enabled;
@@ -2603,8 +3047,17 @@ function getCurrentEngineID() {
     }
     return "";
 }
+function createFallbackEngineID() {
+    return FALLBACK_ENGINE_ID_PREFIX + Date.now().toString(36) + "-" + Math.floor(Math.random() * 100000).toString(36);
+}
+function isFallbackEngineID(engineID) {
+    return String(engineID || "").indexOf(FALLBACK_ENGINE_ID_PREFIX) === 0;
+}
 function isEngineAlive(engineID) {
     if (!engineID) {
+        return false;
+    }
+    if (isFallbackEngineID(engineID)) {
         return false;
     }
     try {
@@ -2625,12 +3078,15 @@ function isEngineAlive(engineID) {
 }
 function acquireRuntimeLock(store, logger) {
     var lockPath = getRuntimeLockPath(store);
-    var currentEngineID = getCurrentEngineID();
+    var currentEngineID = getCurrentEngineID() || createFallbackEngineID();
     var nowISO = runtime.nowISOString();
     var existing = parseRuntimeLock(runtime.readTextFile(lockPath));
     var existingUpdatedAt = Date.parse(existing.updated_at || "");
     var isStale = !existingUpdatedAt || (Date.now() - existingUpdatedAt) > RUNTIME_LOCK_STALE_MS;
-    if (existing.engine_id && existing.engine_id !== currentEngineID && isEngineAlive(existing.engine_id) && !isStale) {
+    var hasExistingLock = !!(existing.engine_id || existing.acquired_at || existing.updated_at);
+    var shouldBlockByExistingLock = hasExistingLock && !isStale;
+    if (shouldBlockByExistingLock) {
+        logger.warn("检测到未过期的 Agent 运行锁，当前实例不再重复启动：" + lockPath);
         return {
             alreadyRunning: true,
             path: lockPath,
@@ -2670,6 +3126,7 @@ function startStopSignalMonitor(options) {
     var monitorOptions = options || {};
     var logger = monitorOptions.logger || runtime.createLogger();
     var websocket = monitorOptions.websocket;
+    var cleanup = monitorOptions.cleanup || null;
     var stopSignalPath = getStopSignalPath(monitorOptions.store);
     var monitor = null;
     var stopped = false;
@@ -2687,7 +3144,11 @@ function startStopSignalMonitor(options) {
         if (websocket && typeof websocket.close === "function") {
             websocket.close();
         }
+        if (cleanup && typeof cleanup.release === "function") {
+            cleanup.release();
+        }
         logger.info("Agent 已停止心跳与重连，准备退出当前脚本。");
+        runtime.sleepMS(300);
         runtime.exitProcess(0);
     }
     monitor = runtime.startInterval(function watchStopSignal() {
@@ -2734,6 +3195,7 @@ function main(cliOptions) {
         if (options.center) {
             config_1.center_base_url = options.center;
         }
+        config_1 = normalizePreferredHeartbeatScheduler(config_1, logger);
         var deviceInfo = runtime.collectDeviceInfo(config_1.device);
         config_1.device = deviceInfo;
         if (!config_1.agent_uuid) {
@@ -2786,7 +3248,12 @@ function finishRegister(config, store, response, logger, options, runtimeLock) {
             deviceID: nextConfig.device_id,
             agentUUID: nextConfig.agent_uuid,
             deviceLinkSN: nextConfig.device_link_sn || "",
+            heartbeatLeasePath: configStore.defaultHeartbeatLeasePath(),
             heartbeatIntervalMS: getHeartbeatIntervalMS(nextConfig),
+            heartbeatScheduler: getHeartbeatScheduler(nextConfig),
+            pingIntervalMS: getPingIntervalMS(nextConfig),
+            watchdogIntervalMS: getWSWatchdogIntervalMS(nextConfig),
+            silenceTimeoutMS: getWSSilenceTimeoutMS(nextConfig),
             reconnectEnabled: getReconnectEnabled(nextConfig),
             reconnectInitialDelayMS: getReconnectInitialDelayMS(nextConfig),
             reconnectMaxDelayMS: getReconnectMaxDelayMS(nextConfig),
@@ -2799,7 +3266,12 @@ function finishRegister(config, store, response, logger, options, runtimeLock) {
         stopSignalMonitor = startStopSignalMonitor({
             store: store,
             websocket: websocketResult,
-            logger: logger
+            logger: logger,
+            cleanup: {
+                release: function () {
+                    runtimeLock.release();
+                }
+            }
         });
     }
     else {
@@ -2839,6 +3311,30 @@ function getHeartbeatIntervalMS(config) {
         return 30000;
     }
     return interval;
+}
+function getHeartbeatScheduler(config) {
+    var websocketConfig = config.websocket || {};
+    return String(websocketConfig.heartbeat_scheduler || "executor");
+}
+function getPingIntervalMS(config) {
+    var heartbeatIntervalMS = getHeartbeatIntervalMS(config);
+    return Math.max(5000, Math.min(heartbeatIntervalMS, 20000));
+}
+function getWSWatchdogIntervalMS(config) {
+    var keepAliveConfig = config.keep_alive || {};
+    var intervalSeconds = Number(keepAliveConfig.ws_watchdog_interval_seconds || 20);
+    if (!intervalSeconds || intervalSeconds < 5) {
+        return 20000;
+    }
+    return intervalSeconds * 1000;
+}
+function getWSSilenceTimeoutMS(config) {
+    var keepAliveConfig = config.keep_alive || {};
+    var timeoutSeconds = Number(keepAliveConfig.ws_silence_timeout_seconds || 120);
+    if (!timeoutSeconds || timeoutSeconds < 10) {
+        return 120000;
+    }
+    return timeoutSeconds * 1000;
 }
 function getReconnectEnabled(config) {
     var websocketConfig = config.websocket || {};
@@ -2919,7 +3415,16 @@ if (typeof module !== "undefined" && module.exports) {
     module.exports = {
         main: main,
         parseCLIArgs: parseCLIArgs,
-        buildRegisterPayload: buildRegisterPayload
+        buildRegisterPayload: buildRegisterPayload,
+        mergeBootstrapConfig: mergeBootstrapConfig,
+        mergeRegisterResult: mergeRegisterResult,
+        acquireRuntimeLock: acquireRuntimeLock,
+        getHeartbeatIntervalMS: getHeartbeatIntervalMS,
+        getReconnectEnabled: getReconnectEnabled,
+        getReconnectInitialDelayMS: getReconnectInitialDelayMS,
+        getReconnectMaxDelayMS: getReconnectMaxDelayMS,
+        getReconnectBackoffMultiplier: getReconnectBackoffMultiplier,
+        createFallbackEngineID: createFallbackEngineID
     };
 }
 

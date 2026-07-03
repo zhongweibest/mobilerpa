@@ -106,7 +106,21 @@ function defaultStopSignalPath(): string {
 }
 
 function defaultRuntimeLockPath(): string {
-  return joinPath(resolveAgentRootPath(), "runtime", "agent.lock.json");
+  return joinPath(resolveRuntimeStateRootPath(), "agent.lock.json");
+}
+
+function defaultHeartbeatLeasePath(): string {
+  return joinPath(resolveRuntimeStateRootPath(), "heartbeat.lease.json");
+}
+
+function resolveRuntimeStateRootPath(): string {
+  if (isNodeRuntime()) {
+    return joinPath(resolveAgentRootPath(), "runtime");
+  }
+
+  const agentRoot = resolveAgentRootPath();
+  const parentRoot = dirname(agentRoot);
+  return joinPath(parentRoot, ".mobilerpa-agent-runtime");
 }
 
 function exists(filePath: string): boolean {
@@ -150,10 +164,17 @@ function createEmptyConfig(): AgentConfig {
     websocket: {
       enabled: true,
       heartbeat_interval_ms: 30000,
+      heartbeat_scheduler: "executor",
       reconnect_enabled: true,
       reconnect_initial_delay_ms: 3000,
       reconnect_max_delay_ms: 60000,
       reconnect_backoff_multiplier: 2
+    },
+    keep_alive: {
+      wake_screen_before_task: true,
+      wake_screen_cooldown_seconds: 30,
+      ws_watchdog_interval_seconds: 20,
+      ws_silence_timeout_seconds: 120
     },
     last_register: {},
     created_at: now,
@@ -167,6 +188,7 @@ function normalizeWebSocketConfig(input?: WebSocketConfig, fallback?: WebSocketC
   return {
     enabled: source.enabled === false ? false : base.enabled !== false,
     heartbeat_interval_ms: source.heartbeat_interval_ms || base.heartbeat_interval_ms || 30000,
+    heartbeat_scheduler: source.heartbeat_scheduler || base.heartbeat_scheduler || "executor",
     reconnect_enabled: source.reconnect_enabled === false ? false : base.reconnect_enabled !== false,
     reconnect_initial_delay_ms: source.reconnect_initial_delay_ms || base.reconnect_initial_delay_ms || 3000,
     reconnect_max_delay_ms: source.reconnect_max_delay_ms || base.reconnect_max_delay_ms || 60000,
@@ -184,6 +206,12 @@ function normalizeConfig(raw?: Partial<AgentConfig>): AgentConfig {
     device_link_sn: input.device_link_sn || "",
     device: input.device || {},
     websocket: normalizeWebSocketConfig(input.websocket, base.websocket),
+    keep_alive: {
+      wake_screen_before_task: input.keep_alive && input.keep_alive.wake_screen_before_task === false ? false : base.keep_alive && base.keep_alive.wake_screen_before_task !== false,
+      wake_screen_cooldown_seconds: Number((input.keep_alive && input.keep_alive.wake_screen_cooldown_seconds) || (base.keep_alive && base.keep_alive.wake_screen_cooldown_seconds) || 30),
+      ws_watchdog_interval_seconds: Number((input.keep_alive && input.keep_alive.ws_watchdog_interval_seconds) || (base.keep_alive && base.keep_alive.ws_watchdog_interval_seconds) || 20),
+      ws_silence_timeout_seconds: Number((input.keep_alive && input.keep_alive.ws_silence_timeout_seconds) || (base.keep_alive && base.keep_alive.ws_silence_timeout_seconds) || 120)
+    },
     last_register: input.last_register || {},
     created_at: input.created_at || base.created_at,
     updated_at: input.updated_at || base.updated_at
@@ -242,5 +270,6 @@ export {
   defaultBootstrapPath,
   defaultStopSignalPath,
   defaultRuntimeLockPath,
+  defaultHeartbeatLeasePath,
   createConfigStore
 };

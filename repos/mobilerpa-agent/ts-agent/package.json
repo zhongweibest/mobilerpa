@@ -7,7 +7,8 @@
     "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true }); require('fs').rmSync('release', { recursive: true, force: true })\"",
     "check": "tsc -p tsconfig.json --noEmit",
     "build": "npm run clean && tsc -p tsconfig.json && node tools/build-agent-bundle.js",
-    "test": "node --test",
+    "test:build": "tsc -p tsconfig.json",
+    "test": "npm run test:build && node --test test/**/*.test.js",
     "release:agent": "npm run check && npm run test && npm run build"
   },
   "devDependencies": {
