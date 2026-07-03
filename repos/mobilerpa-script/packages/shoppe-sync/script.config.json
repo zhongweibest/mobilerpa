@@ -1,0 +1,10 @@
+{
+  "scriptName": "shoppe_sync",
+  "scriptVersion": "v0.1.2",
+  "packageName": "@mobilerpa-script/shoppe-sync",
+  "outputRoot": "../../shoppe_sync",
+  "debugTaskId": "debug_shoppe_sync_v0_1_2",
+  "debugParams": {
+    "debug": true
+  }
+}

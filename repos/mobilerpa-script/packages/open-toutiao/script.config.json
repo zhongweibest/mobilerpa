@@ -1,0 +1,10 @@
+{
+  "scriptName": "open_toutiao",
+  "scriptVersion": "v0.1.2",
+  "packageName": "@mobilerpa-script/open-toutiao",
+  "outputRoot": "../../open_toutiao",
+  "debugTaskId": "debug_open_toutiao_v0_1_2",
+  "debugParams": {
+    "debug": true
+  }
+}

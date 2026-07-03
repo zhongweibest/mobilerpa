@@ -1,0 +1,10 @@
+{
+  "scriptName": "open_qq",
+  "scriptVersion": "v0.1.2",
+  "packageName": "@mobilerpa-script/open-qq",
+  "outputRoot": "../../open_qq",
+  "debugTaskId": "debug_open_qq_v0_1_2",
+  "debugParams": {
+    "debug": true
+  }
+}

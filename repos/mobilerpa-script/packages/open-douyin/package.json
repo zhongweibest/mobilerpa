@@ -1,0 +1,12 @@
+{
+  "name": "@mobilerpa-script/open-douyin",
+  "version": "0.1.0",
+  "private": true,
+  "dependencies": {
+    "@mobilerpa-script/shared": "0.1.0"
+  },
+  "scripts": {
+    "build": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json && node build.js",
+    "check": "node ../../node_modules/typescript/bin/tsc -p tsconfig.json --noEmit"
+  }
+}

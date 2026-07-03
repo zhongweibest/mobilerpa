@@ -1,0 +1,10 @@
+{
+  "scriptName": "open_douyin",
+  "scriptVersion": "v0.1.2",
+  "packageName": "@mobilerpa-script/open-douyin",
+  "outputRoot": "../../open_douyin",
+  "debugTaskId": "debug_open_douyin_v0_1_2",
+  "debugParams": {
+    "debug": true
+  }
+}
