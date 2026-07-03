@@ -261,3 +261,20 @@ func TestParseEnvLine(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadDocsAuthConfig(t *testing.T) {
+	t.Setenv("CENTER_DOCS_AUTH_ENABLED", "false")
+	t.Setenv("CENTER_DOCS_AUTH_USERNAME", "docs_user")
+	t.Setenv("CENTER_DOCS_AUTH_PASSWORD", "docs_pass")
+
+	cfg := Load()
+	if cfg.DocsAuthEnabled {
+		t.Fatalf("expected docs auth disabled")
+	}
+	if cfg.DocsAuthUsername != "docs_user" {
+		t.Fatalf("unexpected docs auth username: %s", cfg.DocsAuthUsername)
+	}
+	if cfg.DocsAuthPassword != "docs_pass" {
+		t.Fatalf("unexpected docs auth password: %s", cfg.DocsAuthPassword)
+	}
+}

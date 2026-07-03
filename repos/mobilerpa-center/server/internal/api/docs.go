@@ -5,12 +5,24 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/mobilerpa/mobilerpa-center/server/internal/config"
 )
 
 //go:generate go run ../../cmd/openapi-gen
 
 //go:embed generated/openapi.json
 var embeddedOpenAPI []byte
+
+var docsAuthConfig = config.Config{
+	DocsAuthEnabled:  true,
+	DocsAuthUsername: "admin",
+	DocsAuthPassword: "123456",
+}
+
+func SetDocsAuthConfig(cfg config.Config) {
+	docsAuthConfig = cfg
+}
 
 const scalarHTMLTemplate = `<!doctype html>
 <html lang="zh-CN">
@@ -43,7 +55,7 @@ const scalarHTMLTemplate = `<!doctype html>
 </html>`
 
 func scalarDocs() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return docsBasicAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w, http.MethodGet)
 			return
@@ -56,16 +68,33 @@ func scalarDocs() http.HandlerFunc {
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		_, _ = fmt.Fprintf(w, scalarHTMLTemplate, specURL)
-	}
+	})
 }
 
 func openAPIDocument() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+	return docsBasicAuth(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
 			methodNotAllowed(w, http.MethodGet)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		_, _ = w.Write(embeddedOpenAPI)
+	})
+}
+
+func docsBasicAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !docsAuthConfig.DocsAuthEnabled {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		username, password, ok := r.BasicAuth()
+		if !ok || username != docsAuthConfig.DocsAuthUsername || password != docsAuthConfig.DocsAuthPassword {
+			w.Header().Set("WWW-Authenticate", `Basic realm="MobileRPA API Docs"`)
+			writeError(w, http.StatusUnauthorized, "docs_auth_required")
+			return
+		}
+		next.ServeHTTP(w, r)
 	}
 }

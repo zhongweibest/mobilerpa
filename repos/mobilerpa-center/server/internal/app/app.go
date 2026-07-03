@@ -44,6 +44,7 @@ type App struct {
 // New 创建中心服务应用，并初始化运行所需依赖。
 func New() (*App, error) {
 	cfg := config.Load()
+	api.SetDocsAuthConfig(cfg)
 
 	db, err := storage.Open(cfg.DBPath)
 	if err != nil {

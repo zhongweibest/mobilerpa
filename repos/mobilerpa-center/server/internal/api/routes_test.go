@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/config"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/discovery"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
@@ -223,7 +224,13 @@ func TestScalarDocsAndOpenAPIDocument(t *testing.T) {
 	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
 	defer server.Close()
 
-	openAPIResp, err := http.Get(server.URL + "/openapi.json")
+	openAPIReq, err := http.NewRequest(http.MethodGet, server.URL+"/openapi.json", nil)
+	if err != nil {
+		t.Fatalf("create openapi request: %v", err)
+	}
+	openAPIReq.SetBasicAuth("admin", "123456")
+
+	openAPIResp, err := http.DefaultClient.Do(openAPIReq)
 	if err != nil {
 		t.Fatalf("openapi request: %v", err)
 	}
@@ -241,7 +248,13 @@ func TestScalarDocsAndOpenAPIDocument(t *testing.T) {
 		t.Fatalf("unexpected openapi version: %#v", openAPIPayload["openapi"])
 	}
 
-	scalarResp, err := http.Get(server.URL + "/scalar")
+	scalarReq, err := http.NewRequest(http.MethodGet, server.URL+"/scalar", nil)
+	if err != nil {
+		t.Fatalf("create scalar request: %v", err)
+	}
+	scalarReq.SetBasicAuth("admin", "123456")
+
+	scalarResp, err := http.DefaultClient.Do(scalarReq)
 	if err != nil {
 		t.Fatalf("scalar request: %v", err)
 	}
@@ -261,6 +274,16 @@ func TestScalarDocsAndOpenAPIDocument(t *testing.T) {
 	}
 	if !strings.Contains(body, "/openapi.json") {
 		t.Fatalf("scalar page should reference openapi.json")
+	}
+
+	unauthorizedResp, err := http.Get(server.URL + "/scalar")
+	if err != nil {
+		t.Fatalf("unauthorized scalar request: %v", err)
+	}
+	defer unauthorizedResp.Body.Close()
+
+	if unauthorizedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("unexpected unauthorized scalar status: %d", unauthorizedResp.StatusCode)
 	}
 }
 
@@ -439,6 +462,50 @@ func TestDeleteOfflineDeviceAndRejectOnlineDevice(t *testing.T) {
 	}
 	if deleteOnlinePayload.Error != "device_online_cannot_delete" {
 		t.Fatalf("unexpected delete online error: %s", deleteOnlinePayload.Error)
+	}
+}
+
+func TestDocsEndpointsCanBeOpenedWhenDocsAuthDisabled(t *testing.T) {
+	t.Parallel()
+
+	SetDocsAuthConfig(config.Config{
+		DocsAuthEnabled:  false,
+		DocsAuthUsername: "admin",
+		DocsAuthPassword: "123456",
+	})
+	defer SetDocsAuthConfig(config.Config{
+		DocsAuthEnabled:  true,
+		DocsAuthUsername: "admin",
+		DocsAuthPassword: "123456",
+	})
+
+	dbPath := filepath.Join(t.TempDir(), "center-docs-auth-disabled-test.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/scalar")
+	if err != nil {
+		t.Fatalf("open scalar without auth: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected scalar status without auth: %d", resp.StatusCode)
 	}
 }
 

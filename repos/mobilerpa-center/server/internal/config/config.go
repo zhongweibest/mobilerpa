@@ -25,6 +25,9 @@ const (
 	defaultPlanRetryInterval    = 1 * time.Minute
 	defaultPlanStartWorkers     = 2
 	defaultPlanStartFanout      = 20
+	defaultDocsAuthEnabled      = true
+	defaultDocsAuthUsername     = "admin"
+	defaultDocsAuthPassword     = "123456"
 )
 
 // Config 定义中心服务运行所需配置。
@@ -59,6 +62,9 @@ type Config struct {
 	PlanRetryInterval    time.Duration
 	PlanStartWorkers     int
 	PlanStartFanout      int
+	DocsAuthEnabled      bool
+	DocsAuthUsername     string
+	DocsAuthPassword     string
 }
 
 // Load 按“内置默认值 -> .env -> 进程环境变量”的优先级加载配置。
@@ -81,6 +87,9 @@ func Load() Config {
 		"CENTER_PLAN_RETRY_INTERVAL":          defaultPlanRetryInterval.String(),
 		"CENTER_PLAN_START_WORKERS":           "2",
 		"CENTER_PLAN_START_FANOUT":            "20",
+		"CENTER_DOCS_AUTH_ENABLED":            "true",
+		"CENTER_DOCS_AUTH_USERNAME":           defaultDocsAuthUsername,
+		"CENTER_DOCS_AUTH_PASSWORD":           defaultDocsAuthPassword,
 	}
 
 	mergeEnvFile(values, findEnvFile())
@@ -94,6 +103,7 @@ func Load() Config {
 	planRetryInterval := parseDurationValue(values["CENTER_PLAN_RETRY_INTERVAL"], defaultPlanRetryInterval)
 	planStartWorkers := parseIntValue(values["CENTER_PLAN_START_WORKERS"], defaultPlanStartWorkers)
 	planStartFanout := parseIntValue(values["CENTER_PLAN_START_FANOUT"], defaultPlanStartFanout)
+	docsAuthEnabled := parseBoolValue(values["CENTER_DOCS_AUTH_ENABLED"], defaultDocsAuthEnabled)
 
 	return Config{
 		HTTPAddr:                  values["CENTER_HTTP_ADDR"],
@@ -113,6 +123,9 @@ func Load() Config {
 		PlanRetryInterval:         planRetryInterval,
 		PlanStartWorkers:          planStartWorkers,
 		PlanStartFanout:           planStartFanout,
+		DocsAuthEnabled:           docsAuthEnabled,
+		DocsAuthUsername:          values["CENTER_DOCS_AUTH_USERNAME"],
+		DocsAuthPassword:          values["CENTER_DOCS_AUTH_PASSWORD"],
 	}
 }
 
@@ -165,6 +178,22 @@ func parseIntValue(raw string, fallback int) int {
 		return fallback
 	}
 	return value
+}
+
+func parseBoolValue(raw string, fallback bool) bool {
+	raw = strings.TrimSpace(strings.ToLower(raw))
+	if raw == "" {
+		return fallback
+	}
+
+	switch raw {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func findEnvFile() string {
