@@ -1,6 +1,6 @@
 ﻿# MobileRPA 文档入口
 
-本文档作为项目文档索引，用于快速判断“该看哪份文档、该维护哪份文档”。后续新增或调整文档时，优先保持这里的入口关系清晰。
+本文档作为项目文档索引，用于快速判断“该看哪份文档、该维护哪份文档”。新增或调整文档时，应优先保持这里的入口关系清晰。
 
 ## 使用原则
 
@@ -50,16 +50,14 @@
 | `repos/mobilerpa-center/tools/README.md` | 中心服务工具脚本说明 |
 | `repos/mobilerpa-center/docs/web/前端结构说明.md` | 前端目录结构与页面范围 |
 | `repos/mobilerpa-center/docs/web/前端开发约定.md` | 前端本地启动、环境配置和请求规则 |
-| `repos/mobilerpa-center/docs/web/archive/前端快速上线清单.md` | 前端快速上线历史参考清单 |
 | `repos/mobilerpa-agent/docs/手机端与脚本架构.md` | Agent 与脚本架构 |
 | `repos/mobilerpa-agent/docs/手机端开发约定.md` | Agent 仓库开发规范 |
 | `repos/mobilerpa-agent/docs/手机端运行时最小契约.md` | Agent 与业务脚本运行契约 |
 | `repos/mobilerpa-agent/docs/新脚本接入模板清单.md` | 新脚本接入模板清单 |
-| `repos/mobilerpa-agent/docs/archive/手机端四周快速上线实施清单.md` | 手机端快速上线历史参考清单 |
 
 ## 合并与归档方向
 
-- `开发计划.md`、`快速上线角色分工排期.md` 的任务级内容不再单独维护，后续以 `项目看板.md` 为准。
+- `开发计划.md`、`快速上线角色分工排期.md` 的任务级内容不再单独维护，统一以 `项目看板.md` 为准。
 - `快速上线计划.md` 保留为“为什么先做 4 周早期生产版”的策略说明，不作为进度表使用。
 - 工作流编排主定义统一维护在 `整体规划方案.md` 第 14 章；原专项方案已归档到 `docs/archive/群控工作流编排方案.md`。
 - 已归档文档只作为历史参考，不再维护任务状态。

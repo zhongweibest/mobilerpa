@@ -44,7 +44,7 @@ mobilerpa-toolkit stop-agent --device <adb-device> [--adb-path <path>] [--remote
 适用场景：
 
 1. 中心服务通过接口触发下发 Agent。
-2. 后续 Linux 部署环境中的非交互式推送。
+2. Linux 部署环境中的非交互式推送。
 
 最小示例：
 
@@ -70,7 +70,7 @@ D:\dev\code\mobilerpa\.tmp\mobilerpa-toolkit.exe push-center `
 2. 默认不覆盖设备已有 `runtime/config.json`。
 3. 每次重新推送都会刷新设备端 `runtime/bootstrap.json`，用于同步最新的 `center_base_url` 和连接参数。
 4. Agent 启动时会优先保留已有 `agent_uuid`、`device_id`，同时吸收 `bootstrap.json` 中的新中心地址。
-5. 工具会确保设备端存在 `/sdcard/脚本/agent/scripts/` 目录，供后续脚本同步使用，但不会在 Agent 下发阶段直接推送业务脚本。
+5. 工具会确保设备端存在 `/sdcard/脚本/agent/scripts/` 目录，供脚本同步使用，但不会在 Agent 下发阶段直接推送业务脚本。
 
 ## 5. `push-manual`
 
