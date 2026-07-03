@@ -69,7 +69,7 @@ function main() {
 
     var rootDir = resolveRoot();
     var templateDir = path.join(rootDir, "templates", "standard");
-    var outputDir = path.join(rootDir, options.scriptName, options.version);
+    var outputDir = path.join(rootDir, "publish", options.scriptName, options.version);
 
     ensureDir(outputDir);
 

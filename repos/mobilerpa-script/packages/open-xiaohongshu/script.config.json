@@ -2,7 +2,7 @@
   "scriptName": "open_xiaohongshu",
   "scriptVersion": "v0.1.2",
   "packageName": "@mobilerpa-script/open-xiaohongshu",
-  "outputRoot": "../../open_xiaohongshu",
+  "outputRoot": "../../publish/open_xiaohongshu",
   "debugTaskId": "debug_open_xiaohongshu_v0_1_2",
   "debugParams": {
     "debug": true

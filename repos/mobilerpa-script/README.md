@@ -5,7 +5,7 @@
 当前仓库已经统一为一套“TypeScript 开发 + JavaScript 发布”的工程模式：
 
 - `packages/`：脚本源码工程目录，使用 Node + TypeScript 开发。
-- `脚本名/版本号/`：发布产物目录，继续兼容中心服务现有上传和下发方式。
+- `publish/脚本名/版本号/`：发布产物目录，继续兼容中心服务现有上传和下发方式。
 
 手机端和 AutoJs6 端始终只运行构建后的 JavaScript，不直接运行 TypeScript 源码。
 
@@ -15,8 +15,10 @@
   统一公共 helper、运行时类型、取消检查、应用启动等共享能力。
 - `packages/<script-package>`
   每个脚本一个独立包，例如 `packages/open-qq`、`packages/shoppe-sync`。
-- `脚本名/版本号/`
-  最终发布目录，例如 `open_qq/v0.1.2/`、`shoppe_sync/v0.1.2/`。
+- `publish/<script_name>/<version>/`
+  最终发布目录，例如 `publish/open_qq/v0.1.2/`、`publish/shoppe_sync/v0.1.2/`。
+- `docs/`
+  脚本仓库自身说明与接入清单。
 - `tools/build-script-package.js`
   通用单脚本发布器。
 - `tools/release-all.js`
@@ -40,7 +42,7 @@
 1. 在 `packages/` 下维护脚本源码。
 2. 公共能力优先放进 `packages/shared`，不要在各脚本里重复复制。
 3. 本地先执行类型检查。
-4. 构建并回写发布目录。
+4. 构建并回写 `publish/` 发布目录。
 5. 使用 `index_debug.js` 做真机调试。
 6. 调试通过后，再由中心服务上传和下发。
 
@@ -72,7 +74,7 @@ npm run release
 1. 在对应 `packages/<script-package>/script.config.json` 中维护版本号。
 2. 在源码中同步更新 `SCRIPT_VERSION`。
 3. 执行 `npm run release`。
-4. 确认 `脚本名/版本号/` 目录下产物齐全。
+4. 确认 `publish/<script_name>/<version>/` 目录下产物齐全。
 5. 用 `index_debug.js` 做本地调试。
 6. 再通过中心服务上传和下发。
 

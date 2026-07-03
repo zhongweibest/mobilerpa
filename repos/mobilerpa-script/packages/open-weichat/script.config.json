@@ -2,7 +2,7 @@
   "scriptName": "open_weichat",
   "scriptVersion": "v0.1.2",
   "packageName": "@mobilerpa-script/open-weichat",
-  "outputRoot": "../../open_weichat",
+  "outputRoot": "../../publish/open_weichat",
   "debugTaskId": "debug_open_weichat_v0_1_2",
   "debugParams": {
     "debug": true
