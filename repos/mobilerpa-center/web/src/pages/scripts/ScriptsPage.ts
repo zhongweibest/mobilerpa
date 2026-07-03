@@ -37,6 +37,7 @@ export const ScriptsPage = defineComponent({
     const selectedScriptName = ref("");
     const createDialogVisible = ref(false);
     const uploadDialogVisible = ref(false);
+    const uploadDialogMode = ref<"create" | "update">("create");
     const uploadFile = ref<File | null>(null);
     const uploadInputKey = ref(0);
     const uploadInputRef = ref<HTMLInputElement | null>(null);
@@ -63,6 +64,7 @@ export const ScriptsPage = defineComponent({
     const selectedVersions = computed<ScriptVersionRecord[]>(() =>
       scriptsStore.flattenedVersions.filter((item) => item.script_name === selectedScriptName.value)
     );
+    const uploadDialogTitle = computed(() => (uploadDialogMode.value === "update" ? "更新脚本版本" : "添加脚本版本"));
 
     async function loadPageData() {
       await Promise.all([scriptsStore.loadScriptNames(), scriptsStore.loadScripts()]);
@@ -90,9 +92,20 @@ export const ScriptsPage = defineComponent({
     }
 
     function openUploadDialog(scriptName = selectedScriptName.value) {
+      uploadDialogMode.value = "create";
       uploadForm.script_name = scriptName;
       uploadForm.script_version = "";
       uploadForm.force = false;
+      uploadFile.value = null;
+      uploadInputKey.value += 1;
+      uploadDialogVisible.value = true;
+    }
+
+    function openUpdateDialog(scriptName: string, scriptVersion: string) {
+      uploadDialogMode.value = "update";
+      uploadForm.script_name = scriptName;
+      uploadForm.script_version = scriptVersion;
+      uploadForm.force = true;
       uploadFile.value = null;
       uploadInputKey.value += 1;
       uploadDialogVisible.value = true;
@@ -139,12 +152,18 @@ export const ScriptsPage = defineComponent({
         script_name: scriptName,
         script_version: scriptVersion,
         source_type: "zip",
-        force: uploadForm.force,
+        force: uploadDialogMode.value === "update" ? true : uploadForm.force,
         file: uploadFile.value
       });
       uploadDialogVisible.value = false;
       selectedScriptName.value = scriptName;
       await loadPageData();
+      noticesStore.success(
+        uploadDialogMode.value === "update"
+          ? `脚本版本 ${scriptName}@${scriptVersion} 已更新`
+          : `脚本版本 ${scriptName}@${scriptVersion} 已添加`,
+        3000
+      );
     }
 
     async function handleDeleteScript(scriptName: string) {
@@ -283,12 +302,11 @@ export const ScriptsPage = defineComponent({
                               }),
                               h(
                                 ElTableColumn,
-                                { label: "操作", width: 220, fixed: "right" },
+                                { label: "操作", width: 160, fixed: "right" },
                                 {
                                   default: ({ row }: { row: ScriptVersionRecord }) =>
                                     h("div", { class: "table-actions table-actions--nowrap" }, [
-                                      h(ElButton, { link: true, type: "primary" }, () => "查看"),
-                                      h(ElButton, { link: true, type: "primary" }, () => "引用"),
+                                      h(ElButton, { link: true, type: "primary", onClick: () => openUpdateDialog(row.script_name, row.script_version) }, () => "更新"),
                                       h(ElButton, { link: true, type: "danger", onClick: () => void handleDeleteVersion(row.script_name, row.script_version) }, () => "删除")
                                     ])
                                 }
@@ -333,7 +351,7 @@ export const ScriptsPage = defineComponent({
           {
             modelValue: uploadDialogVisible.value,
             "onUpdate:modelValue": (value: boolean) => (uploadDialogVisible.value = value),
-            title: "添加脚本版本",
+            title: uploadDialogTitle.value,
             width: "560px",
             closeOnClickModal: false
           },
@@ -347,7 +365,8 @@ export const ScriptsPage = defineComponent({
                   h(ElInput, {
                     modelValue: uploadForm.script_version,
                     "onUpdate:modelValue": (value: string) => (uploadForm.script_version = value),
-                    placeholder: "例如 v0.1.1"
+                    placeholder: "例如 v0.1.1",
+                    readonly: uploadDialogMode.value === "update"
                   })
                 ),
                 h(ElFormItem, { label: "zip 文件" }, () =>
@@ -381,7 +400,9 @@ export const ScriptsPage = defineComponent({
             footer: () =>
               h("div", { class: "dialog-footer" }, [
                 h(ElButton, { onClick: () => (uploadDialogVisible.value = false) }, () => "取消"),
-                h(ElButton, { type: "primary", loading: uploading.value, onClick: () => void handleUploadConfirm() }, () => "确认上传")
+                h(ElButton, { type: "primary", loading: uploading.value, onClick: () => void handleUploadConfirm() }, () =>
+                  uploadDialogMode.value === "update" ? "确认更新" : "确认上传"
+                )
               ])
           }
         )

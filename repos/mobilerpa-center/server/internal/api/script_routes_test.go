@@ -4,11 +4,13 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -239,6 +241,86 @@ func TestScriptUploadFailsWithoutIndexJS(t *testing.T) {
 	}
 }
 
+func TestScriptUploadForceReplaceKeepsWorkingWhenOldVersionDirExists(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-script-force-replace.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	scriptRoot := filepath.Join(t.TempDir(), "script-library")
+	scriptService := script.NewService(db, scriptRoot)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, scriptService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	uploadBody, contentType := buildUploadRequestBody(t, "open_douyin", "0.1.2", "zip", map[string]string{
+		"index.js": "\"use strict\";\nmodule.exports = { version: \"first\" };\n",
+	})
+	uploadResp, err := http.Post(server.URL+"/api/v1/scripts/upload", contentType, uploadBody)
+	if err != nil {
+		t.Fatalf("first upload request: %v", err)
+	}
+	uploadResp.Body.Close()
+	if uploadResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected first upload status: %d", uploadResp.StatusCode)
+	}
+
+	forceBody, forceContentType := buildUploadRequestBodyWithForce(t, "open_douyin", "0.1.2", "zip", true, map[string]string{
+		"index.js": "\"use strict\";\nmodule.exports = { version: \"second\" };\n",
+	})
+	forceResp, err := http.Post(server.URL+"/api/v1/scripts/upload", forceContentType, forceBody)
+	if err != nil {
+		t.Fatalf("force upload request: %v", err)
+	}
+	defer forceResp.Body.Close()
+	if forceResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected force upload status: %d", forceResp.StatusCode)
+	}
+	var forcePayload struct {
+		Status string              `json:"status"`
+		Data   script.UploadResult `json:"data"`
+	}
+	if err := json.NewDecoder(forceResp.Body).Decode(&forcePayload); err != nil {
+		t.Fatalf("decode force upload response: %v", err)
+	}
+	if forcePayload.Data.StoredPath == "" {
+		t.Fatalf("expected stored_path in force upload response")
+	}
+
+	downloadResp, err := http.Get(server.URL + "/api/v1/script/download?script_name=open_douyin&script_version=0.1.2&relative_path=index.js")
+	if err != nil {
+		t.Fatalf("download request after force upload: %v", err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected download status after force upload: %d", downloadResp.StatusCode)
+	}
+
+	content, err := io.ReadAll(downloadResp.Body)
+	if err != nil {
+		t.Fatalf("read download body: %v", err)
+	}
+	if !strings.Contains(string(content), "second") {
+		t.Fatalf("expected updated script content, got: %s", string(content))
+	}
+
+	if _, err := os.Stat(forcePayload.Data.StoredPath); err != nil {
+		t.Fatalf("stat updated stored path: %v", err)
+	}
+}
+
 func TestDeployScriptToAllOnlineDevices(t *testing.T) {
 	t.Parallel()
 
@@ -417,12 +499,19 @@ func TestDeleteScriptVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("upload request: %v", err)
 	}
+	var uploadPayload struct {
+		Status string              `json:"status"`
+		Data   script.UploadResult `json:"data"`
+	}
+	if err := json.NewDecoder(uploadResp.Body).Decode(&uploadPayload); err != nil {
+		t.Fatalf("decode upload response: %v", err)
+	}
 	uploadResp.Body.Close()
 	if uploadResp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected upload status: %d", uploadResp.StatusCode)
 	}
 
-	versionDir := filepath.Join(scriptRoot, "shoppe_sync", "v0.1.3")
+	versionDir := uploadPayload.Data.StoredPath
 	if _, err := os.Stat(versionDir); err != nil {
 		t.Fatalf("stat uploaded version dir: %v", err)
 	}
@@ -731,6 +820,10 @@ func TestListScriptsIncludesWorkflowReferencesAndBlocksDelete(t *testing.T) {
 }
 
 func buildUploadRequestBody(t *testing.T, scriptName string, scriptVersion string, sourceType string, files map[string]string) (*bytes.Buffer, string) {
+	return buildUploadRequestBodyWithForce(t, scriptName, scriptVersion, sourceType, false, files)
+}
+
+func buildUploadRequestBodyWithForce(t *testing.T, scriptName string, scriptVersion string, sourceType string, force bool, files map[string]string) (*bytes.Buffer, string) {
 	t.Helper()
 
 	zipBytes := buildZipBytes(t, files)
@@ -745,6 +838,9 @@ func buildUploadRequestBody(t *testing.T, scriptName string, scriptVersion strin
 	}
 	if err := writer.WriteField("source_type", sourceType); err != nil {
 		t.Fatalf("write source_type: %v", err)
+	}
+	if err := writer.WriteField("force", strconv.FormatBool(force)); err != nil {
+		t.Fatalf("write force: %v", err)
 	}
 
 	part, err := writer.CreateFormFile("file", scriptName+"-"+scriptVersion+".zip")

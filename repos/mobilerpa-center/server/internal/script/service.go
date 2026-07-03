@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -421,15 +422,24 @@ func (s *Service) UploadZip(ctx context.Context, req UploadRequest) (UploadResul
 		return UploadResult{}, ErrScriptUploadEmpty
 	}
 
-	if _, err := s.findVersion(ctx, req.ScriptName, req.ScriptVersion); err == nil {
+	var existingVersion versionRecord
+	hasExistingVersion := false
+	if currentVersion, err := s.findVersion(ctx, req.ScriptName, req.ScriptVersion); err == nil {
 		if !req.Force {
 			return UploadResult{}, ErrScriptVersionAlreadyExists
 		}
+		existingVersion = currentVersion
+		hasExistingVersion = true
 	} else if !errors.Is(err, ErrScriptVersionNotFound) {
 		return UploadResult{}, err
 	}
 
-	versionDir := filepath.Join(s.root, req.ScriptName, req.ScriptVersion)
+	scriptDir := filepath.Join(s.root, req.ScriptName)
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		return UploadResult{}, fmt.Errorf("mkdir script dir: %w", err)
+	}
+	storageDirName := buildStorageDirName(req.ScriptVersion)
+	versionDir := filepath.Join(scriptDir, storageDirName)
 	tempDir := versionDir + ".uploading"
 	if err := os.RemoveAll(tempDir); err != nil {
 		return UploadResult{}, fmt.Errorf("remove temp script dir: %w", err)
@@ -469,10 +479,6 @@ func (s *Service) UploadZip(ctx context.Context, req UploadRequest) (UploadResul
 		return UploadResult{}, err
 	}
 
-	if err := os.RemoveAll(versionDir); err != nil {
-		_ = os.RemoveAll(tempDir)
-		return UploadResult{}, fmt.Errorf("remove old script dir: %w", err)
-	}
 	if err := os.Rename(tempDir, versionDir); err != nil {
 		_ = os.RemoveAll(tempDir)
 		return UploadResult{}, fmt.Errorf("move script dir: %w", err)
@@ -507,6 +513,10 @@ INSERT INTO script_versions (
 		return UploadResult{}, fmt.Errorf("insert script version: %w", err)
 	}
 
+	if req.Force && hasExistingVersion {
+		_ = os.RemoveAll(existingVersion.FilePath)
+	}
+
 	return UploadResult{
 		ScriptName:    req.ScriptName,
 		ScriptVersion: req.ScriptVersion,
@@ -515,6 +525,10 @@ INSERT INTO script_versions (
 		StorageType:   StorageTypeDirectory,
 		StoredPath:    versionDir,
 	}, nil
+}
+
+func buildStorageDirName(scriptVersion string) string {
+	return scriptVersion + "__" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 // DeleteVersion 删除指定脚本版本的数据库记录和本地目录。
