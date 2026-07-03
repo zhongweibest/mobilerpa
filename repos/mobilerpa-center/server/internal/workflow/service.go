@@ -37,58 +37,94 @@ var (
 
 // Definition 表示工作流定义。
 type Definition struct {
-	WorkflowDefID      string `json:"workflow_def_id"`
-	WorkflowName       string `json:"workflow_name"`
-	Description        string `json:"description"`
+	// WorkflowDefID 是工作流定义主键。
+	WorkflowDefID string `json:"workflow_def_id"`
+	// WorkflowName 是工作流名称。
+	WorkflowName string `json:"workflow_name"`
+	// Description 是工作流描述。
+	Description string `json:"description"`
+	// BuilderSegmentsJSON 是前端编排器保存的分段结构 JSON。
 	BuilderSegmentsJSON string `json:"builder_segments_json"`
-	Status             string `json:"status"`
-	Nodes              []Node `json:"nodes"`
-	Edges              []Edge `json:"edges"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	// Status 是工作流当前状态，例如 draft 或 active。
+	Status string `json:"status"`
+	// Nodes 是工作流中定义的节点列表。
+	Nodes []Node `json:"nodes"`
+	// Edges 是工作流中节点之间的连线关系。
+	Edges []Edge `json:"edges"`
+	// CreatedAt 是工作流定义创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是工作流定义最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Node 表示工作流节点定义。
 type Node struct {
+	// WorkflowDefID 是所属工作流定义 ID。
 	WorkflowDefID string `json:"workflow_def_id"`
-	NodeID        string `json:"node_id"`
-	NodeType      string `json:"node_type"`
-	NodeName      string `json:"node_name"`
-	ScriptName    string `json:"script_name"`
+	// NodeID 是节点业务标识。
+	NodeID string `json:"node_id"`
+	// NodeType 是节点类型，例如 script、loop、stop。
+	NodeType string `json:"node_type"`
+	// NodeName 是节点显示名称。
+	NodeName string `json:"node_name"`
+	// ScriptName 是脚本节点绑定的脚本名称。
+	ScriptName string `json:"script_name"`
+	// ScriptVersion 是脚本节点绑定的脚本版本。
 	ScriptVersion string `json:"script_version"`
-	MaxIterations int    `json:"max_iterations"`
-	Position      int    `json:"position"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+	// MaxIterations 是循环节点的最大迭代次数。
+	MaxIterations int `json:"max_iterations"`
+	// Position 是节点在定义中的顺序位置。
+	Position int `json:"position"`
+	// CreatedAt 是节点创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是节点最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Edge 表示工作流节点之间的连线关系。
 type Edge struct {
+	// WorkflowDefID 是所属工作流定义 ID。
 	WorkflowDefID string `json:"workflow_def_id"`
-	FromNodeID    string `json:"from_node_id"`
-	ToNodeID      string `json:"to_node_id"`
-	EdgeType      string `json:"edge_type"`
-	CreatedAt     string `json:"created_at"`
+	// FromNodeID 是起始节点 ID。
+	FromNodeID string `json:"from_node_id"`
+	// ToNodeID 是目标节点 ID。
+	ToNodeID string `json:"to_node_id"`
+	// EdgeType 是连线类型，例如 next、loop_body、loop_exit。
+	EdgeType string `json:"edge_type"`
+	// CreatedAt 是连线创建时间。
+	CreatedAt string `json:"created_at"`
 }
 
 // CreateDefinitionRequest 描述创建工作流定义的请求。
 type CreateDefinitionRequest struct {
-	WorkflowName        string `json:"workflow_name"`
-	Description         string `json:"description"`
+	// WorkflowName 是工作流名称。
+	WorkflowName string `json:"workflow_name"`
+	// Description 是工作流描述。
+	Description string `json:"description"`
+	// BuilderSegmentsJSON 是前端编排器保存的分段结构 JSON。
 	BuilderSegmentsJSON string `json:"builder_segments_json"`
-	Status              string `json:"status"`
-	Nodes               []Node `json:"nodes"`
-	Edges               []Edge `json:"edges"`
+	// Status 是工作流状态。
+	Status string `json:"status"`
+	// Nodes 是工作流节点列表。
+	Nodes []Node `json:"nodes"`
+	// Edges 是工作流连线列表。
+	Edges []Edge `json:"edges"`
 }
 
 // UpdateDefinitionRequest 描述更新工作流定义的请求。
 type UpdateDefinitionRequest struct {
-	WorkflowName        string `json:"workflow_name"`
-	Description         string `json:"description"`
+	// WorkflowName 是工作流名称。
+	WorkflowName string `json:"workflow_name"`
+	// Description 是工作流描述。
+	Description string `json:"description"`
+	// BuilderSegmentsJSON 是前端编排器保存的分段结构 JSON。
 	BuilderSegmentsJSON string `json:"builder_segments_json"`
-	Status              string `json:"status"`
-	Nodes               []Node `json:"nodes"`
-	Edges               []Edge `json:"edges"`
+	// Status 是工作流状态。
+	Status string `json:"status"`
+	// Nodes 是工作流节点列表。
+	Nodes []Node `json:"nodes"`
+	// Edges 是工作流连线列表。
+	Edges []Edge `json:"edges"`
 }
 
 // Service 现在只负责工作流定义与快照读取，不再承载运行实例生命周期。

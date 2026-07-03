@@ -21,14 +21,22 @@ var (
 )
 
 type Package struct {
-	SoftwareID         string `json:"software_id"`
-	SoftwareName       string `json:"software_name"`
-	Description        string `json:"description"`
-	PackageFileName    string `json:"package_file_name"`
+	// SoftwareID 是软件记录 ID。
+	SoftwareID string `json:"software_id"`
+	// SoftwareName 是软件名称。
+	SoftwareName string `json:"software_name"`
+	// Description 是软件描述。
+	Description string `json:"description"`
+	// PackageFileName 是上传包文件名。
+	PackageFileName string `json:"package_file_name"`
+	// PackageStoragePath 是中心本地存储路径。
 	PackageStoragePath string `json:"package_storage_path"`
-	PackageSize        int64  `json:"package_size"`
-	CreatedAt          string `json:"created_at"`
-	UpdatedAt          string `json:"updated_at"`
+	// PackageSize 是软件包字节大小。
+	PackageSize int64 `json:"package_size"`
+	// CreatedAt 是记录创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是记录最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 type CreateRequest struct {

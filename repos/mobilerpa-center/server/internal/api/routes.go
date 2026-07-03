@@ -23,33 +23,48 @@ import (
 )
 
 type createScriptNameRequest struct {
+	// ScriptName 是脚本名称，只允许英文、数字和下划线。
 	ScriptName string `json:"script_name"`
 }
 
 type deployScriptRequest struct {
-	DeviceID      string `json:"device_id"`
-	ScriptName    string `json:"script_name"`
+	// DeviceID 是目标设备 ID。
+	DeviceID string `json:"device_id"`
+	// ScriptName 是待下发脚本名称。
+	ScriptName string `json:"script_name"`
+	// ScriptVersion 是待下发脚本版本。
 	ScriptVersion string `json:"script_version"`
-	Force         bool   `json:"force"`
+	// Force 表示是否强制覆盖设备端现有脚本。
+	Force bool `json:"force"`
 }
 
 type deployScriptAllRequest struct {
-	ScriptName    string `json:"script_name"`
+	// ScriptName 是待下发脚本名称。
+	ScriptName string `json:"script_name"`
+	// ScriptVersion 是待下发脚本版本。
 	ScriptVersion string `json:"script_version"`
-	Force         bool   `json:"force"`
+	// Force 表示是否强制覆盖设备端现有脚本。
+	Force bool `json:"force"`
 }
 
 type deployScriptItemResult struct {
+	// DeviceID 是设备 ID。
 	DeviceID string `json:"device_id"`
-	Status   string `json:"status"`
-	Message  string `json:"message"`
+	// Status 是该设备的下发结果状态。
+	Status string `json:"status"`
+	// Message 是该设备的结果说明。
+	Message string `json:"message"`
 }
 
 type deployScriptAllResponse struct {
-	TotalOnlineDevices int                      `json:"total_online_devices"`
-	SuccessCount       int                      `json:"success_count"`
-	FailureCount       int                      `json:"failure_count"`
-	Results            []deployScriptItemResult `json:"results"`
+	// TotalOnlineDevices 是参与本次批量下发的在线设备总数。
+	TotalOnlineDevices int `json:"total_online_devices"`
+	// SuccessCount 是下发成功的设备数量。
+	SuccessCount int `json:"success_count"`
+	// FailureCount 是下发失败的设备数量。
+	FailureCount int `json:"failure_count"`
+	// Results 是逐设备的下发结果列表。
+	Results []deployScriptItemResult `json:"results"`
 }
 
 // RegisterRoutes 注册中心服务当前可用的 HTTP 路由。
@@ -135,7 +150,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 
 // workflowsCollection godoc
 // @Summary 分页获取或创建工作流定义
-// @Tags Workflows
+// @Tags 工作流管理
 // @Accept json
 // @Produce json
 // @Param page query int false "页码"
@@ -199,7 +214,7 @@ func workflowsCollection(workflows *workflow.Service) http.HandlerFunc {
 
 // plansCollection godoc
 // @Summary 分页获取或创建计划任务
-// @Tags Plans
+// @Tags 计划任务
 // @Accept json
 // @Produce json
 // @Param page query int false "页码"
@@ -375,7 +390,7 @@ func planSubResources(plans *plan.Service) http.HandlerFunc {
 
 // handlePlanDefinitionGet godoc
 // @Summary 获取计划任务定义详情
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Success 200 {object} plan.Definition
@@ -396,7 +411,7 @@ func handlePlanDefinitionGet(ctx context.Context, w http.ResponseWriter, plans *
 
 // handlePlanDefinitionDelete godoc
 // @Summary 删除计划任务定义
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Success 200 {object} map[string]any
@@ -419,7 +434,7 @@ func handlePlanDefinitionDelete(ctx context.Context, w http.ResponseWriter, plan
 
 // handlePlanDefinitionRowsUpdate godoc
 // @Summary 更新计划任务默认排选择
-// @Tags Plans
+// @Tags 计划任务
 // @Accept json
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
@@ -448,7 +463,7 @@ func handlePlanDefinitionRowsUpdate(ctx context.Context, w http.ResponseWriter, 
 
 // handlePlanDefinitionStatusUpdate godoc
 // @Summary 更新计划任务启用状态
-// @Tags Plans
+// @Tags 计划任务
 // @Accept json
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
@@ -477,7 +492,7 @@ func handlePlanDefinitionStatusUpdate(ctx context.Context, w http.ResponseWriter
 
 // handlePlanRunsList godoc
 // @Summary 获取计划任务实例列表
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Success 200 {array} plan.Run
@@ -498,7 +513,7 @@ func handlePlanRunsList(ctx context.Context, w http.ResponseWriter, plans *plan.
 
 // handlePlanStart godoc
 // @Summary 手动启动计划任务
-// @Tags Plans
+// @Tags 计划任务
 // @Accept json
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
@@ -528,7 +543,7 @@ func handlePlanStart(ctx context.Context, w http.ResponseWriter, r *http.Request
 
 // handlePlanRunGet godoc
 // @Summary 获取单个计划任务实例
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -550,7 +565,7 @@ func handlePlanRunGet(ctx context.Context, w http.ResponseWriter, plans *plan.Se
 
 // handlePlanRunEventsList godoc
 // @Summary 获取计划任务实例事件列表
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -572,7 +587,7 @@ func handlePlanRunEventsList(ctx context.Context, w http.ResponseWriter, plans *
 
 // handlePlanRunStop godoc
 // @Summary 停止计划任务实例
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -594,7 +609,7 @@ func handlePlanRunStop(ctx context.Context, w http.ResponseWriter, plans *plan.S
 
 // handlePlanDeviceRunStop godoc
 // @Summary 停止计划任务实例中的单个设备
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -617,7 +632,7 @@ func handlePlanDeviceRunStop(ctx context.Context, w http.ResponseWriter, plans *
 
 // handlePlanRunDelete godoc
 // @Summary 删除计划任务实例
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -642,7 +657,7 @@ func handlePlanRunDelete(ctx context.Context, w http.ResponseWriter, plans *plan
 
 // handlePlanRunRowsAdd godoc
 // @Summary 向计划任务实例追加排
-// @Tags Plans
+// @Tags 计划任务
 // @Accept json
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
@@ -672,7 +687,7 @@ func handlePlanRunRowsAdd(ctx context.Context, w http.ResponseWriter, r *http.Re
 
 // handlePlanRunRowDelete godoc
 // @Summary 从计划任务实例移除排
-// @Tags Plans
+// @Tags 计划任务
 // @Produce json
 // @Param plan_def_id path string true "计划任务定义 ID"
 // @Param plan_run_id path string true "计划任务实例 ID"
@@ -729,7 +744,7 @@ func workflowSubResources(workflows *workflow.Service) http.HandlerFunc {
 
 // handleWorkflowDefinitionGet godoc
 // @Summary 获取工作流定义详情
-// @Tags Workflows
+// @Tags 工作流管理
 // @Produce json
 // @Param workflow_def_id path string true "工作流定义 ID"
 // @Success 200 {object} workflow.Definition
@@ -750,7 +765,7 @@ func handleWorkflowDefinitionGet(ctx context.Context, w http.ResponseWriter, wor
 
 // handleWorkflowDefinitionUpdate godoc
 // @Summary 更新工作流定义
-// @Tags Workflows
+// @Tags 工作流管理
 // @Accept json
 // @Produce json
 // @Param workflow_def_id path string true "工作流定义 ID"
@@ -779,7 +794,7 @@ func handleWorkflowDefinitionUpdate(ctx context.Context, w http.ResponseWriter, 
 
 // handleWorkflowDefinitionDelete godoc
 // @Summary 删除工作流定义
-// @Tags Workflows
+// @Tags 工作流管理
 // @Produce json
 // @Param workflow_def_id path string true "工作流定义 ID"
 // @Success 200 {object} map[string]any
@@ -1006,7 +1021,7 @@ func registerDevice(devices *device.Service) http.HandlerFunc {
 
 // listDevices godoc
 // @Summary 分页获取设备列表
-// @Tags Devices
+// @Tags 设备管理
 // @Produce json
 // @Param page query int false "页码"
 // @Param page_size query int false "分页大小"
@@ -1098,7 +1113,7 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 
 // listAllDevices godoc
 // @Summary 获取全量设备列表
-// @Tags Devices
+// @Tags 设备管理
 // @Produce json
 // @Param slot_zone query string false "分区 ID"
 // @Param slot_row query string false "排号 ID"
@@ -1172,7 +1187,7 @@ func listAllDevices(devices *device.Service) http.HandlerFunc {
 
 // getDevice godoc
 // @Summary 获取设备详情或删除离线设备
-// @Tags Devices
+// @Tags 设备管理
 // @Produce json
 // @Param device_id path string true "设备 ID"
 // @Success 200 {object} device.Device
@@ -1270,7 +1285,7 @@ func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow
 
 // locationNodesCollection godoc
 // @Summary 获取或创建位置节点
-// @Tags Location
+// @Tags 位置管理
 // @Accept json
 // @Produce json
 // @Success 200 {array} device.LocationNode
@@ -1320,7 +1335,7 @@ func locationNodesCollection(devices *device.Service) http.HandlerFunc {
 
 // locationNodeSubResources godoc
 // @Summary 位置节点子资源
-// @Tags Location
+// @Tags 位置管理
 // @Accept json
 // @Produce json
 // @Param node_id path string true "节点 ID"
@@ -1637,7 +1652,7 @@ func scriptManifest(scripts *script.Service) http.HandlerFunc {
 
 // scriptNamesCollection godoc
 // @Summary 获取或新增脚本名称
-// @Tags Scripts
+// @Tags 脚本管理
 // @Accept json
 // @Produce json
 // @Success 200 {array} script.ScriptNameRecord
@@ -1687,7 +1702,7 @@ func scriptNamesCollection(scripts *script.Service) http.HandlerFunc {
 }
 
 // @Summary 向单台设备下发脚本版本
-// @Tags Scripts
+// @Tags 脚本管理
 // @Accept json
 // @Produce json
 // @Param payload body deployScriptRequest true "下发请求"
@@ -1731,7 +1746,7 @@ func deployScript(_ *script.Service, dispatcher *dispatch.Service) http.HandlerF
 
 // uploadScript godoc
 // @Summary 上传脚本版本压缩包
-// @Tags Scripts
+// @Tags 脚本管理
 // @Accept multipart/form-data
 // @Produce json
 // @Success 200 {object} script.UploadResult
@@ -1788,7 +1803,7 @@ func parseBooleanFormValue(value string) bool {
 }
 
 // @Summary 向全部在线设备下发脚本版本
-// @Tags Scripts
+// @Tags 脚本管理
 // @Accept json
 // @Produce json
 // @Param payload body deployScriptAllRequest true "批量下发请求"
@@ -1853,7 +1868,7 @@ func deployScriptToAllOnlineDevices(deviceService *device.Service, dispatcher *d
 
 // listScripts godoc
 // @Summary 分页获取脚本列表
-// @Tags Scripts
+// @Tags 脚本管理
 // @Produce json
 // @Param page query int false "页码"
 // @Param page_size query int false "分页大小"
@@ -1892,7 +1907,7 @@ func listScripts(scripts *script.Service) http.HandlerFunc {
 
 // softwareCollection godoc
 // @Summary 分页获取或新增软件
-// @Tags Software
+// @Tags 软件管理
 // @Accept multipart/form-data
 // @Produce json
 // @Param page query int false "页码"
@@ -1966,7 +1981,7 @@ func softwareCollection(softwareService *software.Service) http.HandlerFunc {
 
 // listAllSoftware godoc
 // @Summary 获取全量软件列表
-// @Tags Software
+// @Tags 软件管理
 // @Produce json
 // @Success 200 {array} software.Package
 // @Failure 500 {object} map[string]any
@@ -2047,7 +2062,7 @@ func softwareSubResources(softwareService *software.Service) http.HandlerFunc {
 
 // handleSoftwareGet godoc
 // @Summary 获取软件详情
-// @Tags Software
+// @Tags 软件管理
 // @Produce json
 // @Param software_id path string true "软件 ID"
 // @Success 200 {object} software.Package
@@ -2068,7 +2083,7 @@ func handleSoftwareGet(ctx context.Context, w http.ResponseWriter, softwareServi
 
 // handleSoftwareUpdate godoc
 // @Summary 更新软件信息
-// @Tags Software
+// @Tags 软件管理
 // @Accept multipart/form-data
 // @Produce json
 // @Param software_id path string true "软件 ID"
@@ -2112,7 +2127,7 @@ func handleSoftwareUpdate(w http.ResponseWriter, r *http.Request, softwareServic
 
 // handleSoftwareDelete godoc
 // @Summary 删除软件
-// @Tags Software
+// @Tags 软件管理
 // @Produce json
 // @Param software_id path string true "软件 ID"
 // @Success 200 {object} map[string]any
@@ -2135,7 +2150,7 @@ func handleSoftwareDelete(ctx context.Context, w http.ResponseWriter, softwareSe
 
 // handleSoftwareDownload godoc
 // @Summary 下载软件包
-// @Tags Software
+// @Tags 软件管理
 // @Produce application/octet-stream
 // @Param software_id path string true "软件 ID"
 // @Success 200 {file} binary
@@ -2186,7 +2201,7 @@ func handleScriptVersionSubResources(scripts *script.Service) http.HandlerFunc {
 
 // handleScriptDelete godoc
 // @Summary 删除脚本名称及其全部版本
-// @Tags Scripts
+// @Tags 脚本管理
 // @Produce json
 // @Param script_name path string true "脚本名称"
 // @Success 200 {object} map[string]any
@@ -2227,7 +2242,7 @@ func handleScriptDelete(scripts *script.Service) http.HandlerFunc {
 
 // handleScriptVersionGet godoc
 // @Summary 获取脚本版本详情
-// @Tags Scripts
+// @Tags 脚本管理
 // @Produce json
 // @Param script_name path string true "脚本名称"
 // @Param script_version path string true "脚本版本"
@@ -2250,7 +2265,7 @@ func handleScriptVersionGet(ctx context.Context, w http.ResponseWriter, scripts 
 
 // handleScriptVersionDelete godoc
 // @Summary 删除脚本版本
-// @Tags Scripts
+// @Tags 脚本管理
 // @Produce json
 // @Param script_name path string true "脚本名称"
 // @Param script_version path string true "脚本版本"

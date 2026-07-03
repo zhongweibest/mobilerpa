@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -108,19 +108,24 @@ var (
 	// ErrPlanRetryStopWindowInvalid 表示截止前停止重试窗口不合法。
 	ErrPlanRetryStopWindowInvalid = errors.New("plan daily_retry_stop_before_deadline_minutes is invalid")
 	// ErrPlanDefinitionDisabled 表示计划任务已禁用。
-	ErrPlanDefinitionDisabled = errors.New("plan definition is disabled")
-	ErrPlanDefinitionRunning        = errors.New("plan definition has active runs")
-	ErrPlanTodayAlreadyStarted      = errors.New("plan today already started")
-	ErrPlanRunDeleteNotAllowed      = errors.New("plan run delete not allowed")
+	ErrPlanDefinitionDisabled  = errors.New("plan definition is disabled")
+	ErrPlanDefinitionRunning   = errors.New("plan definition has active runs")
+	ErrPlanTodayAlreadyStarted = errors.New("plan today already started")
+	ErrPlanRunDeleteNotAllowed = errors.New("plan run delete not allowed")
 )
 
 // DeviceBusyDetail 描述计划任务启动时发现的设备占用情况。
 type DeviceBusyDetail struct {
-	DeviceID      string `json:"device_id"`
+	// DeviceID 是被占用的设备 ID。
+	DeviceID string `json:"device_id"`
+	// OccupancyType 是占用来源类型。
 	OccupancyType string `json:"occupancy_type"`
-	TaskID        string `json:"task_id"`
-	TaskStatus    string `json:"task_status"`
-	Message       string `json:"message"`
+	// TaskID 是占用该设备的任务或实例 ID。
+	TaskID string `json:"task_id"`
+	// TaskStatus 是占用记录当前状态。
+	TaskStatus string `json:"task_status"`
+	// Message 是人可读的占用说明。
+	Message string `json:"message"`
 }
 
 // DeviceBusyError 表示某批设备中存在被占用的设备。
@@ -134,112 +139,193 @@ func (e *DeviceBusyError) Error() string {
 
 // Definition 表示计划任务定义。
 type Definition struct {
-	PlanDefID                           string           `json:"plan_def_id"`
-	PlanName                            string           `json:"plan_name"`
-	Description                         string           `json:"description"`
-	TargetType                          string           `json:"target_type"`
-	TargetScriptName                    string           `json:"target_script_name"`
-	TargetScriptVersion                 string           `json:"target_script_version"`
-	TargetWorkflowDefID                 string           `json:"target_workflow_def_id"`
-	ScheduleType                        string           `json:"schedule_type"`
-	DailyStartTime                      string           `json:"daily_start_time"`
-	DailyDeadlineTime                   string           `json:"daily_deadline_time"`
-	Status                              string           `json:"status"`
-	StatusUpdatedAt                     string           `json:"status_updated_at"`
-	RetryPolicyMode                     string           `json:"retry_policy_mode"`
-	DailyRetryEnabled                   bool             `json:"daily_retry_enabled"`
-	DailyRetryIntervalSeconds           int              `json:"daily_retry_interval_seconds"`
-	DailyRetryStopBeforeDeadlineMinutes int              `json:"daily_retry_stop_before_deadline_minutes"`
-	Rows                                []PlanRowBinding `json:"rows"`
-	CreatedAt                           string           `json:"created_at"`
-	UpdatedAt                           string           `json:"updated_at"`
+	// PlanDefID 是计划任务定义 ID。
+	PlanDefID string `json:"plan_def_id"`
+	// PlanName 是计划任务名称。
+	PlanName string `json:"plan_name"`
+	// Description 是计划任务描述。
+	Description string `json:"description"`
+	// TargetType 是目标类型，例如 script 或 workflow。
+	TargetType string `json:"target_type"`
+	// TargetScriptName 是目标脚本名称。
+	TargetScriptName string `json:"target_script_name"`
+	// TargetScriptVersion 是目标脚本版本。
+	TargetScriptVersion string `json:"target_script_version"`
+	// TargetWorkflowDefID 是目标工作流定义 ID。
+	TargetWorkflowDefID string `json:"target_workflow_def_id"`
+	// ScheduleType 是调度类型，例如 once 或 daily。
+	ScheduleType string `json:"schedule_type"`
+	// DailyStartTime 是每日开始时间。
+	DailyStartTime string `json:"daily_start_time"`
+	// DailyDeadlineTime 是每日截止时间。
+	DailyDeadlineTime string `json:"daily_deadline_time"`
+	// Status 是计划任务启用状态。
+	Status string `json:"status"`
+	// StatusUpdatedAt 是启用状态最近更新时间。
+	StatusUpdatedAt string `json:"status_updated_at"`
+	// RetryPolicyMode 是离线重试策略模式。
+	RetryPolicyMode string `json:"retry_policy_mode"`
+	// DailyRetryEnabled 表示是否启用每日任务离线重试。
+	DailyRetryEnabled bool `json:"daily_retry_enabled"`
+	// DailyRetryIntervalSeconds 是每日任务离线重试间隔秒数。
+	DailyRetryIntervalSeconds int `json:"daily_retry_interval_seconds"`
+	// DailyRetryStopBeforeDeadlineMinutes 是截止前多少分钟停止重试。
+	DailyRetryStopBeforeDeadlineMinutes int `json:"daily_retry_stop_before_deadline_minutes"`
+	// Rows 是计划任务绑定的分区-排列表。
+	Rows []PlanRowBinding `json:"rows"`
+	// CreatedAt 是计划任务定义创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是计划任务定义最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 // PlanRowBinding 表示计划任务绑定的分区-排。
 type PlanRowBinding struct {
+	// PlanDefinitionRowID 是计划任务分区-排绑定记录 ID。
 	PlanDefinitionRowID string `json:"plan_definition_row_id"`
-	PlanDefID           string `json:"plan_def_id"`
-	ZoneID              string `json:"zone_id"`
-	RowID               string `json:"row_id"`
-	ZoneName            string `json:"zone_name"`
-	RowName             string `json:"row_name"`
-	CreatedAt           string `json:"created_at"`
-	UpdatedAt           string `json:"updated_at"`
+	// PlanDefID 是所属计划任务定义 ID。
+	PlanDefID string `json:"plan_def_id"`
+	// ZoneID 是分区节点 ID。
+	ZoneID string `json:"zone_id"`
+	// RowID 是排节点 ID。
+	RowID string `json:"row_id"`
+	// ZoneName 是分区名称。
+	ZoneName string `json:"zone_name"`
+	// RowName 是排名称。
+	RowName string `json:"row_name"`
+	// CreatedAt 是绑定创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是绑定最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Run 表示计划任务实例。
 type Run struct {
-	PlanRunID   string      `json:"plan_run_id"`
-	PlanDefID   string      `json:"plan_def_id"`
-	PlanName    string      `json:"plan_name"`
-	TargetType  string      `json:"target_type"`
-	TargetRefID string      `json:"target_ref_id"`
-	RunDate     string      `json:"run_date"`
-	Status      string      `json:"status"`
-	StartedAt   string      `json:"started_at"`
-	FinishedAt  string      `json:"finished_at"`
-	CreatedAt   string      `json:"created_at"`
-	UpdatedAt   string      `json:"updated_at"`
-	DeviceRuns  []DeviceRun `json:"device_runs"`
+	// PlanRunID 是计划任务实例 ID。
+	PlanRunID string `json:"plan_run_id"`
+	// PlanDefID 是所属计划任务定义 ID。
+	PlanDefID string `json:"plan_def_id"`
+	// PlanName 是计划任务名称。
+	PlanName string `json:"plan_name"`
+	// TargetType 是实例目标类型。
+	TargetType string `json:"target_type"`
+	// TargetRefID 是实例目标引用 ID。
+	TargetRefID string `json:"target_ref_id"`
+	// RunDate 是实例归属的业务日期。
+	RunDate string `json:"run_date"`
+	// Status 是计划任务实例状态。
+	Status string `json:"status"`
+	// StartedAt 是实例开始时间。
+	StartedAt string `json:"started_at"`
+	// FinishedAt 是实例结束时间。
+	FinishedAt string `json:"finished_at"`
+	// CreatedAt 是实例创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是实例最后更新时间。
+	UpdatedAt string `json:"updated_at"`
+	// DeviceRuns 是实例下的设备执行列表。
+	DeviceRuns []DeviceRun `json:"device_runs"`
 }
 
 // DeviceRun 表示计划任务实例下单设备运行态。
 type DeviceRun struct {
+	// PlanDeviceRunID 是计划任务设备运行记录 ID。
 	PlanDeviceRunID string `json:"plan_device_run_id"`
-	PlanRunID       string `json:"plan_run_id"`
-	PlanDefID       string `json:"plan_def_id"`
-	ZoneID          string `json:"zone_id"`
-	RowID           string `json:"row_id"`
-	SlotID          string `json:"slot_id"`
-	DeviceID        string `json:"device_id"`
-	TargetType      string `json:"target_type"`
-	TargetRefID     string `json:"target_ref_id"`
-	CurrentNodeID   string `json:"current_node_id"`
-	Status          string `json:"status"`
-	NextRetryAt     string `json:"next_retry_at"`
-	StartedAt       string `json:"started_at"`
-	FinishedAt      string `json:"finished_at"`
-	LastError       string `json:"last_error"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	// PlanRunID 是所属计划任务实例 ID。
+	PlanRunID string `json:"plan_run_id"`
+	// PlanDefID 是所属计划任务定义 ID。
+	PlanDefID string `json:"plan_def_id"`
+	// ZoneID 是分区节点 ID。
+	ZoneID string `json:"zone_id"`
+	// RowID 是排节点 ID。
+	RowID string `json:"row_id"`
+	// SlotID 是槽位节点 ID。
+	SlotID string `json:"slot_id"`
+	// DeviceID 是目标设备 ID。
+	DeviceID string `json:"device_id"`
+	// TargetType 是执行目标类型。
+	TargetType string `json:"target_type"`
+	// TargetRefID 是执行目标引用 ID。
+	TargetRefID string `json:"target_ref_id"`
+	// CurrentNodeID 是当前执行到的工作流节点 ID。
+	CurrentNodeID string `json:"current_node_id"`
+	// Status 是设备运行状态。
+	Status string `json:"status"`
+	// NextRetryAt 是下次离线重试时间。
+	NextRetryAt string `json:"next_retry_at"`
+	// StartedAt 是设备执行开始时间。
+	StartedAt string `json:"started_at"`
+	// FinishedAt 是设备执行结束时间。
+	FinishedAt string `json:"finished_at"`
+	// LastError 是最近一次错误摘要。
+	LastError string `json:"last_error"`
+	// CreatedAt 是记录创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是记录最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 // Event 表示计划任务事件。
 type Event struct {
-	PlanEventID int64          `json:"plan_event_id"`
-	PlanRunID   string         `json:"plan_run_id"`
-	PlanDefID   string         `json:"plan_def_id"`
-	DeviceID    string         `json:"device_id"`
-	EventType   string         `json:"event_type"`
-	Message     string         `json:"message"`
-	Extra       map[string]any `json:"extra"`
-	CreatedAt   string         `json:"created_at"`
+	// PlanEventID 是计划任务事件记录 ID。
+	PlanEventID int64 `json:"plan_event_id"`
+	// PlanRunID 是所属计划任务实例 ID。
+	PlanRunID string `json:"plan_run_id"`
+	// PlanDefID 是所属计划任务定义 ID。
+	PlanDefID string `json:"plan_def_id"`
+	// DeviceID 是关联设备 ID；实例级事件可为空。
+	DeviceID string `json:"device_id"`
+	// EventType 是事件类型。
+	EventType string `json:"event_type"`
+	// Message 是事件摘要。
+	Message string `json:"message"`
+	// Extra 是事件扩展信息。
+	Extra map[string]any `json:"extra"`
+	// CreatedAt 是事件创建时间。
+	CreatedAt string `json:"created_at"`
 }
 
 // CreateDefinitionRequest 描述创建计划任务定义时的请求体。
 type CreateDefinitionRequest struct {
-	PlanName                            string           `json:"plan_name"`
-	Description                         string           `json:"description"`
-	TargetType                          string           `json:"target_type"`
-	TargetScriptName                    string           `json:"target_script_name"`
-	TargetScriptVersion                 string           `json:"target_script_version"`
-	TargetWorkflowDefID                 string           `json:"target_workflow_def_id"`
-	ScheduleType                        string           `json:"schedule_type"`
-	DailyStartTime                      string           `json:"daily_start_time"`
-	DailyDeadlineTime                   string           `json:"daily_deadline_time"`
-	Status                              string           `json:"status"`
-	RetryPolicyMode                     string           `json:"retry_policy_mode"`
-	DailyRetryEnabled                   bool             `json:"daily_retry_enabled"`
-	DailyRetryIntervalSeconds           int              `json:"daily_retry_interval_seconds"`
-	DailyRetryStopBeforeDeadlineMinutes int              `json:"daily_retry_stop_before_deadline_minutes"`
-	Rows                                []PlanRowBinding `json:"rows"`
+	// PlanName 是计划任务名称。
+	PlanName string `json:"plan_name"`
+	// Description 是计划任务描述。
+	Description string `json:"description"`
+	// TargetType 是目标类型。
+	TargetType string `json:"target_type"`
+	// TargetScriptName 是目标脚本名称。
+	TargetScriptName string `json:"target_script_name"`
+	// TargetScriptVersion 是目标脚本版本。
+	TargetScriptVersion string `json:"target_script_version"`
+	// TargetWorkflowDefID 是目标工作流定义 ID。
+	TargetWorkflowDefID string `json:"target_workflow_def_id"`
+	// ScheduleType 是调度类型。
+	ScheduleType string `json:"schedule_type"`
+	// DailyStartTime 是每日开始时间。
+	DailyStartTime string `json:"daily_start_time"`
+	// DailyDeadlineTime 是每日截止时间。
+	DailyDeadlineTime string `json:"daily_deadline_time"`
+	// Status 是计划任务启用状态。
+	Status string `json:"status"`
+	// RetryPolicyMode 是离线重试策略模式。
+	RetryPolicyMode string `json:"retry_policy_mode"`
+	// DailyRetryEnabled 表示是否启用每日离线重试。
+	DailyRetryEnabled bool `json:"daily_retry_enabled"`
+	// DailyRetryIntervalSeconds 是离线重试间隔秒数。
+	DailyRetryIntervalSeconds int `json:"daily_retry_interval_seconds"`
+	// DailyRetryStopBeforeDeadlineMinutes 是截止前停止重试窗口分钟数。
+	DailyRetryStopBeforeDeadlineMinutes int `json:"daily_retry_stop_before_deadline_minutes"`
+	// Rows 是默认绑定的分区-排列表。
+	Rows []PlanRowBinding `json:"rows"`
 }
 
 type UpdateDefinitionRowsRequest struct {
+	// Rows 是更新后的默认分区-排列表。
 	Rows []PlanRowBinding `json:"rows"`
 }
 
 type UpdateDefinitionStatusRequest struct {
+	// Status 是新的启用状态。
 	Status string `json:"status"`
 }
 
@@ -249,8 +335,8 @@ type DefinitionListFilter struct {
 }
 
 type RunListFilter struct {
-	PlanDefID  string
-	PlanName   string
+	PlanDefID string
+	PlanName  string
 }
 
 type effectiveRetryPolicy struct {
@@ -266,6 +352,7 @@ type StartRequest struct {
 
 // AddRowsRequest 描述追加分区-排时的请求。
 type AddRowsRequest struct {
+	// Rows 是待追加的分区-排列表。
 	Rows []PlanRowBinding `json:"rows"`
 }
 

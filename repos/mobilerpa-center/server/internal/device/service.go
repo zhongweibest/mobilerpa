@@ -148,18 +148,30 @@ type RegisterResult struct {
 
 // LocationNode 表示位置树中的一个节点。
 type LocationNode struct {
-	NodeID    string `json:"node_id"`
-	ParentID  string `json:"parent_id"`
-	NodeType  string `json:"node_type"`
-	NodeName  string `json:"node_name"`
-	DeviceID  string `json:"device_id"`
-	SortOrder int    `json:"sort_order"`
+	// NodeID 是位置节点主键。
+	NodeID string `json:"node_id"`
+	// ParentID 是父节点 ID；根节点为空。
+	ParentID string `json:"parent_id"`
+	// NodeType 是节点类型，例如 zone、row、slot。
+	NodeType string `json:"node_type"`
+	// NodeName 是节点名称。
+	NodeName string `json:"node_name"`
+	// DeviceID 是槽位绑定的设备 ID。
+	DeviceID string `json:"device_id"`
+	// SortOrder 是同层级排序值。
+	SortOrder int `json:"sort_order"`
+	// CreatedAt 是节点创建时间。
 	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是节点最后更新时间。
 	UpdatedAt string `json:"updated_at"`
-	ZoneName  string `json:"zone_name"`
-	RowName   string `json:"row_name"`
-	SlotName  string `json:"slot_name"`
-	PathText  string `json:"path_text"`
+	// ZoneName 是所在分区名称。
+	ZoneName string `json:"zone_name"`
+	// RowName 是所在排名称。
+	RowName string `json:"row_name"`
+	// SlotName 是所在槽位名称。
+	SlotName string `json:"slot_name"`
+	// PathText 是从分区到当前节点的可读路径。
+	PathText string `json:"path_text"`
 }
 
 // CreateLocationNodeRequest 描述创建位置节点的请求。

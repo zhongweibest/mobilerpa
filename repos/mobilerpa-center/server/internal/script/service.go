@@ -41,10 +41,10 @@ var (
 	ErrScriptUploadEmpty = errors.New("script upload is empty")
 	// ErrScriptRepositoryUnavailable 表示当前服务没有可用的脚本版本仓库存储。
 	ErrScriptRepositoryUnavailable = errors.New("script repository is unavailable")
-	ErrScriptVersionReferenced    = errors.New("script version is referenced by workflows")
-	ErrScriptReferenced           = errors.New("script is referenced by workflows")
-	ErrScriptNameInvalid          = errors.New("script_name must match ^[A-Za-z0-9_]+$")
-	ErrScriptNameAlreadyExists    = errors.New("script_name already exists")
+	ErrScriptVersionReferenced     = errors.New("script version is referenced by workflows")
+	ErrScriptReferenced            = errors.New("script is referenced by workflows")
+	ErrScriptNameInvalid           = errors.New("script_name must match ^[A-Za-z0-9_]+$")
+	ErrScriptNameAlreadyExists     = errors.New("script_name already exists")
 )
 
 const (
@@ -106,6 +106,7 @@ type VersionSummary struct {
 	Status string `json:"status"`
 	// CreatedAt 是创建时间。
 	CreatedAt string `json:"created_at"`
+	// WorkflowReferences 是当前版本被哪些工作流节点引用。
 	WorkflowReferences []WorkflowReference `json:"workflow_references"`
 }
 
@@ -118,16 +119,23 @@ type ScriptSummary struct {
 }
 
 type ScriptNameRecord struct {
+	// ScriptName 是脚本名称主键。
 	ScriptName string `json:"script_name"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	// CreatedAt 是脚本名称记录创建时间。
+	CreatedAt string `json:"created_at"`
+	// UpdatedAt 是脚本名称记录最后更新时间。
+	UpdatedAt string `json:"updated_at"`
 }
 
 type WorkflowReference struct {
+	// WorkflowDefID 是引用该脚本的工作流定义 ID。
 	WorkflowDefID string `json:"workflow_def_id"`
-	WorkflowName  string `json:"workflow_name"`
-	NodeID        string `json:"node_id"`
-	NodeName      string `json:"node_name"`
+	// WorkflowName 是引用该脚本的工作流名称。
+	WorkflowName string `json:"workflow_name"`
+	// NodeID 是引用节点 ID。
+	NodeID string `json:"node_id"`
+	// NodeName 是引用节点名称。
+	NodeName string `json:"node_name"`
 }
 
 type ReferenceConflictError struct {
@@ -641,15 +649,15 @@ WHERE script_name = ?`,
 }
 
 type versionRecord struct {
-	ScriptName   string
+	ScriptName    string
 	ScriptVersion string
-	EntryFile    string
-	Checksum     string
-	FilePath     string
-	StorageType  string
-	SourceType   string
-	Status       string
-	CreatedAt    string
+	EntryFile     string
+	Checksum      string
+	FilePath      string
+	StorageType   string
+	SourceType    string
+	Status        string
+	CreatedAt     string
 }
 
 func (s *Service) findVersion(ctx context.Context, scriptName string, scriptVersion string) (versionRecord, error) {

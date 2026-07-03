@@ -4,12 +4,15 @@
       "api.deployScriptAllRequest": {
         "properties": {
           "force": {
+            "description": "Force 表示是否强制覆盖设备端现有脚本。",
             "type": "boolean"
           },
           "script_name": {
+            "description": "ScriptName 是待下发脚本名称。",
             "type": "string"
           },
           "script_version": {
+            "description": "ScriptVersion 是待下发脚本版本。",
             "type": "string"
           }
         },
@@ -18,18 +21,22 @@
       "api.deployScriptAllResponse": {
         "properties": {
           "failure_count": {
+            "description": "FailureCount 是下发失败的设备数量。",
             "type": "integer"
           },
           "results": {
+            "description": "Results 是逐设备的下发结果列表。",
             "items": {
               "$ref": "#/components/schemas/api.deployScriptItemResult"
             },
             "type": "array"
           },
           "success_count": {
+            "description": "SuccessCount 是下发成功的设备数量。",
             "type": "integer"
           },
           "total_online_devices": {
+            "description": "TotalOnlineDevices 是参与本次批量下发的在线设备总数。",
             "type": "integer"
           }
         },
@@ -38,12 +45,15 @@
       "api.deployScriptItemResult": {
         "properties": {
           "device_id": {
+            "description": "DeviceID 是设备 ID。",
             "type": "string"
           },
           "message": {
+            "description": "Message 是该设备的结果说明。",
             "type": "string"
           },
           "status": {
+            "description": "Status 是该设备的下发结果状态。",
             "type": "string"
           }
         },
@@ -52,15 +62,19 @@
       "api.deployScriptRequest": {
         "properties": {
           "device_id": {
+            "description": "DeviceID 是目标设备 ID。",
             "type": "string"
           },
           "force": {
+            "description": "Force 表示是否强制覆盖设备端现有脚本。",
             "type": "boolean"
           },
           "script_name": {
+            "description": "ScriptName 是待下发脚本名称。",
             "type": "string"
           },
           "script_version": {
+            "description": "ScriptVersion 是待下发脚本版本。",
             "type": "string"
           }
         },
@@ -194,39 +208,51 @@
       "device.LocationNode": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是节点创建时间。",
             "type": "string"
           },
           "device_id": {
+            "description": "DeviceID 是槽位绑定的设备 ID。",
             "type": "string"
           },
           "node_id": {
+            "description": "NodeID 是位置节点主键。",
             "type": "string"
           },
           "node_name": {
+            "description": "NodeName 是节点名称。",
             "type": "string"
           },
           "node_type": {
+            "description": "NodeType 是节点类型，例如 zone、row、slot。",
             "type": "string"
           },
           "parent_id": {
+            "description": "ParentID 是父节点 ID；根节点为空。",
             "type": "string"
           },
           "path_text": {
+            "description": "PathText 是从分区到当前节点的可读路径。",
             "type": "string"
           },
           "row_name": {
+            "description": "RowName 是所在排名称。",
             "type": "string"
           },
           "slot_name": {
+            "description": "SlotName 是所在槽位名称。",
             "type": "string"
           },
           "sort_order": {
+            "description": "SortOrder 是同层级排序值。",
             "type": "integer"
           },
           "updated_at": {
+            "description": "UpdatedAt 是节点最后更新时间。",
             "type": "string"
           },
           "zone_name": {
+            "description": "ZoneName 是所在分区名称。",
             "type": "string"
           }
         },
@@ -252,6 +278,7 @@
       "plan.AddRowsRequest": {
         "properties": {
           "rows": {
+            "description": "Rows 是待追加的分区-排列表。",
             "items": {
               "$ref": "#/components/schemas/plan.PlanRowBinding"
             },
@@ -263,63 +290,82 @@
       "plan.Definition": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是计划任务定义创建时间。",
             "type": "string"
           },
           "daily_deadline_time": {
+            "description": "DailyDeadlineTime 是每日截止时间。",
             "type": "string"
           },
           "daily_retry_enabled": {
+            "description": "DailyRetryEnabled 表示是否启用每日任务离线重试。",
             "type": "boolean"
           },
           "daily_retry_interval_seconds": {
+            "description": "DailyRetryIntervalSeconds 是每日任务离线重试间隔秒数。",
             "type": "integer"
           },
           "daily_retry_stop_before_deadline_minutes": {
+            "description": "DailyRetryStopBeforeDeadlineMinutes 是截止前多少分钟停止重试。",
             "type": "integer"
           },
           "daily_start_time": {
+            "description": "DailyStartTime 是每日开始时间。",
             "type": "string"
           },
           "description": {
+            "description": "Description 是计划任务描述。",
             "type": "string"
           },
           "plan_def_id": {
+            "description": "PlanDefID 是计划任务定义 ID。",
             "type": "string"
           },
           "plan_name": {
+            "description": "PlanName 是计划任务名称。",
             "type": "string"
           },
           "retry_policy_mode": {
+            "description": "RetryPolicyMode 是离线重试策略模式。",
             "type": "string"
           },
           "rows": {
+            "description": "Rows 是计划任务绑定的分区-排列表。",
             "items": {
               "$ref": "#/components/schemas/plan.PlanRowBinding"
             },
             "type": "array"
           },
           "schedule_type": {
+            "description": "ScheduleType 是调度类型，例如 once 或 daily。",
             "type": "string"
           },
           "status": {
+            "description": "Status 是计划任务启用状态。",
             "type": "string"
           },
           "status_updated_at": {
+            "description": "StatusUpdatedAt 是启用状态最近更新时间。",
             "type": "string"
           },
           "target_script_name": {
+            "description": "TargetScriptName 是目标脚本名称。",
             "type": "string"
           },
           "target_script_version": {
+            "description": "TargetScriptVersion 是目标脚本版本。",
             "type": "string"
           },
           "target_type": {
+            "description": "TargetType 是目标类型，例如 script 或 workflow。",
             "type": "string"
           },
           "target_workflow_def_id": {
+            "description": "TargetWorkflowDefID 是目标工作流定义 ID。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是计划任务定义最后更新时间。",
             "type": "string"
           }
         },
@@ -328,54 +374,71 @@
       "plan.DeviceRun": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是记录创建时间。",
             "type": "string"
           },
           "current_node_id": {
+            "description": "CurrentNodeID 是当前执行到的工作流节点 ID。",
             "type": "string"
           },
           "device_id": {
+            "description": "DeviceID 是目标设备 ID。",
             "type": "string"
           },
           "finished_at": {
+            "description": "FinishedAt 是设备执行结束时间。",
             "type": "string"
           },
           "last_error": {
+            "description": "LastError 是最近一次错误摘要。",
             "type": "string"
           },
           "next_retry_at": {
+            "description": "NextRetryAt 是下次离线重试时间。",
             "type": "string"
           },
           "plan_def_id": {
+            "description": "PlanDefID 是所属计划任务定义 ID。",
             "type": "string"
           },
           "plan_device_run_id": {
+            "description": "PlanDeviceRunID 是计划任务设备运行记录 ID。",
             "type": "string"
           },
           "plan_run_id": {
+            "description": "PlanRunID 是所属计划任务实例 ID。",
             "type": "string"
           },
           "row_id": {
+            "description": "RowID 是排节点 ID。",
             "type": "string"
           },
           "slot_id": {
+            "description": "SlotID 是槽位节点 ID。",
             "type": "string"
           },
           "started_at": {
+            "description": "StartedAt 是设备执行开始时间。",
             "type": "string"
           },
           "status": {
+            "description": "Status 是设备运行状态。",
             "type": "string"
           },
           "target_ref_id": {
+            "description": "TargetRefID 是执行目标引用 ID。",
             "type": "string"
           },
           "target_type": {
+            "description": "TargetType 是执行目标类型。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是记录最后更新时间。",
             "type": "string"
           },
           "zone_id": {
+            "description": "ZoneID 是分区节点 ID。",
             "type": "string"
           }
         },
@@ -384,28 +447,36 @@
       "plan.Event": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是事件创建时间。",
             "type": "string"
           },
           "device_id": {
+            "description": "DeviceID 是关联设备 ID；实例级事件可为空。",
             "type": "string"
           },
           "event_type": {
+            "description": "EventType 是事件类型。",
             "type": "string"
           },
           "extra": {
             "additionalProperties": {},
+            "description": "Extra 是事件扩展信息。",
             "type": "object"
           },
           "message": {
+            "description": "Message 是事件摘要。",
             "type": "string"
           },
           "plan_def_id": {
+            "description": "PlanDefID 是所属计划任务定义 ID。",
             "type": "string"
           },
           "plan_event_id": {
+            "description": "PlanEventID 是计划任务事件记录 ID。",
             "type": "integer"
           },
           "plan_run_id": {
+            "description": "PlanRunID 是所属计划任务实例 ID。",
             "type": "string"
           }
         },
@@ -414,27 +485,35 @@
       "plan.PlanRowBinding": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是绑定创建时间。",
             "type": "string"
           },
           "plan_def_id": {
+            "description": "PlanDefID 是所属计划任务定义 ID。",
             "type": "string"
           },
           "plan_definition_row_id": {
+            "description": "PlanDefinitionRowID 是计划任务分区-排绑定记录 ID。",
             "type": "string"
           },
           "row_id": {
+            "description": "RowID 是排节点 ID。",
             "type": "string"
           },
           "row_name": {
+            "description": "RowName 是排名称。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是绑定最后更新时间。",
             "type": "string"
           },
           "zone_id": {
+            "description": "ZoneID 是分区节点 ID。",
             "type": "string"
           },
           "zone_name": {
+            "description": "ZoneName 是分区名称。",
             "type": "string"
           }
         },
@@ -443,42 +522,54 @@
       "plan.Run": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是实例创建时间。",
             "type": "string"
           },
           "device_runs": {
+            "description": "DeviceRuns 是实例下的设备执行列表。",
             "items": {
               "$ref": "#/components/schemas/plan.DeviceRun"
             },
             "type": "array"
           },
           "finished_at": {
+            "description": "FinishedAt 是实例结束时间。",
             "type": "string"
           },
           "plan_def_id": {
+            "description": "PlanDefID 是所属计划任务定义 ID。",
             "type": "string"
           },
           "plan_name": {
+            "description": "PlanName 是计划任务名称。",
             "type": "string"
           },
           "plan_run_id": {
+            "description": "PlanRunID 是计划任务实例 ID。",
             "type": "string"
           },
           "run_date": {
+            "description": "RunDate 是实例归属的业务日期。",
             "type": "string"
           },
           "started_at": {
+            "description": "StartedAt 是实例开始时间。",
             "type": "string"
           },
           "status": {
+            "description": "Status 是计划任务实例状态。",
             "type": "string"
           },
           "target_ref_id": {
+            "description": "TargetRefID 是实例目标引用 ID。",
             "type": "string"
           },
           "target_type": {
+            "description": "TargetType 是实例目标类型。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是实例最后更新时间。",
             "type": "string"
           }
         },
@@ -490,6 +581,7 @@
       "plan.UpdateDefinitionRowsRequest": {
         "properties": {
           "rows": {
+            "description": "Rows 是更新后的默认分区-排列表。",
             "items": {
               "$ref": "#/components/schemas/plan.PlanRowBinding"
             },
@@ -501,6 +593,7 @@
       "plan.UpdateDefinitionStatusRequest": {
         "properties": {
           "status": {
+            "description": "Status 是新的启用状态。",
             "type": "string"
           }
         },
@@ -562,12 +655,15 @@
       "script.ScriptNameRecord": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是脚本名称记录创建时间。",
             "type": "string"
           },
           "script_name": {
+            "description": "ScriptName 是脚本名称主键。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是脚本名称记录最后更新时间。",
             "type": "string"
           }
         },
@@ -649,6 +745,7 @@
             "type": "string"
           },
           "workflow_references": {
+            "description": "WorkflowReferences 是当前版本被哪些工作流节点引用。",
             "items": {
               "$ref": "#/components/schemas/script.WorkflowReference"
             },
@@ -660,15 +757,19 @@
       "script.WorkflowReference": {
         "properties": {
           "node_id": {
+            "description": "NodeID 是引用节点 ID。",
             "type": "string"
           },
           "node_name": {
+            "description": "NodeName 是引用节点名称。",
             "type": "string"
           },
           "workflow_def_id": {
+            "description": "WorkflowDefID 是引用该脚本的工作流定义 ID。",
             "type": "string"
           },
           "workflow_name": {
+            "description": "WorkflowName 是引用该脚本的工作流名称。",
             "type": "string"
           }
         },
@@ -677,27 +778,35 @@
       "software.Package": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是记录创建时间。",
             "type": "string"
           },
           "description": {
+            "description": "Description 是软件描述。",
             "type": "string"
           },
           "package_file_name": {
+            "description": "PackageFileName 是上传包文件名。",
             "type": "string"
           },
           "package_size": {
+            "description": "PackageSize 是软件包字节大小。",
             "type": "integer"
           },
           "package_storage_path": {
+            "description": "PackageStoragePath 是中心本地存储路径。",
             "type": "string"
           },
           "software_id": {
+            "description": "SoftwareID 是软件记录 ID。",
             "type": "string"
           },
           "software_name": {
+            "description": "SoftwareName 是软件名称。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是记录最后更新时间。",
             "type": "string"
           }
         },
@@ -706,36 +815,45 @@
       "workflow.Definition": {
         "properties": {
           "builder_segments_json": {
+            "description": "BuilderSegmentsJSON 是前端编排器保存的分段结构 JSON。",
             "type": "string"
           },
           "created_at": {
+            "description": "CreatedAt 是工作流定义创建时间。",
             "type": "string"
           },
           "description": {
+            "description": "Description 是工作流描述。",
             "type": "string"
           },
           "edges": {
+            "description": "Edges 是工作流中节点之间的连线关系。",
             "items": {
               "$ref": "#/components/schemas/workflow.Edge"
             },
             "type": "array"
           },
           "nodes": {
+            "description": "Nodes 是工作流中定义的节点列表。",
             "items": {
               "$ref": "#/components/schemas/workflow.Node"
             },
             "type": "array"
           },
           "status": {
+            "description": "Status 是工作流当前状态，例如 draft 或 active。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是工作流定义最后更新时间。",
             "type": "string"
           },
           "workflow_def_id": {
+            "description": "WorkflowDefID 是工作流定义主键。",
             "type": "string"
           },
           "workflow_name": {
+            "description": "WorkflowName 是工作流名称。",
             "type": "string"
           }
         },
@@ -744,18 +862,23 @@
       "workflow.Edge": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是连线创建时间。",
             "type": "string"
           },
           "edge_type": {
+            "description": "EdgeType 是连线类型，例如 next、loop_body、loop_exit。",
             "type": "string"
           },
           "from_node_id": {
+            "description": "FromNodeID 是起始节点 ID。",
             "type": "string"
           },
           "to_node_id": {
+            "description": "ToNodeID 是目标节点 ID。",
             "type": "string"
           },
           "workflow_def_id": {
+            "description": "WorkflowDefID 是所属工作流定义 ID。",
             "type": "string"
           }
         },
@@ -764,33 +887,43 @@
       "workflow.Node": {
         "properties": {
           "created_at": {
+            "description": "CreatedAt 是节点创建时间。",
             "type": "string"
           },
           "max_iterations": {
+            "description": "MaxIterations 是循环节点的最大迭代次数。",
             "type": "integer"
           },
           "node_id": {
+            "description": "NodeID 是节点业务标识。",
             "type": "string"
           },
           "node_name": {
+            "description": "NodeName 是节点显示名称。",
             "type": "string"
           },
           "node_type": {
+            "description": "NodeType 是节点类型，例如 script、loop、stop。",
             "type": "string"
           },
           "position": {
+            "description": "Position 是节点在定义中的顺序位置。",
             "type": "integer"
           },
           "script_name": {
+            "description": "ScriptName 是脚本节点绑定的脚本名称。",
             "type": "string"
           },
           "script_version": {
+            "description": "ScriptVersion 是脚本节点绑定的脚本版本。",
             "type": "string"
           },
           "updated_at": {
+            "description": "UpdatedAt 是节点最后更新时间。",
             "type": "string"
           },
           "workflow_def_id": {
+            "description": "WorkflowDefID 是所属工作流定义 ID。",
             "type": "string"
           }
         },
@@ -799,27 +932,33 @@
       "workflow.UpdateDefinitionRequest": {
         "properties": {
           "builder_segments_json": {
+            "description": "BuilderSegmentsJSON 是前端编排器保存的分段结构 JSON。",
             "type": "string"
           },
           "description": {
+            "description": "Description 是工作流描述。",
             "type": "string"
           },
           "edges": {
+            "description": "Edges 是工作流连线列表。",
             "items": {
               "$ref": "#/components/schemas/workflow.Edge"
             },
             "type": "array"
           },
           "nodes": {
+            "description": "Nodes 是工作流节点列表。",
             "items": {
               "$ref": "#/components/schemas/workflow.Node"
             },
             "type": "array"
           },
           "status": {
+            "description": "Status 是工作流状态。",
             "type": "string"
           },
           "workflow_name": {
+            "description": "WorkflowName 是工作流名称。",
             "type": "string"
           }
         },
@@ -918,7 +1057,7 @@
         },
         "summary": "分页获取设备列表",
         "tags": [
-          "Devices"
+          "设备管理"
         ]
       }
     },
@@ -975,7 +1114,7 @@
         },
         "summary": "获取全量设备列表",
         "tags": [
-          "Devices"
+          "设备管理"
         ]
       }
     },
@@ -1028,7 +1167,7 @@
         },
         "summary": "获取设备详情或删除离线设备",
         "tags": [
-          "Devices"
+          "设备管理"
         ]
       },
       "get": {
@@ -1079,7 +1218,7 @@
         },
         "summary": "获取设备详情或删除离线设备",
         "tags": [
-          "Devices"
+          "设备管理"
         ]
       }
     },
@@ -1132,7 +1271,7 @@
         },
         "summary": "获取设备详情或删除离线设备",
         "tags": [
-          "Devices"
+          "设备管理"
         ]
       }
     },
@@ -1177,7 +1316,7 @@
         },
         "summary": "获取或创建位置节点",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       },
       "post": {
@@ -1220,7 +1359,7 @@
         },
         "summary": "获取或创建位置节点",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       }
     },
@@ -1284,7 +1423,7 @@
         },
         "summary": "位置节点子资源",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       },
       "get": {
@@ -1346,7 +1485,7 @@
         },
         "summary": "位置节点子资源",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       },
       "put": {
@@ -1408,7 +1547,7 @@
         },
         "summary": "位置节点子资源",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       }
     },
@@ -1472,7 +1611,7 @@
         },
         "summary": "位置节点子资源",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       }
     },
@@ -1536,7 +1675,7 @@
         },
         "summary": "位置节点子资源",
         "tags": [
-          "Location"
+          "位置管理"
         ]
       }
     },
@@ -1639,7 +1778,7 @@
         },
         "summary": "分页获取或创建计划任务",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       },
       "post": {
@@ -1740,7 +1879,7 @@
         },
         "summary": "分页获取或创建计划任务",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -1794,7 +1933,7 @@
         },
         "summary": "删除计划任务定义",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       },
       "get": {
@@ -1845,7 +1984,7 @@
         },
         "summary": "获取计划任务定义详情",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -1921,7 +2060,7 @@
         },
         "summary": "更新计划任务默认排选择",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -1977,7 +2116,7 @@
         },
         "summary": "获取计划任务实例列表",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2040,7 +2179,7 @@
         },
         "summary": "删除计划任务实例",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       },
       "get": {
@@ -2100,7 +2239,7 @@
         },
         "summary": "获取单个计划任务实例",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2171,7 +2310,7 @@
         },
         "summary": "停止计划任务实例中的单个设备",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2236,7 +2375,7 @@
         },
         "summary": "获取计划任务实例事件列表",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2321,7 +2460,7 @@
         },
         "summary": "向计划任务实例追加排",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2401,7 +2540,7 @@
         },
         "summary": "从计划任务实例移除排",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2463,7 +2602,7 @@
         },
         "summary": "停止计划任务实例",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2539,7 +2678,7 @@
         },
         "summary": "手动启动计划任务",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2615,7 +2754,7 @@
         },
         "summary": "更新计划任务启用状态",
         "tags": [
-          "Plans"
+          "计划任务"
         ]
       }
     },
@@ -2660,7 +2799,7 @@
         },
         "summary": "获取或新增脚本名称",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       },
       "post": {
@@ -2703,7 +2842,7 @@
         },
         "summary": "获取或新增脚本名称",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -2766,7 +2905,7 @@
         },
         "summary": "分页获取脚本列表",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -2821,7 +2960,7 @@
         },
         "summary": "向单台设备下发脚本版本",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -2875,7 +3014,7 @@
         },
         "summary": "向全部在线设备下发脚本版本",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -2917,7 +3056,7 @@
         },
         "summary": "上传脚本版本压缩包",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -2971,7 +3110,7 @@
         },
         "summary": "删除脚本名称及其全部版本",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -3034,7 +3173,7 @@
         },
         "summary": "删除脚本版本",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       },
       "get": {
@@ -3094,7 +3233,7 @@
         },
         "summary": "获取脚本版本详情",
         "tags": [
-          "Scripts"
+          "脚本管理"
         ]
       }
     },
@@ -3157,7 +3296,7 @@
         },
         "summary": "分页获取或新增软件",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       },
       "post": {
@@ -3218,7 +3357,7 @@
         },
         "summary": "分页获取或新增软件",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       }
     },
@@ -3252,7 +3391,7 @@
         },
         "summary": "获取全量软件列表",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       }
     },
@@ -3306,7 +3445,7 @@
         },
         "summary": "删除软件",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       },
       "get": {
@@ -3357,7 +3496,7 @@
         },
         "summary": "获取软件详情",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       },
       "put": {
@@ -3446,7 +3585,7 @@
         },
         "summary": "更新软件信息",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       }
     },
@@ -3500,7 +3639,7 @@
         },
         "summary": "下载软件包",
         "tags": [
-          "Software"
+          "软件管理"
         ]
       }
     },
@@ -3560,7 +3699,7 @@
         },
         "summary": "分页获取或创建工作流定义",
         "tags": [
-          "Workflows"
+          "工作流管理"
         ]
       },
       "post": {
@@ -3618,7 +3757,7 @@
         },
         "summary": "分页获取或创建工作流定义",
         "tags": [
-          "Workflows"
+          "工作流管理"
         ]
       }
     },
@@ -3672,7 +3811,7 @@
         },
         "summary": "删除工作流定义",
         "tags": [
-          "Workflows"
+          "工作流管理"
         ]
       },
       "get": {
@@ -3723,7 +3862,7 @@
         },
         "summary": "获取工作流定义详情",
         "tags": [
-          "Workflows"
+          "工作流管理"
         ]
       },
       "put": {
@@ -3797,7 +3936,7 @@
         },
         "summary": "更新工作流定义",
         "tags": [
-          "Workflows"
+          "工作流管理"
         ]
       }
     }
