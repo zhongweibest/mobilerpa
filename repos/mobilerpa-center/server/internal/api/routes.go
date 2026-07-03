@@ -70,6 +70,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/healthz", healthz)
 	mux.HandleFunc("/api/v1/device/register", registerDevice(devices))
 	mux.HandleFunc("/api/v1/devices", listDevices(devices, plans))
+	mux.HandleFunc("/api/v1/devices/all", listAllDevices(devices))
 	mux.HandleFunc("/api/v1/devices/", getDevice(devices, tasks, workflows, plans))
 	mux.HandleFunc("/api/v1/location-nodes", locationNodesCollection(devices))
 	mux.HandleFunc("/api/v1/location-nodes/", locationNodeSubResources(devices))
@@ -90,6 +91,7 @@ func RegisterRoutes(mux *http.ServeMux, devices *device.Service, tasks *task.Ser
 	mux.HandleFunc("/api/v1/scripts", listScripts(scripts))
 	mux.HandleFunc("/api/v1/scripts/", scriptsSubResources(scripts))
 	mux.HandleFunc("/api/v1/software", softwareCollection(softwareService))
+	mux.HandleFunc("/api/v1/software/all", listAllSoftware(softwareService))
 	mux.HandleFunc("/api/v1/software/", softwareSubResources(softwareService))
 	mux.HandleFunc("/api/v1/workflows", workflowsCollection(workflows))
 	mux.HandleFunc("/api/v1/workflows/", workflowSubResources(workflows))
@@ -787,6 +789,70 @@ func listDevices(devices *device.Service, plans *plan.Service) http.HandlerFunc 
 	}
 }
 
+func listAllDevices(devices *device.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		results, err := devices.List(ctx, device.DeviceListFilter{
+			SlotZoneID:     strings.TrimSpace(r.URL.Query().Get("slot_zone")),
+			SlotRowID:      strings.TrimSpace(r.URL.Query().Get("slot_row")),
+			SlotPositionID: strings.TrimSpace(r.URL.Query().Get("slot_position")),
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		items := make([]map[string]any, 0, len(results))
+		for _, item := range results {
+			items = append(items, map[string]any{
+				"device_id":                           item.DeviceID,
+				"agent_uuid":                          item.AgentUUID,
+				"device_name":                         item.DeviceName,
+				"physical_slot":                       item.PhysicalSlot,
+				"group_name":                          item.GroupName,
+				"slot_zone_id":                        item.SlotZoneID,
+				"slot_row_id":                         item.SlotRowID,
+				"slot_position_id":                    item.SlotPositionID,
+				"slot_zone":                           item.SlotZone,
+				"slot_row":                            item.SlotRow,
+				"slot_position":                       item.SlotPosition,
+				"status":                              item.Status,
+				"bind_status":                         item.BindStatus,
+				"ip":                                  item.IP,
+				"brand":                               item.Brand,
+				"model":                               item.Model,
+				"android_id":                          item.AndroidID,
+				"adb_serial":                          item.ADBSerial,
+				"device_link_sn":                      item.DeviceLinkSN,
+				"current_task_id":                     item.CurrentTaskID,
+				"current_step":                        item.CurrentStep,
+				"last_error":                          item.LastError,
+				"accessibility_status":                item.AccessibilityStatus,
+				"foreground_service_status":           item.ForegroundServiceStatus,
+				"battery_optimization_ignored_status": item.BatteryOptimizationIgnoredStatus,
+				"env_checked_at":                      item.EnvCheckedAt,
+				"env_check_message":                   item.EnvCheckMessage,
+				"last_heartbeat_at":                   item.LastHeartbeatAt,
+				"created_at":                          item.CreatedAt,
+				"updated_at":                          item.UpdatedAt,
+				"occupancy":                           nil,
+			})
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data":   items,
+		})
+	}
+}
+
 func getDevice(devices *device.Service, tasks *task.Service, workflows *workflow.Service, plans *plan.Service) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		trimmed := strings.TrimPrefix(r.URL.Path, "/api/v1/devices/")
@@ -1396,6 +1462,29 @@ func softwareCollection(softwareService *software.Service) http.HandlerFunc {
 				"expected_methods": []string{http.MethodGet, http.MethodPost},
 			})
 		}
+	}
+}
+
+func listAllSoftware(softwareService *software.Service) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, http.MethodGet)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+
+		result, err := softwareService.List(ctx)
+		if err != nil {
+			writeSoftwareError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"data":   result,
+		})
 	}
 }
 

@@ -2,7 +2,7 @@ import { defineStore } from "pinia";
 import { computed, ref } from "vue";
 
 import { controlAgent, deployAgents, fetchDiscoveredDevices, fetchSoftwareInstallJob, pairDevice, startSoftwareInstall } from "../api/discovery";
-import { fetchSoftware } from "../api/software";
+import { fetchAllSoftware } from "../api/software";
 import { fetchDiscoverySettings, saveDiscoverySettings } from "../api/settings";
 import type { AgentActionResult, AgentDeploymentResult, DiscoveredDevice, PairDeviceResult, SoftwareInstallJob } from "../types/discovery";
 import type { SoftwarePackageRecord } from "../types/software";
@@ -42,11 +42,7 @@ export const useDiscoveryStore = defineStore("discovery", () => {
   }
 
   async function loadSoftwareOptions() {
-    const result = await fetchSoftware({
-      page: 1,
-      page_size: 100
-    });
-    softwareOptions.value = result.items;
+    softwareOptions.value = await fetchAllSoftware();
   }
 
   async function persistDiscoverySettings() {

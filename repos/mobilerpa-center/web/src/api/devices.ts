@@ -26,6 +26,10 @@ export function fetchDevices(query: PaginationQuery): Promise<PaginatedResult<De
   return requestJSON<PaginatedResult<DeviceRecord>>(`/api/v1/devices?${searchParams.toString()}`);
 }
 
+export function fetchAllDevices(): Promise<DeviceRecord[]> {
+  return requestJSON<DeviceRecord[]>("/api/v1/devices/all");
+}
+
 export function fetchDeviceByID(deviceID: string): Promise<DeviceRecord> {
   return requestJSON<DeviceRecord>(`/api/v1/devices/${encodeURIComponent(deviceID)}`);
 }

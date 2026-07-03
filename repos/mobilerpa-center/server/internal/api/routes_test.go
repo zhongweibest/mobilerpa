@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/script"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/software"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/storage"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/task"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/workflow"
@@ -372,6 +375,154 @@ func TestDeleteOfflineDeviceAndRejectOnlineDevice(t *testing.T) {
 	}
 	if deleteOnlinePayload.Error != "device_online_cannot_delete" {
 		t.Fatalf("unexpected delete online error: %s", deleteOnlinePayload.Error)
+	}
+}
+
+func TestListAllDevices(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-list-all-devices.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	for index := 1; index <= 2; index++ {
+		registerBody := map[string]any{
+			"agent_uuid":  "agent-list-all-" + strconv.Itoa(index),
+			"device_name": "Device " + strconv.Itoa(index),
+			"brand":       "Google",
+			"model":       "Pixel 8",
+		}
+		bodyBytes, err := json.Marshal(registerBody)
+		if err != nil {
+			t.Fatalf("marshal register body: %v", err)
+		}
+		resp, err := http.Post(server.URL+"/api/v1/device/register", "application/json", bytes.NewReader(bodyBytes))
+		if err != nil {
+			t.Fatalf("register request: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected register status: %d", resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(server.URL + "/api/v1/devices/all")
+	if err != nil {
+		t.Fatalf("list all devices request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected list all devices status: %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Status string          `json:"status"`
+		Data   []device.Device `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode list all devices response: %v", err)
+	}
+
+	if payload.Status != "ok" {
+		t.Fatalf("unexpected list all devices payload status: %s", payload.Status)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("unexpected list all devices count: %d", len(payload.Data))
+	}
+}
+
+func TestListAllSoftware(t *testing.T) {
+	t.Parallel()
+
+	dbPath := filepath.Join(t.TempDir(), "center-list-all-software.db")
+	db, err := storage.Open(dbPath)
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	defer db.Close()
+
+	deviceService := device.NewService(db)
+	taskService := task.NewService(db)
+	dispatchService := dispatch.NewService(taskService)
+	discoveryService := discovery.NewService(db, "adb", filepath.Join("..", "..", "..", "mobilerpa-agent", "agent"), "http://127.0.0.1:8080", "")
+	softwareRoot := filepath.Join(t.TempDir(), "software-library")
+	softwareService := software.NewService(db, softwareRoot)
+	wsHandler := ws.NewHandler(deviceService, dispatchService, nil, nil)
+
+	mux := http.NewServeMux()
+	RegisterRoutes(mux, deviceService, taskService, dispatchService, discoveryService, softwareService, wsHandler)
+
+	server := httptest.NewServer(WithCORS(mux, []string{"http://localhost:5173", "http://127.0.0.1:5173"}))
+	defer server.Close()
+
+	for index := 1; index <= 2; index++ {
+		body := &bytes.Buffer{}
+		writer := multipart.NewWriter(body)
+		if err := writer.WriteField("software_name", "软件"+strconv.Itoa(index)); err != nil {
+			t.Fatalf("write software_name: %v", err)
+		}
+		if err := writer.WriteField("description", "描述"+strconv.Itoa(index)); err != nil {
+			t.Fatalf("write description: %v", err)
+		}
+		part, err := writer.CreateFormFile("file", "pkg"+strconv.Itoa(index)+".apk")
+		if err != nil {
+			t.Fatalf("create form file: %v", err)
+		}
+		if _, err := part.Write([]byte("apk-bytes")); err != nil {
+			t.Fatalf("write file body: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close writer: %v", err)
+		}
+
+		resp, err := http.Post(server.URL+"/api/v1/software", writer.FormDataContentType(), body)
+		if err != nil {
+			t.Fatalf("create software request: %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("unexpected create software status: %d", resp.StatusCode)
+		}
+	}
+
+	resp, err := http.Get(server.URL + "/api/v1/software/all")
+	if err != nil {
+		t.Fatalf("list all software request: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected list all software status: %d", resp.StatusCode)
+	}
+
+	var payload struct {
+		Status string             `json:"status"`
+		Data   []software.Package `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode list all software response: %v", err)
+	}
+	if payload.Status != "ok" {
+		t.Fatalf("unexpected list all software payload status: %s", payload.Status)
+	}
+	if len(payload.Data) != 2 {
+		t.Fatalf("unexpected list all software count: %d", len(payload.Data))
 	}
 }
 

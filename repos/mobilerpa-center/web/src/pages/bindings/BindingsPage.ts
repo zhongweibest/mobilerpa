@@ -17,7 +17,7 @@ import {
 } from "element-plus";
 import { computed, defineComponent, h, onMounted, reactive, ref } from "vue";
 
-import { bindLocationNode, createLocationNode, deleteLocationNode, fetchDevices, fetchLocationNodes, unbindLocationNode, updateLocationNode } from "../../api/devices";
+import { bindLocationNode, createLocationNode, deleteLocationNode, fetchAllDevices, fetchLocationNodes, unbindLocationNode, updateLocationNode } from "../../api/devices";
 import { useNoticesStore } from "../../stores/notices";
 
 function normalizeText(value: string) {
@@ -205,13 +205,10 @@ export const BindingsPage = defineComponent({
       try {
         const [locationNodes, devicePage] = await Promise.all([
           fetchLocationNodes(),
-          fetchDevices({
-            page: 1,
-            page_size: 100
-          })
+          fetchAllDevices()
         ]);
         nodes.value = locationNodes;
-        devices.value = devicePage.items || [];
+        devices.value = devicePage || [];
 
         if (currentNodeID.value && !locationNodes.find((item) => item.node_id === currentNodeID.value)) {
           currentNodeID.value = "";

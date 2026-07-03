@@ -10,6 +10,10 @@ export function fetchSoftware(query: PaginationQuery): Promise<PaginatedResult<S
   return requestJSON<PaginatedResult<SoftwarePackageRecord>>(`/api/v1/software?${searchParams.toString()}`);
 }
 
+export function fetchAllSoftware(): Promise<SoftwarePackageRecord[]> {
+  return requestJSON<SoftwarePackageRecord[]>("/api/v1/software/all");
+}
+
 export async function createSoftware(payload: CreateSoftwareRequest): Promise<SoftwarePackageRecord> {
   const formData = new FormData();
   formData.append("software_name", payload.software_name);
