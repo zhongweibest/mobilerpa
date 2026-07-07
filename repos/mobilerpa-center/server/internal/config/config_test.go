@@ -266,6 +266,8 @@ func TestLoadDocsAuthConfig(t *testing.T) {
 	t.Setenv("CENTER_DOCS_AUTH_ENABLED", "false")
 	t.Setenv("CENTER_DOCS_AUTH_USERNAME", "docs_user")
 	t.Setenv("CENTER_DOCS_AUTH_PASSWORD", "docs_pass")
+	t.Setenv("CENTER_LOG_ROOT_PATH", "./data/custom-logs")
+	t.Setenv("CENTER_LOG_RETENTION_DAYS", "9")
 
 	cfg := Load()
 	if cfg.DocsAuthEnabled {
@@ -276,5 +278,11 @@ func TestLoadDocsAuthConfig(t *testing.T) {
 	}
 	if cfg.DocsAuthPassword != "docs_pass" {
 		t.Fatalf("unexpected docs auth password: %s", cfg.DocsAuthPassword)
+	}
+	if cfg.LogRootPath != "./data/custom-logs" {
+		t.Fatalf("unexpected log root path: %s", cfg.LogRootPath)
+	}
+	if cfg.LogRetentionDays != 9 {
+		t.Fatalf("unexpected log retention days: %d", cfg.LogRetentionDays)
 	}
 }

@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/getkin/kin-openapi v0.140.0
 	github.com/gorilla/websocket v1.5.3
+	github.com/lestrrat-go/file-rotatelogs v2.4.0+incompatible
 	modernc.org/sqlite v1.38.2
 )
 
@@ -13,11 +14,14 @@ require (
 	github.com/go-openapi/jsonpointer v0.22.5 // indirect
 	github.com/go-openapi/swag/jsonname v0.25.5 // indirect
 	github.com/google/uuid v1.6.0 // indirect
+	github.com/jonboulle/clockwork v0.5.0 // indirect
 	github.com/kr/pretty v0.1.0 // indirect
+	github.com/lestrrat-go/strftime v1.2.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/oasdiff/yaml v0.1.0 // indirect
 	github.com/oasdiff/yaml3 v0.0.13 // indirect
+	github.com/pkg/errors v0.9.1 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2 // indirect
 	golang.org/x/exp v0.0.0-20250620022241-b7579e27df2b // indirect

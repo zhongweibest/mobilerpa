@@ -13,6 +13,7 @@ import (
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/discovery"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/logger"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/plan"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/script"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/settings"
@@ -45,6 +46,9 @@ type App struct {
 func New() (*App, error) {
 	cfg := config.Load()
 	api.SetDocsAuthConfig(cfg)
+	if err := logger.Setup(cfg.LogRootPath, cfg.LogRetentionDays); err != nil {
+		return nil, fmt.Errorf("setup logger: %w", err)
+	}
 
 	db, err := storage.Open(cfg.DBPath)
 	if err != nil {
@@ -101,6 +105,7 @@ func (a *App) Run() error {
 		a.cfg.DeviceOfflineScanInterval,
 		a.cfg.PlanScanInterval,
 	)
+	log.Printf("log_root=%s log_retention_days=%d", a.cfg.LogRootPath, a.cfg.LogRetentionDays)
 	go a.runOfflineScanner()
 	a.startPlanWorkers()
 	go a.runPlanScheduler()
@@ -117,14 +122,14 @@ func (a *App) runOfflineScanner() {
 		deviceIDs, err := a.devices.MarkStaleOffline(ctx, cutoff)
 		cancel()
 		if err != nil {
-			log.Printf("scan stale devices: %v", err)
+			logger.SchedulerErrorf("scan stale devices: %v", err)
 			continue
 		}
 		if len(deviceIDs) == 0 {
 			continue
 		}
 
-		log.Printf("marked %d stale devices offline: %v", len(deviceIDs), deviceIDs)
+		logger.Schedulerf("marked %d stale devices offline: %v", len(deviceIDs), deviceIDs)
 	}
 }
 
@@ -139,13 +144,13 @@ func (a *App) runPlanScheduler() {
 		dueDefinitionIDs, err := a.plans.ListDueDefinitionIDs(startCtx, now)
 		startCancel()
 		if err != nil {
-			log.Printf("scan plan auto starts: %v", err)
+			logger.SchedulerErrorf("scan plan auto starts: %v", err)
 		} else {
 			for _, planDefID := range dueDefinitionIDs {
 				select {
 				case a.planStartQueue <- planDefID:
 				default:
-					log.Printf("plan start queue is full, skip enqueue plan_def_id=%s", planDefID)
+					logger.SchedulerErrorf("plan start queue is full, skip enqueue plan_def_id=%s", planDefID)
 				}
 			}
 		}
@@ -154,13 +159,13 @@ func (a *App) runPlanScheduler() {
 		expiredPlanRunIDs, err := a.plans.ListExpiredRunIDs(stopCtx, now)
 		stopCancel()
 		if err != nil {
-			log.Printf("scan plan deadlines: %v", err)
+			logger.SchedulerErrorf("scan plan deadlines: %v", err)
 		} else {
 			for _, planRunID := range expiredPlanRunIDs {
 				select {
 				case a.planStopQueue <- planRunID:
 				default:
-					log.Printf("plan stop queue is full, skip enqueue plan_run_id=%s", planRunID)
+					logger.SchedulerErrorf("plan stop queue is full, skip enqueue plan_run_id=%s", planRunID)
 				}
 			}
 		}
@@ -169,11 +174,11 @@ func (a *App) runPlanScheduler() {
 		retriedRuns, err := a.plans.RetryDueTargets(retryCtx, now, a.cfg.PlanRetryInterval)
 		retryCancel()
 		if err != nil {
-			log.Printf("scan plan retries: %v", err)
+			logger.SchedulerErrorf("scan plan retries: %v", err)
 			continue
 		}
 		if len(retriedRuns) > 0 {
-			log.Printf("retry scan processed plan runs: %v", retriedRuns)
+			logger.Schedulerf("retry scan processed plan runs: %v", retriedRuns)
 		}
 	}
 }
@@ -197,11 +202,11 @@ func (a *App) runPlanStartWorker() {
 		planRunID, err := a.plans.AutoStartDefinition(ctx, planDefID, now)
 		cancel()
 		if err != nil {
-			log.Printf("async auto start plan %s: %v", planDefID, err)
+			logger.SchedulerErrorf("async auto start plan %s: %v", planDefID, err)
 			continue
 		}
 		if planRunID != "" {
-			log.Printf("auto started plan run asynchronously: plan_def_id=%s plan_run_id=%s", planDefID, planRunID)
+			logger.Schedulerf("auto started plan run asynchronously: plan_def_id=%s plan_run_id=%s", planDefID, planRunID)
 		}
 	}
 }
@@ -212,11 +217,11 @@ func (a *App) runPlanStopWorker() {
 		stoppedPlanRunID, err := a.plans.AutoStopRun(ctx, planRunID)
 		cancel()
 		if err != nil {
-			log.Printf("async auto stop plan run %s: %v", planRunID, err)
+			logger.SchedulerErrorf("async auto stop plan run %s: %v", planRunID, err)
 			continue
 		}
 		if stoppedPlanRunID != "" {
-			log.Printf("stopped plan run asynchronously by deadline: %s", stoppedPlanRunID)
+			logger.Schedulerf("stopped plan run asynchronously by deadline: %s", stoppedPlanRunID)
 		}
 	}
 }

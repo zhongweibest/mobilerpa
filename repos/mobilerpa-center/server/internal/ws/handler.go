@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -13,6 +12,7 @@ import (
 
 	"github.com/mobilerpa/mobilerpa-center/server/internal/device"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/dispatch"
+	"github.com/mobilerpa/mobilerpa-center/server/internal/logger"
 	"github.com/mobilerpa/mobilerpa-center/server/internal/plan"
 	"github.com/mobilerpa/mobilerpa-center/server/pkg/protocol"
 )
@@ -55,7 +55,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		h.dispatcher.UnregisterDeviceConn(currentDeviceID, conn)
 		if err := h.devices.MarkOffline(context.Background(), currentDeviceID, time.Now()); err != nil {
-			log.Printf("mark offline for %s: %v", currentDeviceID, err)
+			logger.WSErrorf("mark offline for %s: %v", currentDeviceID, err)
 		}
 	}()
 
@@ -93,16 +93,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if profile, ok := parseExecutionProfile(msg.Payload); ok {
 				if err := h.devices.UpdateExecutionProfile(context.Background(), currentDeviceID, profile); err != nil {
-					log.Printf("update execution profile for %s via %s: %v", currentDeviceID, protocol.MessageTypeHello, err)
+					logger.WSErrorf("update execution profile for %s via %s: %v", currentDeviceID, protocol.MessageTypeHello, err)
 				}
 			}
 			if deviceLinkSN := parseDeviceLinkSN(msg.Payload); deviceLinkSN != "" {
 				if err := h.devices.UpdateDeviceLinkSN(context.Background(), currentDeviceID, deviceLinkSN); err != nil {
-					log.Printf("update device_link_sn for %s via %s: %v", currentDeviceID, protocol.MessageTypeHello, err)
+					logger.WSErrorf("update device_link_sn for %s via %s: %v", currentDeviceID, protocol.MessageTypeHello, err)
 				}
 			}
 			if becameOnline {
-				log.Printf("device %s became online via %s", currentDeviceID, protocol.MessageTypeHello)
+				logger.WSF("device %s became online via %s", currentDeviceID, protocol.MessageTypeHello)
 			}
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeHello, msg.RequestID, "ok")
 
@@ -124,16 +124,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			if profile, ok := parseExecutionProfile(msg.Payload); ok {
 				if err := h.devices.UpdateExecutionProfile(context.Background(), currentDeviceID, profile); err != nil {
-					log.Printf("update execution profile for %s via %s: %v", currentDeviceID, protocol.MessageTypeHeartbeat, err)
+					logger.WSErrorf("update execution profile for %s via %s: %v", currentDeviceID, protocol.MessageTypeHeartbeat, err)
 				}
 			}
 			if deviceLinkSN := parseDeviceLinkSN(msg.Payload); deviceLinkSN != "" {
 				if err := h.devices.UpdateDeviceLinkSN(context.Background(), currentDeviceID, deviceLinkSN); err != nil {
-					log.Printf("update device_link_sn for %s via %s: %v", currentDeviceID, protocol.MessageTypeHeartbeat, err)
+					logger.WSErrorf("update device_link_sn for %s via %s: %v", currentDeviceID, protocol.MessageTypeHeartbeat, err)
 				}
 			}
 			if becameOnline {
-				log.Printf("device %s became online via %s", currentDeviceID, protocol.MessageTypeHeartbeat)
+				logger.WSF("device %s became online via %s", currentDeviceID, protocol.MessageTypeHeartbeat)
 			}
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeHeartbeat, msg.RequestID, "ok")
 
@@ -142,14 +142,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
 			taskItem, err := h.dispatcher.HandleTaskAck(context.Background(), msg)
 			if err != nil {
-				log.Printf("handle task_ack for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle task_ack for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskAck, msg.RequestID, "server_error")
 				continue
 			}
 			if _, err := h.dispatcher.MarkTaskRunning(context.Background(), taskItem.TaskID, msg.RequestID, "", "设备已确认并开始执行任务"); err != nil {
-				log.Printf("mark task running for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("mark task running for device %s: %v", currentDeviceID, err)
 			}
-			log.Printf("device %s acknowledged task %s", currentDeviceID, taskItem.TaskID)
+			logger.WSF("device %s acknowledged task %s", currentDeviceID, taskItem.TaskID)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskAck, msg.RequestID, "ok")
 
 		case protocol.MessageTypeWorkflowSessionAck:
@@ -162,24 +162,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			payloadBytes, err := json.Marshal(msg.Payload)
 			if err != nil {
-				log.Printf("marshal workflow_session_ack for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("marshal workflow_session_ack for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
 				continue
 			}
 
 			var payload protocol.WorkflowSessionAckPayload
 			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-				log.Printf("decode workflow_session_ack for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("decode workflow_session_ack for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
 				continue
 			}
 
 			if err := h.plans.HandleWorkflowSessionAck(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
-				log.Printf("handle workflow_session_ack for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle workflow_session_ack for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "server_error")
 				continue
 			}
-			log.Printf("device %s acknowledged workflow session plan_run=%s plan_device_run=%s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID)
+			logger.WSF("device %s acknowledged workflow session plan_run=%s plan_device_run=%s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionAck, msg.RequestID, "ok")
 
 		case protocol.MessageTypeWorkflowSessionEvent:
@@ -192,24 +192,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			payloadBytes, err := json.Marshal(msg.Payload)
 			if err != nil {
-				log.Printf("marshal workflow_session_event for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("marshal workflow_session_event for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
 				continue
 			}
 
 			var payload protocol.WorkflowSessionEventPayload
 			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-				log.Printf("decode workflow_session_event for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("decode workflow_session_event for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
 				continue
 			}
 
 			if err := h.plans.HandleWorkflowSessionEvent(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
-				log.Printf("handle workflow_session_event for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle workflow_session_event for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "server_error")
 				continue
 			}
-			log.Printf("device %s reported workflow session event plan_run=%s plan_device_run=%s event=%s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID, payload.EventType)
+			logger.WSF("device %s reported workflow session event plan_run=%s plan_device_run=%s event=%s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID, payload.EventType)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionEvent, msg.RequestID, "ok")
 
 		case protocol.MessageTypeWorkflowSessionResult:
@@ -222,24 +222,24 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 			payloadBytes, err := json.Marshal(msg.Payload)
 			if err != nil {
-				log.Printf("marshal workflow_session_result for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("marshal workflow_session_result for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
 				continue
 			}
 
 			var payload protocol.WorkflowSessionResultPayload
 			if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-				log.Printf("decode workflow_session_result for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("decode workflow_session_result for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
 				continue
 			}
 
 			if err := h.plans.HandleWorkflowSessionResult(context.Background(), payload, msg.RequestID, currentDeviceID); err != nil {
-				log.Printf("handle workflow_session_result for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle workflow_session_result for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "server_error")
 				continue
 			}
-			log.Printf("device %s reported workflow session result plan_run=%s plan_device_run=%s -> %s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID, payload.Status)
+			logger.WSF("device %s reported workflow session result plan_run=%s plan_device_run=%s -> %s", currentDeviceID, payload.PlanRunID, payload.PlanDeviceRunID, payload.Status)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeWorkflowSessionResult, msg.RequestID, "ok")
 
 		case protocol.MessageTypeTaskProgress:
@@ -247,11 +247,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
 			taskItem, err := h.dispatcher.HandleTaskProgress(context.Background(), msg)
 			if err != nil {
-				log.Printf("handle task_progress for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle task_progress for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskProgress, msg.RequestID, "server_error")
 				continue
 			}
-			log.Printf("device %s reported task progress %s -> %s", currentDeviceID, taskItem.TaskID, taskItem.CurrentStep)
+			logger.WSF("device %s reported task progress %s -> %s", currentDeviceID, taskItem.TaskID, taskItem.CurrentStep)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskProgress, msg.RequestID, "ok")
 
 		case protocol.MessageTypeTaskResult:
@@ -259,11 +259,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			deviceConn = h.dispatcher.RegisterDeviceConn(currentDeviceID, conn)
 			taskItem, err := h.dispatcher.HandleTaskResult(context.Background(), msg)
 			if err != nil {
-				log.Printf("handle task_result for device %s: %v", currentDeviceID, err)
+				logger.WSErrorf("handle task_result for device %s: %v", currentDeviceID, err)
 				_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskResult, msg.RequestID, "server_error")
 				continue
 			}
-			log.Printf("device %s reported task result %s -> %s", currentDeviceID, taskItem.TaskID, taskItem.Status)
+			logger.WSF("device %s reported task result %s -> %s", currentDeviceID, taskItem.TaskID, taskItem.Status)
 			_ = writeAck(deviceConn, currentDeviceID, protocol.MessageTypeTaskResult, msg.RequestID, "ok")
 
 		default:

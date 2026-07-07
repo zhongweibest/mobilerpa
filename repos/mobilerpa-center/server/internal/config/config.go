@@ -18,6 +18,7 @@ const (
 	defaultAgentRootPath        = "../../mobilerpa-agent/agent"
 	defaultScriptRootPath       = "./data/scripts"
 	defaultSoftwareRootPath     = "./data/software"
+	defaultLogRootPath          = "./data/logs"
 	defaultCenterBaseURL        = "http://127.0.0.1:8080"
 	defaultToolkitPath          = ""
 	defaultWorkflowScanInterval = 15 * time.Second
@@ -25,6 +26,7 @@ const (
 	defaultPlanRetryInterval    = 1 * time.Minute
 	defaultPlanStartWorkers     = 2
 	defaultPlanStartFanout      = 20
+	defaultLogRetentionDays     = 7
 	defaultDocsAuthEnabled      = true
 	defaultDocsAuthUsername     = "admin"
 	defaultDocsAuthPassword     = "123456"
@@ -52,6 +54,8 @@ type Config struct {
 	ScriptRootPath string
 	// SoftwareRootPath 是中心服务保存软件安装包的目录根目录。
 	SoftwareRootPath string
+	// LogRootPath 是中心服务本地日志目录根目录。
+	LogRootPath string
 	// CenterBaseURL 是写入手机端 bootstrap 的默认中心地址。
 	CenterBaseURL string
 	// ToolkitPath 是网页下发 Agent 时使用的 toolkit 可执行文件路径。
@@ -62,6 +66,7 @@ type Config struct {
 	PlanRetryInterval    time.Duration
 	PlanStartWorkers     int
 	PlanStartFanout      int
+	LogRetentionDays     int
 	DocsAuthEnabled      bool
 	DocsAuthUsername     string
 	DocsAuthPassword     string
@@ -80,6 +85,7 @@ func Load() Config {
 		"CENTER_AGENT_ROOT_PATH":              defaultAgentRootPath,
 		"CENTER_SCRIPT_ROOT_PATH":             defaultScriptRootPath,
 		"CENTER_SOFTWARE_ROOT_PATH":           defaultSoftwareRootPath,
+		"CENTER_LOG_ROOT_PATH":                defaultLogRootPath,
 		"CENTER_BASE_URL":                     defaultCenterBaseURL,
 		"CENTER_TOOLKIT_PATH":                 defaultToolkitPath,
 		"CENTER_WORKFLOW_SCAN_INTERVAL":       defaultWorkflowScanInterval.String(),
@@ -87,6 +93,7 @@ func Load() Config {
 		"CENTER_PLAN_RETRY_INTERVAL":          defaultPlanRetryInterval.String(),
 		"CENTER_PLAN_START_WORKERS":           "2",
 		"CENTER_PLAN_START_FANOUT":            "20",
+		"CENTER_LOG_RETENTION_DAYS":           "7",
 		"CENTER_DOCS_AUTH_ENABLED":            "true",
 		"CENTER_DOCS_AUTH_USERNAME":           defaultDocsAuthUsername,
 		"CENTER_DOCS_AUTH_PASSWORD":           defaultDocsAuthPassword,
@@ -103,6 +110,7 @@ func Load() Config {
 	planRetryInterval := parseDurationValue(values["CENTER_PLAN_RETRY_INTERVAL"], defaultPlanRetryInterval)
 	planStartWorkers := parseIntValue(values["CENTER_PLAN_START_WORKERS"], defaultPlanStartWorkers)
 	planStartFanout := parseIntValue(values["CENTER_PLAN_START_FANOUT"], defaultPlanStartFanout)
+	logRetentionDays := parseIntValue(values["CENTER_LOG_RETENTION_DAYS"], defaultLogRetentionDays)
 	docsAuthEnabled := parseBoolValue(values["CENTER_DOCS_AUTH_ENABLED"], defaultDocsAuthEnabled)
 
 	return Config{
@@ -116,6 +124,7 @@ func Load() Config {
 		AgentRootPath:             values["CENTER_AGENT_ROOT_PATH"],
 		ScriptRootPath:            values["CENTER_SCRIPT_ROOT_PATH"],
 		SoftwareRootPath:          values["CENTER_SOFTWARE_ROOT_PATH"],
+		LogRootPath:               values["CENTER_LOG_ROOT_PATH"],
 		CenterBaseURL:             values["CENTER_BASE_URL"],
 		ToolkitPath:               values["CENTER_TOOLKIT_PATH"],
 		WorkflowScanInterval:      workflowScanInterval,
@@ -123,6 +132,7 @@ func Load() Config {
 		PlanRetryInterval:         planRetryInterval,
 		PlanStartWorkers:          planStartWorkers,
 		PlanStartFanout:           planStartFanout,
+		LogRetentionDays:          logRetentionDays,
 		DocsAuthEnabled:           docsAuthEnabled,
 		DocsAuthUsername:          values["CENTER_DOCS_AUTH_USERNAME"],
 		DocsAuthPassword:          values["CENTER_DOCS_AUTH_PASSWORD"],
